@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 4
+names: ['ball', 'goalkeeper', 'player', 'referee']
+
+roboflow:
+  workspace: yolo-atnlh
+  project: football-detection-wfhdh
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/yolo-atnlh/football-detection-wfhdh/dataset/2
