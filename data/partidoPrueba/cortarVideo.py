@@ -1,7 +1,7 @@
 import cv2
 
 input_video = "./08fd33_4.mp4"
-output_video = "08fd33_4_corto.mp4"
+output_video = "08fd33_4_medio.mp4"
 
 cap = cv2.VideoCapture(input_video)
 fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -13,7 +13,7 @@ fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 out = cv2.VideoWriter(output_video, fourcc, fps, (width, height))
 
 # Leer y guardar los primeros 10 frames
-for i in range(10):
+for i in range(200):
     ret, frame = cap.read()
     if not ret:
         break
@@ -22,4 +22,3 @@ for i in range(10):
 # Liberar recursos
 cap.release()
 out.release()
-

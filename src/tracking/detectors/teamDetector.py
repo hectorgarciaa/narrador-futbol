@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 
-from shirtDetector import ShirtDetector
+from .shirtDetector import ShirtDetector
 
 def visualize_shirt_clusters(shirt_crops, max_players=20):
     """
