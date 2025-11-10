@@ -88,8 +88,8 @@ class TeamDetector:
             shirts.append(shirt)
             shirt_color = self.shirtDetector.getColorKMeans(shirt)
             team, distances = self.assign_team(shirt_color)
-            return team, distances
-        return None, None
+            return team, distances, shirt_color, player_pixels.size
+        return None, None, None, player_pixels.size
     
     def detectTeams(self, frame_detections, showPlot=False):
         shirts = []
@@ -98,8 +98,8 @@ class TeamDetector:
         for object_detected in frame_detections:
             bbox = object_detected.boxes.xyxy
             class_name = object_detected.names[object_detected.boxes.cls.item()]
-            team, distances = self.getTeamOfPlayers(frame_detections.orig_img, shirts, bbox)
-            teams_of_detected_objects.append({"class": class_name, "team": team, "distances": distances})
+            team, distances, shirt_color, bboxSize = self.getTeamOfPlayers(frame_detections.orig_img, shirts, bbox)
+            teams_of_detected_objects.append({"class": class_name, "team": team, "distances": distances, "shirt_color": shirt_color, "bbox_size": bboxSize})
 
         if showPlot and len(shirts) > 0:
             visualize_shirt_clusters(shirts)

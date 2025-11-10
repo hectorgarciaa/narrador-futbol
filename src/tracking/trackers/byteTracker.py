@@ -294,7 +294,7 @@ class ByteTrack:
             ]
         else:
             detections_second = []
-            r_tracked_stracks = [
+        r_tracked_stracks = [
             strack_pool[i]
             for i in u_track
             if strack_pool[i].state == TrackState.Tracked

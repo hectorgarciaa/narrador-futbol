@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 class ShirtDetector:
-    def __init__(self,  n_clusters=8, init='k-means++', n_init=10, random_state=0,
+    def __init__(self,  n_clusters=2, init='k-means++', n_init=10, random_state=0,
                  lower_grass=np.array([35, 40, 40]), upper_grass=np.array([85, 255, 255])):
         self.lower_grass = lower_grass
         self.upper_grass = upper_grass
