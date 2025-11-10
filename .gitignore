@@ -1,0 +1,4 @@
+__pycache__
+yolov8x.pt
+yolov11x.pt
+*.avi
