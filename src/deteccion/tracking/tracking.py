@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
-
+from team_aware_bytetrack import ByteTrack
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -129,9 +129,11 @@ class Tracker:
     def __init__(self, ruta_modelo, conf_model, track_thresh, track_buffer, match_thresh, frame_rate, team_colors_hsv):
         self.modelo = YOLO(ruta_modelo)
         self.conf_model = conf_model
-        self.tracker = sv.ByteTrack(track_thresh, track_buffer, match_thresh, frame_rate)
+        self.tracker = ByteTrack(track_thresh, track_buffer, match_thresh, frame_rate)
+        #self.tracker = sv.ByteTrack(track_thresh, track_buffer, match_thresh, frame_rate)
         self.team_refs_hsv = team_colors_hsv
         self.player_teams = {}
+        self.player_teams_distances = {}
 
     def detect(self, partido):
         return self.modelo.predict(partido, stream=True, conf=self.conf_model)
@@ -162,48 +164,76 @@ class Tracker:
         return shirt
 
     def assign_team(self, shirt_hsv):
-        print("Shirt HSV:", shirt_hsv)
-        print("Team refs HSV:", self.team_refs_hsv)
+        #print("Shirt HSV:", shirt_hsv)
+        #print("Team refs HSV:", self.team_refs_hsv)
         distances = {team: np.linalg.norm(shirt_hsv - ref_hsv)
                      for team, ref_hsv in self.team_refs_hsv.items()}
-        print(distances)
-        return min(distances, key=distances.get)
+        #print(distances)
+        return min(distances, key=distances.get), distances
     
     def get_tracks(self, partido):
+
         detections = self.detect(partido)
-        tracks = { "player": [], "goalkeeper": [], "referee": [], "ball": [] }
+        tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": []}
 
         for num_frame, detection_frame in enumerate(detections):
             detection_sv = sv.Detections.from_ultralytics(detection_frame)
-            track = self.tracker.update_with_detections(detection_sv)
-            
-            tracks["player"].append({}), tracks["goalkeeper"].append({}), tracks["referee"].append({}), tracks["ball"].append({})
+
+            # --- 🔹 Calcular equipo para cada detección del frame ---
+            team_labels = []
+            team_distances_labels = []
             shirt_crops = []
-            for object_detected in track:
+
+            for bbox in detection_sv.xyxy:
+                x1, y1, x2, y2 = map(int, bbox)
+                crop = detection_frame.orig_img[y1:y2, x1:x2]
+
+                if crop.size > 0:
+                    h, w = crop.shape[:2]
+                    shirt = crop[int(0.1 * h):int(0.5 * h), int(0.2 * w):int(0.8 * w)]
+                    shirt_crops.append(shirt)
+                    shirt_hsv = self.get_shirt_color_kmeans(shirt)
+                    #print('Num_frame: ',num_frame)
+                    team, distances = self.assign_team(shirt_hsv)
+                    team_labels.append(team)
+                    team_distances_labels.append(distances)
+                else:
+                    team_labels.append("Unknown")
+
+            # --- 🔹 Pasar detecciones + equipos al tracker ---
+            #[print(label) for label in team_labels]
+            track = self.tracker.update_with_detections(detection_sv, team_labels=team_labels)
+
+            # --- 🔹 Inicializar diccionarios por clase ---
+            for key in tracks.keys():
+                tracks[key].append({})
+
+            # --- 🔹 Procesar cada track detectado ---
+            for object_detected, det_team, det_distance in zip(track, team_labels, team_distances_labels):
                 bbox, _, confidence, class_id, tracker_id, class_name = object_detected
                 class_name = class_name["class_name"]
 
-                # 🔹 Si es jugador o portero, asignamos color y equipo
+                # 🔸 Solo asignamos equipo si aún no lo tiene
                 if class_name in ["player", "goalkeeper"]:
-                    x1, y1, x2, y2 = map(int, bbox)
-                    crop = detection_frame.orig_img[y1:y2, x1:x2]
+                    if tracker_id not in self.player_teams:
+                        self.player_teams[tracker_id] = det_team
+                    self.player_teams_distances[tracker_id] = det_distance
 
-                    if crop.size > 0 and tracker_id not in self.player_teams:
-                        h, w = crop.shape[:2]
-                        shirt = crop[int(0.1*h):int(0.5*h), int(0.2*w):int(0.8*w)]  # zona de camiseta
-                        shirt_crops.append(shirt)
-                        shirt_hsv = self.get_shirt_color_kmeans(shirt)
-                        team = self.assign_team(shirt_hsv)
-                        self.player_teams[tracker_id] = team
-
+                # Guardar info del track
                 tracks[class_name][num_frame][tracker_id] = {
                     "bbox": bbox,
                     "confidence": confidence,
-                    "team": self.player_teams.get(tracker_id, "Unknown")
+                    "team": self.player_teams.get(tracker_id, "Unknown"),
+                    "distance": self.player_teams_distances.get(tracker_id, {})
                 }
+
+            # --- 🔹 Visualizar los clusters de camisetas ---
+            '''
             if len(shirt_crops) > 0:
                 visualize_shirt_clusters(shirt_crops)
+            '''
         return tracks
+
     
     def draw_tracks(self, partido, tracks, output_path):
         cap = cv2.VideoCapture(partido)
@@ -230,10 +260,11 @@ class Tracker:
                 color = colors.get(class_name, (255, 255, 255))
                 
                 for track_id, data in frame_data.items():
-                    print(data)
+                    #print(data)
                     x1, y1, x2, y2 = map(int, data["bbox"])
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame, f"{class_name}-{data['team']} #{track_id}", 
+                    
+                    cv2.putText(frame, f"{class_name}-{data['team']}\n {[d.round(2) for d in data['distance'].values()]} #{track_id}", 
                                 (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 
                                 0.5, color, 1, cv2.LINE_AA)
 
@@ -245,8 +276,8 @@ class Tracker:
         print(f"✅ Video anotado guardado en: {output_path}")
     
 
-ruta_modelo = "../../../models/finetuning/v11/yolov11m/weights/best.pt"
-partido = "../../../data/partidoPrueba/08fd33_4_corto.mp4"
+ruta_modelo = "../../../models/finetuning/v11/yolov11m/weights/bestx.pt"
+partido = "../../../data/partidoPrueba/08fd33_4.mp4"
 output = "../../../output/pruebaTracker/08fd33_4_3.mp4"
 
 if __name__ == "__main__":
@@ -254,7 +285,8 @@ if __name__ == "__main__":
     "Real Madrid": np.array([0, 0, 245]),      # blanco (HSV)
     "Wolfsburgo":  np.array([70, 150, 150])    # verde
 }
-    t = Tracker(ruta_modelo, 0.05, 0.05, 150, 1, 25, TEAM_COLORS)
+    t = Tracker(ruta_modelo, 0.05, 0.05, 90, 0.95, 25, TEAM_COLORS)
     tracks = t.get_tracks(partido)
+    #print(tracks)
     t.draw_tracks(partido, tracks, output)
 
