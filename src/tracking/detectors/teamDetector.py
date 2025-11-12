@@ -71,9 +71,40 @@ def visualize_shirt_clusters(shirt_crops, max_players=20):
     plt.show()
 
 class TeamDetector:
-    def __init__(self, team_colors):
-        self.team_colors = team_colors
+    def __init__(self, team_colors_refs, confirmation_threshold=3, color_tolerance=25):
+        self.team_colors_refs = team_colors_refs
+        self.team_colors = {team: team_colors_refs[team] for team in team_colors_refs.keys()}
+        
+        self.color_samples = {team: {} for team in team_colors_refs.keys()}
+
+        self.confirmation_threshold = confirmation_threshold
+        self.color_tolerance = color_tolerance
+        self.confirmed_teams  = set()
+
         self.shirtDetector = ShirtDetector()
+
+    def updateTeamColors(self, shirt_color):
+        if len(self.confirmed_teams) == len(self.team_colors):
+            return
+        
+        distances = {team: np.linalg.norm(shirt_color - color) if color is not None else np.linalg.norm(shirt_color - self.team_colors_refs[team]) for team, color in self.team_colors.items()}
+        closest_team = min(distances, key=distances.get)
+
+        if closest_team in self.confirmed_teams:
+            return
+        
+        found_similar = False
+        for shirt_colors_sample in self.color_samples[closest_team].keys():
+            if np.linalg.norm(shirt_color - np.array(shirt_colors_sample)) < self.color_tolerance:
+                self.color_samples[closest_team][shirt_colors_sample] += 1
+                if self.color_samples[closest_team][shirt_colors_sample] >= self.confirmation_threshold:
+                    self.confirmed_teams.add(closest_team)
+                    self.team_colors[closest_team] = np.array(shirt_colors_sample)
+                found_similar = True
+                break
+
+        if not found_similar:
+            self.color_samples[closest_team][tuple(shirt_color)] = 1
 
     def assign_team(self, shirt_color):
         distances = {team: np.linalg.norm(shirt_color - color) for team, color in self.team_colors.items()}
@@ -87,6 +118,7 @@ class TeamDetector:
             shirt = player_pixels[:int(0.5*h), :]
             shirts.append(shirt)
             shirt_color = self.shirtDetector.getColorKMeans(shirt)
+            self.updateTeamColors(shirt_color)
             team, distances = self.assign_team(shirt_color)
             return team, distances, shirt_color, player_pixels.size
         return None, None, None, player_pixels.size
