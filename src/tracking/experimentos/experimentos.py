@@ -29,6 +29,7 @@ for n_frame, frame_tracks in enumerate(players):
             "team": player_dict["team"]
             } )
         reformed_data.append(row)
+    break
 
 df = pd.DataFrame(reformed_data)
 df = df.set_index(['frame', 'tracker_id'])

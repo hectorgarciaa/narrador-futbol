@@ -22,7 +22,7 @@ class Drawer:
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         label = f"{class_name} #{track_id}"
         label += "\n"
-        d = {d.round(1) for d in data["distances"].values()}
+        d = [data["distances"]["Real Madrid"].round(1), data["distances"]["Wolfsburgo"].round(1)]
         label += f"{data['team']}: {d}"
 
         cv2.putText(frame, label, (x1, y1 - 5),

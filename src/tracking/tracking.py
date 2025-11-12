@@ -81,9 +81,9 @@ def convert_to_serializable(obj):
         return obj
 
 if __name__ == "__main__":
-    MODEL_PATH = "../../models/finetuning/v11/yolov11m/weights/best.pt"
+    MODEL_PATH = "../../models/finetuning/v11/yolov11x/weights/best.pt"
     VIDEO = "../../data/partidoPrueba/08fd33_4_medio.mp4"
-    OUTPUT = "../../output/pruebaTracker/08fd33_4_pruebas_"
+    OUTPUT = "../../output/pruebaTracker/08fd33_4_15"
     SHOWKMEANS = False
     TEAM_COLORS = { "Real Madrid": np.array([255, 127, 127]),       "Wolfsburgo":  np.array([224, 77, 196]) }
 
@@ -109,7 +109,7 @@ if __name__ == "__main__":
                     tracker_conf = { "track_thresh": tt, "track_buffer": 90, "match_thresh": mt, "frame_rate": 25, "minimum_consecutive_frames": mcf }
                     output = OUTPUT + str(prueba_id) + ".mp4"
                     prueba_id += 1
-                    
+
                     tracker = Tracker(MODEL_PATH, conf, tracker_conf, TEAM_COLORS)
                     tracks = tracker.get_tracks(VIDEO, SHOWKMEANS)
                 
@@ -128,7 +128,3 @@ if __name__ == "__main__":
             except:
                 with open("./tracks.pkl", "rb") as f:
                     tracks_todos = pickle.load(f)
-
-    print(tracker.teamDetector.team_colors)
-    print(tracker.teamDetector.confirmed_teams)
-    print(tracker.teamDetector.color_samples)
