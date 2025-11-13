@@ -1,13 +1,7 @@
-import os
-import json
-import pickle
-import numpy as np
-import pandas as pd
 import supervision as sv
 
 from detectors import Detector, TeamDetector
 from trackers import ByteTrack
-from drawer import Drawer
 
 class Tracker:
     def __init__(self, model_path, conf, tracker_conf, team_colors):

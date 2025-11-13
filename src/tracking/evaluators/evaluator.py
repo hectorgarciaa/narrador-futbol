@@ -2,7 +2,7 @@ import numpy as np
 from collections import defaultdict, Counter
 
 class Evaluator:
-    def __inir__(self):
+    def __init__(self):
         pass
 
     def createDefaultDicts(self, num_dicts):
@@ -38,10 +38,11 @@ class Evaluator:
 
         gaps = len(gap_lengths)
         mean_gap_len = np.mean(gap_lengths) if gap_lengths else 0.0
+        speed = np.sqrt(np.array(movimiento_x)**2 + np.array(movimiento_y)**2) if movimiento_x else 0.0
         mean_speed = np.mean(np.sqrt(np.array(movimiento_x)**2 + np.array(movimiento_y)**2)) if movimiento_x else 0.0
         max_speed = np.max(np.sqrt(np.array(movimiento_x)**2 + np.array(movimiento_y)**2)) if movimiento_x else 0.0
 
-        return gaps, mean_gap_len, mean_speed, max_speed
+        return gaps, mean_gap_len, speed, mean_speed, max_speed
     
     def getFlipsAndEntropy(self, tid, id_teams):
         teams = id_teams.get(tid, [])
@@ -51,6 +52,7 @@ class Evaluator:
             c = Counter(teams)
             team_mode, _ = c.most_common(1)[0]
             flips_static = sum(1 for x in teams if x != team_mode)
+            flips_dynamic_bool = [teams[i] != teams[i - 1] for i in range(1, len(teams))]
             flips_dynamic = sum(teams[i] != teams[i - 1] for i in range(1, len(teams)))
             flip_rate_static = flips_static / len(teams) if teams else None
             flip_rate_dynamic = flips_dynamic / (len(teams) - 1) if len(teams) > 1 else None
@@ -59,7 +61,7 @@ class Evaluator:
             ps = np.array(list(c.values()))/sum(c.values())
             entropy = -np.sum(ps * np.log2(ps + 1e-12))
 
-        return team_mode, flip_rate_static, flip_rate_dynamic, entropy
+        return team_mode, flips_dynamic_bool, flip_rate_static, flip_rate_dynamic, entropy
     
     def getColorsVar(self, tid, id_colors):
         colors = np.array(id_colors.get(tid, []), dtype=float) if id_colors.get(tid) else None
@@ -72,25 +74,30 @@ class Evaluator:
         sizes = np.array(id_bbox_sizes.get(tid, []), dtype=float) if id_bbox_sizes.get(tid) else None
         size_cv = (np.std(sizes)/np.mean(sizes)) if sizes is not None and len(sizes)>1 else None
 
+        return sizes, size_cv
+
 
     def metricsOfTic(self, T, tid, frames_seen, id_bboxes, id_teams, id_colors, id_bbox_sizes, id_conf):            
         frames_seen_sorted = sorted(frames_seen)
         total_seen = len(frames_seen_sorted)
         coverage = total_seen / T
 
-        gaps, mean_gap_len, mean_speed, max_speed = self.getGapsAndSpeed(tid, frames_seen_sorted, id_bboxes)
+        gaps, mean_gap_len, speed, mean_speed, max_speed = self.getGapsAndSpeed(tid, frames_seen_sorted, id_bboxes)
 
-        team_mode, flip_rate_static, flip_rate_dynamic, entropy = self.getFlipsAndEntropy(tid, id_teams)
+        team_mode, flips_dynamic_bool, flip_rate_static, flip_rate_dynamic, entropy = self.getFlipsAndEntropy(tid, id_teams)
 
         color_var, color_diff = self.getColorsVar(tid, id_colors)
 
-        size_cv = self.getBBoxSize(tid, id_bbox_sizes)
-        
-        return {
+        sizes, size_cv = self.getBBoxSize(tid, id_bbox_sizes)
+
+        metrics_list = { "frames_seen": frames_seen_sorted, "speed": speed, "flips": flips_dynamic_bool, "bbox_size": sizes, "confs": id_conf[tid] }
+        metrics = {
             "coverage": coverage, "total_seen": total_seen, "fragments": gaps, "mean_gap_len": mean_gap_len, "mean_speed": mean_speed, "max_speed": max_speed,
             "team_mode": team_mode, "team_flip_rate_static": flip_rate_static, "team_flip_rate_dynamic": flip_rate_dynamic, "team_entropy": entropy,
             "color_var": color_var, "color_diff": color_diff, "bbox_size_cv": size_cv, "mean_confidence": float(np.mean(id_conf[tid])) if id_conf.get(tid) else None
         }
+
+        return metrics_list, metrics
 
     def evaluate(self, tracks, class_name="player"):
         frames = tracks[class_name]
@@ -101,10 +108,13 @@ class Evaluator:
         
         # Metrics per id
         metrics = {}
+        metrics_list = {}
         num_tracks = 0
         for tid, frames_seen in id_frames.items():
             if int(tid) > num_tracks:    num_tracks = int(tid)
-            metricsTid = self.metricsOfTic(T, tid, frames_seen, id_bboxes, id_teams, id_colors, id_bbox_sizes, id_conf)
+            metrics_list_tid, metricsTid = self.metricsOfTic(T, tid, frames_seen, id_bboxes, id_teams, id_colors, id_bbox_sizes, id_conf)
+            
+            metrics_list[tid] = metrics_list_tid
             metrics[tid] = metricsTid
 
         # Summary stats
@@ -143,4 +153,4 @@ class Evaluator:
             "confidence": float(np.mean(confidence)) if confidence else 0.0,
         }
 
-        return metrics, summary
+        return metrics, metrics_list, summary, T

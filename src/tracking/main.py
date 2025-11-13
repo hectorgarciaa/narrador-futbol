@@ -1,8 +1,7 @@
 import json
 import numpy as np
 
-from tracking import Tracker
-from drawer import Drawer
+from trackers import Tracker
 from evaluators import Evaluator
 
 def convert_to_serializable(obj):
@@ -23,7 +22,8 @@ if __name__ == "__main__":
 
     MODEL_PATH = "../../models/finetuning/v11/yolov11m/weights/best.pt"
     VIDEO = "../../data/partidoPrueba/08fd33_4_medio.mp4"
-    OUTPUT = "../../output/pruebaTracker/partido_medio_m.mp4"
+    OUTPUT = "../../output/tracks_json/tracker/tracks.json"
+    
     SHOWKMEANS = False
     TEAM_COLORS = { "Real Madrid": np.array([255, 127, 127]),       "Wolfsburgo":  np.array([224, 77, 196]) }
 
@@ -37,12 +37,8 @@ if __name__ == "__main__":
     tracker = Tracker(MODEL_PATH, CONF, TRACKER_CONF, TEAM_COLORS)
     tracks = tracker.get_tracks(VIDEO, SHOWKMEANS)
 
-    drawer = Drawer(colors = { "player": (0, 255, 0), "goalkeeper": (0, 255, 255), "referee": (255, 0, 0), "ball": (0, 0, 255) })
-    drawer.draw_tracks(tracks, VIDEO, OUTPUT)
-
     evaluator = Evaluator()
-    metrics, summary = evaluator.evaluate(tracks)
-    print(summary)
+    metrics, metrics_list, summary, n_frames = evaluator.evaluate(tracks)
     
-    with open("./tracks_m_vmedio.json", "w", encoding="utf-8") as f:
+    with open("OUTPUT", "w", encoding="utf-8") as f:
         json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
