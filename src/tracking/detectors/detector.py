@@ -6,7 +6,4 @@ class Detector:
         self.conf = conf
     
     def detect(self, video, stream=True):
-        return self.model.predict(video, stream=stream, conf=self.conf, verbose=False)
-        
-
-
+        return self.model.predict(video, stream=stream, conf=self.conf)
