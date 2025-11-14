@@ -4,6 +4,7 @@ import numpy as np
 from tracking import Tracker
 from drawer import Drawer
 from evaluators import Evaluator
+from evaluators.MetricsVisualizer import MetricsVisualizer  
 
 def convert_to_serializable(obj):
     if isinstance(obj, dict):
@@ -22,12 +23,13 @@ def convert_to_serializable(obj):
 if __name__ == "__main__":
 
     MODEL_PATH = "../../models/finetuning/v11/yolov11m/weights/best.pt"
-    VIDEO = "../../data/partidoPrueba/08fd33_4_medio.mp4"
-    OUTPUT = "../../output/pruebaTracker/partido_medio_m.mp4"
+    VIDEO = "../../data/partidoPrueba/08fd33_4_corto.mp4"
+    OUTPUT = "../../output/pruebaTracker/corto.mp4"
     SHOWKMEANS = False
     TEAM_COLORS = { "Real Madrid": np.array([255, 127, 127]),       "Wolfsburgo":  np.array([224, 77, 196]) }
 
-    CONF = 0.1
+    #CONF = 0.1
+    CONF = 0.01
     TT = 0.5
     MT = 0.945
     MCF = 5
@@ -42,7 +44,26 @@ if __name__ == "__main__":
 
     evaluator = Evaluator()
     metrics, summary = evaluator.evaluate(tracks)
+    vis = MetricsVisualizer()
+
     print(summary)
+
+    # --- SPEED (por frame) ---
+    speed_events = vis.collect_speed_events(metrics)
+    vis.plot_speed_events_scatter(speed_events)  # scatter interactivo speed vs frame
+
+    # --- COVERAGE (1 punto por track) ---
+    cov_events = vis.collect_metric_events(metrics, "coverage")
+    vis.plot_metric_events_scatter(cov_events, "coverage")
+
+    # --- mean_speed por track ---
+    mean_speed_events = vis.collect_metric_events(metrics, "mean_speed")
+    vis.plot_metric_events_scatter(mean_speed_events, "mean_speed")
+
+    # --- color_diff por track ---
+    color_diff_events = vis.collect_metric_events(metrics, "color_diff")
+    vis.plot_metric_events_scatter(color_diff_events, "color_diff")
+
     
     with open("./tracks_m_vmedio.json", "w", encoding="utf-8") as f:
         json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
