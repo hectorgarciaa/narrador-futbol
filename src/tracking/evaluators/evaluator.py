@@ -3,7 +3,6 @@ from collections import defaultdict, Counter
 
 
 class Evaluator:
-
     def __init__(self):
         pass
 
@@ -78,6 +77,7 @@ class Evaluator:
             team_mode, _ = c.most_common(1)[0]
 
             flips_static = sum(1 for x in teams if x != team_mode)
+            flips_dynamic_bool = [teams[i] != teams[i - 1] for i in range(1, len(teams))]
             flips_dynamic = sum(teams[i] != teams[i - 1] for i in range(1, len(teams)))
 
             flip_rate_static = flips_static / len(teams)
@@ -207,6 +207,7 @@ class Evaluator:
                        id_bboxes, id_conf, id_bbox_sizes)
 
         metrics = {}
+        metrics_list = {}
         num_tracks = 0
 
         for tid, frames_seen in id_frames.items():
