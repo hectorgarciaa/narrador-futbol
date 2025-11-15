@@ -1,3 +1,4 @@
 from .evaluator import Evaluator
-from .visualizators import TrackVisualizator
-from .visualizators import ExperimentVisualizator
+from .visualizer import TrackVisualizer
+from .visualizer import ExperimentVisualizer
+from .visualizer import ClusterVisualizer

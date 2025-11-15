@@ -63,8 +63,9 @@ class MetricsVisualizer:
         """
         events = []
         for tid, m in metrics.items():
-            metric_dict = m.get("metric_events", {})
-            entry = metric_dict.get(metric_key)
+            # metric_dict = m.get("metric_events", {})
+            # entry = metric_dict.get(metric_key)
+            entry = m.get(metric_key)
 
             if entry is None:
                 continue

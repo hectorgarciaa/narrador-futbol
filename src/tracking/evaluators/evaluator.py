@@ -86,7 +86,7 @@ class Evaluator:
             ps = np.array(list(c.values())) / sum(c.values())
             entropy = float(-np.sum(ps * np.log2(ps + 1e-12)))
 
-        return team_mode, flip_rate_static, flip_rate_dynamic, entropy
+        return team_mode, flips_dynamic_bool, flip_rate_static, flip_rate_dynamic, entropy
 
     # ----------------------------------------------
     # COLOR METRICS
@@ -109,9 +109,9 @@ class Evaluator:
         sizes = np.array(id_bbox_sizes.get(tid, []), dtype=float) if id_bbox_sizes.get(tid) else None
 
         if sizes is None or len(sizes) <= 1:
-            return None
+            return None, None
         
-        return float(np.std(sizes) / np.mean(sizes))
+        return sizes, float(np.std(sizes) / np.mean(sizes))
 
     # ----------------------------------------------
     # METRICS FOR ONE TRACK
@@ -128,23 +128,27 @@ class Evaluator:
         gaps, mean_gap_len, mean_speed, max_speed, speed_values, speed_frames = \
             self.getGapsAndSpeed(tid, frames_seen_sorted, id_bboxes)
 
-        team_mode, flip_rate_static, flip_rate_dynamic, entropy = \
+        team_mode, flips_dynamic_bool, flip_rate_static, flip_rate_dynamic, entropy = \
             self.getFlipsAndEntropy(tid, id_teams)
 
         color_var, color_diff = self.getColorsVar(tid, id_colors)
 
-        size_cv = self.getBBoxSize(tid, id_bbox_sizes)
+        sizes, size_cv = self.getBBoxSize(tid, id_bbox_sizes)
 
         mean_conf = float(np.mean(id_conf[tid])) if id_conf.get(tid) else None
 
         # -------- metric_events como LISTAS de eventos por métrica --------
-        metric_events = {}
+        metrics_events = {}
+        metrics_list = { "frames_seen": frames_seen_sorted,
+                        "speed_values": speed_values, "speed_frames": speed_frames,
+                        "flips": flips_dynamic_bool, "bbox_size": sizes, "confs": id_conf[tid] }
 
         def add_metric_event(key, value, frame=mid_frame):
             if value is None:
-                return
-            event = {"id": int(tid), "frame": int(frame), "value": float(value)}
-            metric_events.setdefault(key, []).append(event)
+                event = {"id": int(tid), "frame": int(frame), "value": None}
+            else:
+                event = {"id": int(tid), "frame": int(frame), "value": float(value)}
+            metrics_events.setdefault(key, []).append(event)
 
         # métricas agregadas (1 por track)
         add_metric_event("coverage", coverage)
@@ -153,6 +157,7 @@ class Evaluator:
         add_metric_event("mean_gap_len", mean_gap_len)
         add_metric_event("mean_speed", mean_speed)
         add_metric_event("max_speed", max_speed)
+        add_metric_event("num_speed_samples", len(speed_values))
         add_metric_event("team_flip_rate_static", flip_rate_static)
         add_metric_event("team_flip_rate_dynamic", flip_rate_dynamic)
         add_metric_event("entropy", entropy)
@@ -160,6 +165,9 @@ class Evaluator:
         add_metric_event("color_diff", color_diff)
         add_metric_event("bbox_size_cv", size_cv)
         add_metric_event("mean_confidence", mean_conf)
+
+        metrics_events["speed_events"] =  list(zip(speed_frames, speed_values))        # por compatibilidad
+        metrics_events["team_mode"] =  team_mode
 
         # métrica speed: un evento por (frame_prev, frame_curr)
         speed_metric_events = []
@@ -171,32 +179,14 @@ class Evaluator:
                 "value": float(speed)
             })
         if speed_metric_events:
-            metric_events["speed"] = metric_events.get("speed", []) + speed_metric_events
-
-        return {
-            "coverage": coverage,
-            "total_seen": total_seen,
-            "fragments": gaps,
-            "mean_gap_len": mean_gap_len,
-            "mean_speed": mean_speed,
-            "max_speed": max_speed,
-            "num_speed_samples": len(speed_values),
-            "speed_events": list(zip(speed_frames, speed_values)),  # por compatibilidad
-            "team_mode": team_mode,
-            "team_flip_rate_static": flip_rate_static,
-            "team_flip_rate_dynamic": flip_rate_dynamic,
-            "team_entropy": entropy,
-            "color_var": color_var,
-            "color_diff": color_diff,
-            "bbox_size_cv": size_cv,
-            "mean_confidence": mean_conf,
-            "metric_events": metric_events
-        }
+            metrics_events["speed"] = speed_metric_events
+        
+        return metrics_events, metrics_list
 
     # ----------------------------------------------
     # MAIN EVALUATION
     # ----------------------------------------------
-    def evaluate(self, tracks, class_name="player"):
+    def evaluateClass(self, tracks, class_name="player"):
         frames = tracks[class_name]
         T = len(frames)
 
@@ -214,44 +204,47 @@ class Evaluator:
             if int(tid) > num_tracks:
                 num_tracks = int(tid)
 
-            metricsTid = self.metricsOfTic(
+            metricsTid, metrics_list_tid = self.metricsOfTic(
                 T, tid, frames_seen,
                 id_bboxes, id_teams, id_colors,
                 id_bbox_sizes, id_conf
             )
             metrics[tid] = metricsTid
+            metrics_list[tid] = metrics_list_tid
 
         # -------- summary global --------
-        covs = [m["coverage"] for m in metrics.values()]
-        total_seen = [m["total_seen"] for m in metrics.values()]
-        frag = [m["fragments"] for m in metrics.values()]
-        mean_gap_len = [m["mean_gap_len"] for m in metrics.values()]
+        covs = [m["coverage"][0]["value"] for m in metrics.values()]
+        total_seen = [m["total_seen"][0]["value"] for m in metrics.values()]
+        frag = [m["fragments"][0]["value"] for m in metrics.values()]
+        mean_gap_len = [m["mean_gap_len"][0]["value"] for m in metrics.values()]
 
-        total_speed_samples = sum(m["num_speed_samples"] for m in metrics.values())
+        total_speed_samples = sum(m["num_speed_samples"][0]["value"] for m in metrics.values())
         mean_speed = (
-            sum(m["mean_speed"] * m["num_speed_samples"] for m in metrics.values()) / total_speed_samples
+            sum(m["mean_speed"][0]["value"] * m["num_speed_samples"][0]["value"] for m in metrics.values()) / total_speed_samples
             if total_speed_samples > 0 else 0.0
         )
-
-        max_speed_list = [m["max_speed"] for m in metrics.values()]
+        speed_list = [m["mean_speed"][0]["value"] for m in metrics.values()]
+        max_speed_list = [m["max_speed"][0]["value"] for m in metrics.values()]
+        
         flip_rates_static = [
-            m["team_flip_rate_static"] for m in metrics.values()
-            if m["team_flip_rate_static"] is not None
+            m["team_flip_rate_static"][0]["value"] for m in metrics.values()
+            if m["team_flip_rate_static"][0]["value"] is not None
         ]
         flip_rates_dynamic = [
-            m["team_flip_rate_dynamic"] for m in metrics.values()
-            if m["team_flip_rate_dynamic"] is not None
+            m["team_flip_rate_dynamic"][0]["value"] for m in metrics.values()
+            if m["team_flip_rate_dynamic"][0]["value"] is not None
         ]
-        entropy = [m["team_entropy"] for m in metrics.values()]
-        color_var = [m["color_var"] for m in metrics.values()]
-        color_diff = [m["color_diff"] for m in metrics.values()]
+        entropy = [m["entropy"][0]["value"] for m in metrics.values()]
+        color_var = [m["color_var"][0]["value"] for m in metrics.values()]
+        color_diff = [m["color_diff"][0]["value"] for m in metrics.values()]
+
         bbox_size = [
-            m["bbox_size_cv"] for m in metrics.values()
-            if m["bbox_size_cv"] is not None
+            m["bbox_size_cv"][0]["value"] for m in metrics.values()
+            if m["bbox_size_cv"][0]["value"] is not None
         ]
         confidence = [
-            m["mean_confidence"] for m in metrics.values()
-            if m["mean_confidence"] is not None
+            m["mean_confidence"][0]["value"] for m in metrics.values()
+            if m["mean_confidence"][0]["value"] is not None
         ]
 
         summary = {
@@ -273,7 +266,9 @@ class Evaluator:
             ) if frag else 0.0,
 
             "mean_speed": float(mean_speed),
-            "max_speed": float(np.max(max_speed_list) if max_speed_list else 0.0),
+            "mean_mean_speed": float(np.mean(speed_list)if speed_list else 0.0),
+            "max_speed": float(np.max(max_speed_list) if speed_list else 0.0),
+            "mean_max_speed": float(np.mean(max_speed_list)if speed_list else 0.0),
 
             "mean_team_flip_rate": float(np.mean(flip_rates_static)) if flip_rates_static else 0.0,
             "mean_team_flip_dynamic": float(np.mean(flip_rates_dynamic)) if flip_rates_dynamic else 0.0,
@@ -285,4 +280,16 @@ class Evaluator:
             "confidence": float(np.mean(confidence)) if confidence else 0.0,
         }
         
-        return metrics, summary
+        return metrics, metrics_list, summary, T
+    
+    def evaluate(self, classes, tracks):
+        evaluation = {}
+        for class_name in classes:
+            metrics, metrics_list, summary, n_frames = self.evaluateClass(tracks, class_name)
+            evaluation[class_name] = {
+                "metrics": metrics,
+                "metrics_list": metrics_list,
+                "summary": summary,
+                "n_frames": n_frames
+            }
+        return evaluation

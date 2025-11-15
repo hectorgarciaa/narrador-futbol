@@ -22,8 +22,8 @@ def convert_to_serializable(obj):
 if __name__ == "__main__":
 
     MODEL_PATH = "../../models/finetuning/v11/yolov11m/weights/best.pt"
-    VIDEO = "../../data/partidoPrueba/08fd33_4_corto.mp4"
-    OUTPUT = "../../output/pruebaTracker/corto.mp4"
+    VIDEO = "../../data/partidoPrueba/partido_medio.mp4"
+    OUTPUT = "../../output/tracks_json/tracks.json"
     SHOWKMEANS = False
     TEAM_COLORS = { "Real Madrid": np.array([255, 127, 127]),       "Wolfsburgo":  np.array([224, 77, 196]) }
 
@@ -35,11 +35,16 @@ if __name__ == "__main__":
     
     TRACKER_CONF = { "track_thresh": TT, "track_buffer": 90, "match_thresh": MT, "frame_rate": 25, "minimum_consecutive_frames": MCF }
 
-    tracker = Tracker(MODEL_PATH, CONF, TRACKER_CONF, TEAM_COLORS)
-    tracks = tracker.get_tracks(VIDEO, SHOWKMEANS)
+    # tracker = Tracker(MODEL_PATH, CONF, TRACKER_CONF, TEAM_COLORS)
+    # tracks = tracker.get_tracks(VIDEO, SHOWKMEANS)
+
+    with open("./tracks_m_vmedio.json", "r", encoding="utf-8") as f:
+        tracks = json.load(f, )
 
     evaluator = Evaluator()
-    metrics, summary = evaluator.evaluate(tracks)
+    evaluation = evaluator.evaluate(["player"], tracks)
+    metrics, metrics_list, summary, n_frames = evaluation["player"]["metrics"], evaluation["player"]["metrics_list"], evaluation["player"]["summary"], evaluation["player"]["n_frames"], 
+    
     vis = MetricsVisualizer()
 
     print(summary)
@@ -61,5 +66,5 @@ if __name__ == "__main__":
     vis.plot_metric_events_scatter(color_diff_events, "color_diff")
 
     
-    with open("OUTPUT", "w", encoding="utf-8") as f:
+    with open(OUTPUT, "w", encoding="utf-8") as f:
         json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
