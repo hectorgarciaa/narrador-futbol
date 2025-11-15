@@ -18,6 +18,11 @@ def convert_to_serializable(obj):
         return float(obj)
     else:
         return obj
+    
+def saveResult(tracks):
+    with open(OUTPUT, "w", encoding="utf-8") as f:
+        json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
+
 
 if __name__ == "__main__":
 
@@ -66,5 +71,5 @@ if __name__ == "__main__":
     vis.plot_metric_events_scatter(color_diff_events, "color_diff")
 
     
-    with open(OUTPUT, "w", encoding="utf-8") as f:
-        json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
+    # saveResult(tracks)
+    
