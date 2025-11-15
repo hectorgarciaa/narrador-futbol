@@ -20,15 +20,16 @@ def convert_to_serializable(obj):
         return obj
     
 def saveResult(tracks):
-    with open(OUTPUT, "w", encoding="utf-8") as f:
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
 
 
 if __name__ == "__main__":
 
-    MODEL_PATH = "../../models/finetuning/v11/yolov11m/weights/best.pt"
-    VIDEO = "../../data/partidoPrueba/partido_medio.mp4"
-    OUTPUT = "../../output/tracks_json/tracks.json"
+    MODEL_PATH  = "../../models/finetuning/v11/yolov11m/weights/best.pt"
+    VIDEO_PATH  = "../../data/partidoPrueba/partido_medio.mp4"
+    TRACK_PATH  = "../../output/tracks_json/tracker/tracks_m.json"
+    OUTPUT_PATH = "../../output/tracks_json/tracker/tracks.json"
     SHOWKMEANS = False
     TEAM_COLORS = { "Real Madrid": np.array([255, 127, 127]),       "Wolfsburgo":  np.array([224, 77, 196]) }
 
@@ -41,9 +42,9 @@ if __name__ == "__main__":
     TRACKER_CONF = { "track_thresh": TT, "track_buffer": 90, "match_thresh": MT, "frame_rate": 25, "minimum_consecutive_frames": MCF }
 
     # tracker = Tracker(MODEL_PATH, CONF, TRACKER_CONF, TEAM_COLORS)
-    # tracks = tracker.get_tracks(VIDEO, SHOWKMEANS)
+    # tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
 
-    with open("./tracks_m_vmedio.json", "r", encoding="utf-8") as f:
+    with open(TRACK_PATH, "r", encoding="utf-8") as f:
         tracks = json.load(f, )
 
     evaluator = Evaluator()
