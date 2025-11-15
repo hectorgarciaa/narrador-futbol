@@ -1,7 +1,7 @@
 import cv2
 
-input_video = "./08fd33_4.mp4"
-output_video = "08fd33_4_medio.mp4"
+input_video = "./partido.mp4"
+output_video = "./partido_medio.mp4"
 
 cap = cv2.VideoCapture(input_video)
 fps = int(cap.get(cv2.CAP_PROP_FPS))
