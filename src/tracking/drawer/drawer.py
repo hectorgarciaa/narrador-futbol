@@ -8,7 +8,18 @@ class Drawer:
         pass
 
     def createWriter(self, video, output_path):
+        if not video:
+            raise ValueError("Video path is empty.")
+        if not os.path.isfile(video):
+            raise FileNotFoundError(f"Video not found: {video}")
+
+        root, ext = os.path.splitext(output_path)
+        if ext == "":
+            output_path = root + ".mp4"
+
         cap = cv2.VideoCapture(video)
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open video: {video}")
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -21,9 +32,12 @@ class Drawer:
         x1, y1, x2, y2 = map(int, data["bbox"])
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         label = f"{class_name} #{track_id}"
-        label += "\n"
-        d = [data["distances"]["Real Madrid"].round(1), data["distances"]["Wolfsburgo"].round(1)]
-        label += f"{data['team']}: {d}"
+        distances = data.get("distances")
+        team = data.get("team")
+        if distances is not None and team is not None:
+            label += "\n"
+            d = [distances["Real Madrid"].round(1), distances["Wolfsburgo"].round(1)]
+            label += f"{team}: {d}"
 
         cv2.putText(frame, label, (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
@@ -34,7 +48,7 @@ class Drawer:
         for track_id, data in frame_data.items():
             self.drawDetection(frame, class_name, data, color, track_id)
 
-    def draw_tracks(self, tracks, video, output_path):        
+    def draw_tracks(self, tracks, video, output_path, show=False, window_name="Tracking"):
         cap, out = self.createWriter(video, output_path)
 
         num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -49,7 +63,13 @@ class Drawer:
                 self.drawAllDetectionsInFrame(frame, class_name, class_tracks, frame_id)
             
             out.write(frame)
+            if show:
+                cv2.imshow(window_name, frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
             frame_id += 1
 
         cap.release()
         out.release()
+        if show:
+            cv2.destroyAllWindows()
