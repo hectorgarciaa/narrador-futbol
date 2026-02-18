@@ -3,3 +3,6 @@ yolov8x.pt
 yolov11x.pt
 *.avi
 pruebaTracker
+
+# Exclude models directory (large files)
+models/
