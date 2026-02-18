@@ -18,7 +18,7 @@ if __name__ == "__main__":
     SHOWKMEANS = config.get('visualization', 'show_kmeans')
     TEAM_COLORS = config.get_team_colors()
 
-    # Colores de visualización
+    # Visualization colors
     vis_colors = config.get_visualization_colors()
 
     confs = [0.1]
@@ -26,14 +26,14 @@ if __name__ == "__main__":
     mts = [0.945]
     mcfs = [5]
 
-    prueba_id = 0
-    total_pruebas = len(confs) * len(tts) * len(mts) * len(mcfs)
-    tracks_todos = []
+    experiment_id = 0
+    total_experiments = len(confs) * len(tts) * len(mts) * len(mcfs)
+    all_tracks = []
     for conf in confs:
         for tt in tts:
             for mt in mts:
                 for mcf in mcfs:
-                    inicio = time.time()
+                    start_time = time.time()
                     tracker_conf = {
                         "track_thresh": tt,
                         "track_buffer": config.get('tracking', 'track_buffer'),
@@ -41,22 +41,24 @@ if __name__ == "__main__":
                         "frame_rate": config.get('tracking', 'frame_rate'),
                         "minimum_consecutive_frames": mcf,
                     }
-                    output = OUTPUT + "/" + str(prueba_id) + ".mp4"
-                    prueba_id += 1
+                    output = OUTPUT + "/" + str(experiment_id) + ".mp4"
+                    experiment_id += 1
 
                     tracker = Tracker(MODEL_PATH, conf, tracker_conf, TEAM_COLORS)
                     tracks = tracker.get_tracks(VIDEO, SHOWKMEANS)
 
-                    tracks_todos.append({"conf": conf, "tt": tt, "mt": mt, "mcf": mcf, "track": tracks})
+                    all_tracks.append({"conf": conf, "tt": tt, "mt": mt, "mcf": mcf, "track": tracks})
 
                     drawer = Drawer(colors=vis_colors)
                     drawer.draw_tracks(tracks, VIDEO, output)
 
-                    if prueba_id == 1:
-                        with open("./tracks_prueba.json", "w", encoding="utf-8") as f:
+                    if experiment_id == 1:
+                        tracks_sample_path = str(config.get_path('paths', 'output', 'prueba_tracker', create_if_missing=True)) + "/tracks_sample.json"
+                        with open(tracks_sample_path, "w", encoding="utf-8") as f:
                             json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
-                    fin = time.time()
-                    logger.info(f"Prueba {prueba_id}/{total_pruebas} - {int(fin - inicio)}s")
+                    end_time = time.time()
+                    logger.info(f"Experiment {experiment_id}/{total_experiments} - {int(end_time - start_time)}s")
 
-            with open("./tracks.json", "w", encoding="utf-8") as f:
-                json.dump(convert_to_serializable(tracks_todos), f, indent=4, ensure_ascii=False, sort_keys=True)
+    tracks_path = str(config.get_path('paths', 'output', 'prueba_tracker', create_if_missing=True)) + "/tracks.json"
+    with open(tracks_path, "w", encoding="utf-8") as f:
+        json.dump(convert_to_serializable(all_tracks), f, indent=4, ensure_ascii=False, sort_keys=True)

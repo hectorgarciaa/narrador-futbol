@@ -5,15 +5,15 @@ from football_ai.core import get_config
 
 
 def download_yolo_models(base_dir, versions):
-    """Descarga y guarda modelos YOLO según la configuración."""
+    """Downloads and saves YOLO models according to the configuration."""
     for version, model_names in versions.items():
-        for nombre in model_names:
-            modelo = YOLO(nombre)
-            archivo = f"{nombre}.pt"
-            ruta_guardado = os.path.join(base_dir, version, archivo)
-            os.makedirs(os.path.dirname(ruta_guardado), exist_ok=True)
-            modelo.save(ruta_guardado)
-            print(f"{nombre} guardado en {ruta_guardado}")
+        for name in model_names:
+            model = YOLO(name)
+            filename = f"{name}.pt"
+            save_path = os.path.join(base_dir, version, filename)
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            model.save(save_path)
+            print(f"{name} saved to {save_path}")
 
 
 if __name__ == "__main__":

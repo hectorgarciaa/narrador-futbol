@@ -8,19 +8,19 @@ class Drawer:
 
     def create_writer(self, video, output_path):
         """
-        Crea un VideoWriter para guardar el video procesado.
+        Creates a VideoWriter to save the processed video.
         
         Args:
-            video: Ruta al video de entrada
-            output_path: Ruta donde guardar el video de salida
+            video: Path to the input video
+            output_path: Path where the output video will be saved
             
         Returns:
-            Tupla (VideoCapture, VideoWriter)
+            Tuple (VideoCapture, VideoWriter)
             
         Raises:
-            ValueError: Si la ruta del video está vacía
-            FileNotFoundError: Si el video no existe
-            RuntimeError: Si no se puede abrir el video o crear el writer
+            ValueError: If the video path is empty
+            FileNotFoundError: If the video does not exist
+            RuntimeError: If the video cannot be opened or the writer cannot be created
         """
         if not video:
             raise ValueError("Video path is empty.")
@@ -40,12 +40,12 @@ class Drawer:
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-            # Crear directorio de salida si no existe
+            # Create output directory if it doesn't exist
             output_dir = os.path.dirname(output_path)
             if output_dir:
                 os.makedirs(output_dir, exist_ok=True)
             
-            # Crear VideoWriter
+            # Create VideoWriter
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
             
@@ -61,7 +61,7 @@ class Drawer:
             raise RuntimeError(f"Error creating video writer: {e}") from e
     
     def draw_detection(self, frame, class_name, data, color, track_id):
-        """Dibuja una detección individual sobre el frame."""
+        """Draws a single detection on the frame."""
         x1, y1, x2, y2 = map(int, data["bbox"])
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         label = f"{class_name} #{track_id}"
@@ -75,7 +75,7 @@ class Drawer:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
     def draw_all_detections_in_frame(self, frame, class_name, class_tracks, frame_id):
-        """Dibuja todas las detecciones de una clase en un frame."""
+        """Draws all detections of a class in a frame."""
         frame_data = class_tracks[frame_id]
         color = self.colors.get(class_name, self.DEFAULT_COLOR)
         for track_id, data in frame_data.items():
@@ -83,17 +83,17 @@ class Drawer:
 
     def draw_tracks(self, tracks, video, output_path, show=False, window_name="Tracking"):
         """
-        Dibuja los tracks sobre el video y lo guarda.
+        Draws the tracks on the video and saves it.
         
         Args:
-            tracks: Diccionario con tracks por clase
-            video: Ruta al video de entrada
-            output_path: Ruta donde guardar el video con tracks
-            show: Si True, muestra el video en tiempo real
-            window_name: Nombre de la ventana para visualización
+            tracks: Dictionary with tracks per class
+            video: Path to the input video
+            output_path: Path where the video with tracks will be saved
+            show: If True, displays the video in real time
+            window_name: Name of the display window
             
         Raises:
-            RuntimeError: Si hay un error durante el procesamiento del video
+            RuntimeError: If an error occurs during video processing
         """
         cap = None
         out = None
@@ -123,7 +123,7 @@ class Drawer:
             raise RuntimeError(f"Error drawing tracks: {e}") from e
         
         finally:
-            # Liberar recursos
+            # Release resources
             if cap is not None:
                 cap.release()
             if out is not None:

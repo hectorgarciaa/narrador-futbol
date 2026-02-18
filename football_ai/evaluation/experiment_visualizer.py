@@ -78,12 +78,12 @@ class ExperimentVisualizer:
             df = df_filter
         else:
             df = self.create_dfs_metrics(class_name)
-        # Distribución de cobertura por track
+        # Coverage distribution per track
         plt.figure(figsize=(25, 5))
         sns.boxplot(data=df, x="experiment_id", y=y)
-        plt.title("Distribución de cobertura por track")
-        plt.xlabel("Experimento")
-        plt.ylabel("Cobertura")
+        plt.title("Coverage distribution per track")
+        plt.xlabel("Experiment")
+        plt.ylabel("Coverage")
         plt.show()
 
     def show_params_comparison(self, class_name, df_filter=None):

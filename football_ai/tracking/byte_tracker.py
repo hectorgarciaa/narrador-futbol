@@ -185,7 +185,7 @@ class ByteTrack:
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
 
-        # Filtrar team_labels con los mismos índices que las detecciones de alta confianza
+        # Filter team_labels with the same indices as high-confidence detections
         if team_labels is not None:
             remain_indices = np.where(remain_inds)[0]
             team_labels_keep = [team_labels[j] for j in remain_indices]
@@ -203,9 +203,9 @@ class ByteTrack:
                 self.external_id_counter,
             )
             if team_labels_keep is not None and i < len(team_labels_keep):
-                det.equipo = team_labels_keep[i]
+                det.team = team_labels_keep[i]
             else:
-                det.equipo = None
+                det.team = None
             
             detections.append(det)
 
@@ -225,24 +225,24 @@ class ByteTrack:
         STrack.multi_predict(strack_pool, self.shared_kalman)
         dists = matching.iou_distance(strack_pool, detections)
 
-        # Penalización extra si equipos distintos
+        # Extra penalty if teams differ
         for i, track in enumerate(strack_pool):
             for j, det in enumerate(detections):
-                if hasattr(track, "equipo") and hasattr(det, "equipo"):
-                    if track.equipo != det.equipo:
+                if hasattr(track, "team") and hasattr(det, "team"):
+                    if track.team != det.team:
                         dists[i, j] += self.team_penalty
 
         dists = matching.fuse_score(dists, detections)
         matches, u_track, u_detection = matching.linear_assignment(
             dists, thresh=self.minimum_matching_threshold
         )
-        # Manejo de cambios de equipo en tracks
+        # Handle team switches in tracks
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
 
-            old_team = getattr(track, "equipo", None)
-            new_team = getattr(det, "equipo", None)
+            old_team = getattr(track, "team", None)
+            new_team = getattr(det, "team", None)
 
             if old_team is not None and new_team is not None and old_team != new_team:
                 if not hasattr(track, "team_switch_frames"):
@@ -251,8 +251,8 @@ class ByteTrack:
                     track.team_switch_frames += 1
 
                 if track.team_switch_frames >= self.team_switch_threshold:
-                    logger.info(f"Cambio de equipo confirmado: Track ahora es {new_team}")
-                    track.equipo = new_team
+                    logger.info(f"Team switch confirmed: Track is now {new_team}")
+                    track.team = new_team
                     track.team_switch_frames = 0
                 else:
                     new_team = old_team
@@ -262,9 +262,9 @@ class ByteTrack:
                     track.team_switch_frames = 0
 
                 if old_team is None and new_team is not None:
-                    track.equipo = new_team
+                    track.team = new_team
 
-            # --- Actualización normal del track ---
+            # --- Normal track update ---
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id)
                 activated_starcks.append(track)

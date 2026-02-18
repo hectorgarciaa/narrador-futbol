@@ -1,5 +1,5 @@
 """
-Módulo core - Configuración, logging y utilidades compartidas.
+Core module - Configuration, logging, and shared utilities.
 """
 
 from .config import Config, get_config

@@ -1,8 +1,8 @@
 """
-Módulo de configuración para el sistema de narración de fútbol con IA.
+Configuration module for the AI football commentary system.
 
-Este módulo proporciona una clase Config para cargar y acceder a la configuración
-del proyecto desde un archivo YAML, con soporte para rutas absolutas y validación.
+This module provides a Config class to load and access project configuration
+from a YAML file, with support for absolute paths and validation.
 """
 
 import yaml
@@ -14,19 +14,19 @@ import numpy as np
 
 class Config:
     """
-    Clase para gestionar la configuración del proyecto.
+    Class to manage project configuration.
     
-    Carga configuración desde config.yaml y proporciona acceso a todos los parámetros
-    del sistema, con resolución de rutas relativas a absolutas.
+    Loads configuration from config.yaml and provides access to all system
+    parameters, with relative-to-absolute path resolution.
     """
     
     def __init__(self, config_dict: Dict[str, Any], project_root: Path):
         """
-        Inicializa la configuración.
+        Initialize the configuration.
         
         Args:
-            config_dict: Diccionario con la configuración cargada
-            project_root: Ruta raíz del proyecto
+            config_dict: Dictionary with the loaded configuration
+            project_root: Project root path
         """
         self._config = config_dict
         self.project_root = project_root
@@ -34,22 +34,22 @@ class Config:
     @classmethod
     def from_yaml(cls, config_path: Optional[str] = None) -> "Config":
         """
-        Carga la configuración desde un archivo YAML.
+        Load configuration from a YAML file.
         
         Args:
-            config_path: Ruta al archivo de configuración. Si es None, busca
-                        config.yaml en la raíz del proyecto.
+            config_path: Path to the configuration file. If None, searches for
+                        config.yaml in the project root.
                         
         Returns:
-            Instancia de Config con la configuración cargada
+            Config instance with the loaded configuration
             
         Raises:
-            FileNotFoundError: Si el archivo de configuración no existe
-            yaml.YAMLError: Si hay un error al parsear el YAML
+            FileNotFoundError: If the configuration file does not exist
+            yaml.YAMLError: If there is an error parsing the YAML
         """
-        # Determinar la raíz del proyecto (donde está config.yaml)
+        # Determine the project root (where config.yaml is)
         if config_path is None:
-            # Buscar config.yaml desde el archivo actual hacia arriba
+            # Search for config.yaml from the current file upward
             current_file = Path(__file__).resolve()
             project_root = current_file.parent.parent.parent  # football_ai/core -> football_ai -> narrador-futbol
             config_path = project_root / "config.yaml"
@@ -59,62 +59,62 @@ class Config:
             
         if not config_path.exists():
             raise FileNotFoundError(
-                f"Archivo de configuración no encontrado: {config_path}\n"
-                f"Asegúrate de que config.yaml existe en la raíz del proyecto."
+                f"Configuration file not found: {config_path}\n"
+                f"Make sure config.yaml exists in the project root."
             )
         
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config_dict = yaml.safe_load(f)
         except yaml.YAMLError as e:
-            raise yaml.YAMLError(f"Error al parsear {config_path}: {e}")
+            raise yaml.YAMLError(f"Error parsing {config_path}: {e}")
         
         return cls(config_dict, project_root)
     
     def get_path(self, *keys: str, create_if_missing: bool = False) -> Path:
         """
-        Obtiene una ruta absoluta desde la configuración.
+        Get an absolute path from the configuration.
         
         Args:
-            *keys: Claves para navegar en el diccionario de configuración
-                  Ejemplo: 'paths', 'models', 'yolo_base'
-            create_if_missing: Si True, crea el directorio si no existe
+            *keys: Keys to navigate the configuration dictionary
+                  Example: 'paths', 'models', 'yolo_base'
+            create_if_missing: If True, create the directory if it doesn't exist
             
         Returns:
-            Path absoluto resuelto desde la raíz del proyecto
+            Absolute Path resolved from the project root
             
         Raises:
-            KeyError: Si la clave no existe en la configuración
+            KeyError: If the key does not exist in the configuration
         """
         value = self._get_nested(*keys)
         
         if not isinstance(value, str):
             raise ValueError(
-                f"El valor en {'.'.join(keys)} no es una ruta válida: {value}"
+                f"The value at {'.'.join(keys)} is not a valid path: {value}"
             )
         
-        # Convertir ruta relativa a absoluta
+        # Convert relative path to absolute
         abs_path = self.project_root / value
         
-        # Crear directorio si se solicita
+        # Create directory if requested
         if create_if_missing and not abs_path.exists():
-            if '.' in abs_path.name:  # Es un archivo
+            if '.' in abs_path.name:  # It's a file
                 abs_path.parent.mkdir(parents=True, exist_ok=True)
-            else:  # Es un directorio
+            else:  # It's a directory
                 abs_path.mkdir(parents=True, exist_ok=True)
         
         return abs_path
     
     def get(self, *keys: str, default: Any = None) -> Any:
         """
-        Obtiene un valor de la configuración.
+        Get a value from the configuration.
         
         Args:
-            *keys: Claves para navegar en el diccionario
-            default: Valor por defecto si la clave no existe
+            *keys: Keys to navigate the dictionary
+            default: Default value if the key does not exist
             
         Returns:
-            Valor de la configuración o default si no existe
+            Configuration value or default if not found
         """
         try:
             return self._get_nested(*keys)
@@ -123,86 +123,86 @@ class Config:
     
     def _get_nested(self, *keys: str) -> Any:
         """
-        Navega por el diccionario de configuración usando claves anidadas.
+        Navigate the configuration dictionary using nested keys.
         
         Args:
-            *keys: Secuencia de claves para acceder al valor
+            *keys: Sequence of keys to access the value
             
         Returns:
-            Valor encontrado en la configuración
+            Value found in the configuration
             
         Raises:
-            KeyError: Si alguna clave no existe
+            KeyError: If any key does not exist
         """
         value = self._config
         for key in keys:
             if not isinstance(value, dict):
                 raise KeyError(
-                    f"No se puede acceder a '{key}' en {'.'.join(keys[:-1])}"
+                    f"Cannot access '{key}' in {'.'.join(keys[:-1])}"
                 )
             if key not in value:
                 raise KeyError(
-                    f"Clave '{key}' no encontrada en configuración. "
-                    f"Ruta: {'.'.join(keys)}"
+                    f"Key '{key}' not found in configuration. "
+                    f"Path: {'.'.join(keys)}"
                 )
             value = value[key]
         return value
     
     @property
     def paths(self) -> Dict[str, Any]:
-        """Diccionario con todas las rutas configuradas."""
+        """Dictionary with all configured paths."""
         return self._config.get('paths', {})
     
     @property
     def detection(self) -> Dict[str, Any]:
-        """Configuración de detección."""
+        """Detection configuration."""
         return self._config.get('detection', {})
     
     @property
     def tracking(self) -> Dict[str, Any]:
-        """Configuración de tracking."""
+        """Tracking configuration."""
         return self._config.get('tracking', {})
     
     @property
     def teams(self) -> Dict[str, Any]:
-        """Configuración de equipos."""
+        """Teams configuration."""
         return self._config.get('teams', {})
     
     @property
     def visualization(self) -> Dict[str, Any]:
-        """Configuración de visualización."""
+        """Visualization configuration."""
         return self._config.get('visualization', {})
     
     @property
     def finetuning(self) -> Dict[str, Any]:
-        """Configuración de fine-tuning."""
+        """Fine-tuning configuration."""
         return self._config.get('finetuning', {})
     
     @property
     def color_clustering(self) -> Dict[str, Any]:
-        """Configuración de clustering de colores."""
+        """Color clustering configuration."""
         return self._config.get('color_clustering', {})
     
     @property
     def logging_config(self) -> Dict[str, Any]:
-        """Configuración de logging."""
+        """Logging configuration."""
         return self._config.get('logging', {})
     
     def get_team_names(self) -> list:
         """
-        Obtiene la lista de nombres de equipos configurados.
+        Get the list of configured team names.
         
         Returns:
-            Lista con los nombres de los equipos
+            List with team names
         """
         return list(self.teams.keys())
     
     def get_team_colors(self) -> Dict[str, np.ndarray]:
         """
-        Obtiene los colores de los equipos como arrays de numpy.
+        Get team colors as numpy arrays.
         
         Returns:
-            Diccionario con nombre del equipo como clave y color RGB como array numpy
+            Dictionary with team name as key and RGB color as numpy array
         """
         teams = self.teams
         team_colors = {}
@@ -215,35 +215,35 @@ class Config:
     
     def get_visualization_colors(self) -> Dict[str, tuple]:
         """
-        Obtiene los colores de visualización como tuplas (para OpenCV).
+        Get visualization colors as tuples (for OpenCV).
         
         Returns:
-            Diccionario con nombre de clase como clave y color BGR como tupla
+            Dictionary with class name as key and BGR color as tuple
         """
         colors = self.visualization.get('colors', {})
         return {k: tuple(v) for k, v in colors.items()}
     
     def __repr__(self) -> str:
-        """Representación en string de la configuración."""
+        """String representation of the configuration."""
         return f"Config(project_root={self.project_root})"
 
 
-# Instancia global de configuración (se carga bajo demanda)
+# Global configuration instance (loaded on demand)
 _global_config: Optional[Config] = None
 
 
 def get_config(config_path: Optional[str] = None) -> Config:
     """
-    Obtiene la configuración global del proyecto.
+    Get the global project configuration.
     
-    Esta función implementa un patrón singleton para la configuración,
-    cargándola solo una vez y reutilizándola en llamadas posteriores.
+    This function implements a singleton pattern for configuration,
+    loading it only once and reusing it in subsequent calls.
     
     Args:
-        config_path: Ruta al archivo de configuración (solo usado en la primera llamada)
+        config_path: Path to the configuration file (only used on first call)
         
     Returns:
-        Instancia global de Config
+        Global Config instance
     """
     global _global_config
     

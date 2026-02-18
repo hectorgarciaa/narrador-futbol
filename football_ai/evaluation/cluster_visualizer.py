@@ -8,10 +8,10 @@ from sklearn.cluster import KMeans
 
 def visualize_shirt_clusters(shirt_crops, max_players=20):
     """
-    Muestra hasta N crops de camisetas en una cuadricula.
-    Para cada crop:
-      - izquierda: crop original
-      - derecha: crop coloreado por cluster (KMeans k=2)
+    Displays up to N shirt crops in a grid.
+    For each crop:
+      - left: original crop
+      - right: cluster-colored crop (KMeans k=2)
     """
     shirt_crops = shirt_crops[:max_players]
     n = len(shirt_crops)
@@ -49,12 +49,12 @@ def visualize_shirt_clusters(shirt_crops, max_players=20):
 
         ax_orig = axes[row, col * 2]
         ax_orig.imshow(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
-        ax_orig.set_title(f"Jugador {idx + 1} original")
+        ax_orig.set_title(f"Player {idx + 1} original")
         ax_orig.axis("off")
 
         ax_cluster = axes[row, col * 2 + 1]
         ax_cluster.imshow(cv2.cvtColor(cluster_img, cv2.COLOR_BGR2RGB))
-        ax_cluster.set_title("Clusters (camiseta vs cesped)")
+        ax_cluster.set_title("Clusters (shirt vs grass)")
         ax_cluster.axis("off")
 
     plt.tight_layout()
@@ -67,7 +67,7 @@ class ClusterVisualizer:
         self.video_path = video_path
 
     def reformat_track(self, tracks):
-        """Reformatea los tracks a un DataFrame plano para analisis."""
+        """Reformats the tracks into a flat DataFrame for analysis."""
         reformed_data = []
         for class_name, class_info in tracks.items():
             for n_frame, frame_tracks in enumerate(class_info):
@@ -89,7 +89,7 @@ class ClusterVisualizer:
                         "B": player_dict["shirt_color"][2],
                         "team": player_dict["team"],
                     }
-                    # Distancias dinamicas por nombre de equipo
+                    # Dynamic distances by team name
                     for team_name, dist in player_dict["distances"].items():
                         row[team_name] = dist
                     reformed_data.append(row)
@@ -97,11 +97,11 @@ class ClusterVisualizer:
         return pd.DataFrame(reformed_data)
 
     def get_data_frame(self):
-        """Devuelve el DataFrame reformateado."""
+        """Returns the reformatted DataFrame."""
         return self.reformed_tracks
 
     def show_hist_of_class_name(self, axes, df, class_name, cols, xlabel):
-        """Muestra histogramas para una clase especifica."""
+        """Displays histograms for a specific class."""
         for i, c in enumerate(cols):
             axes[i].hist(df[c], bins=256)
             axes[i].set_title(c)
@@ -110,7 +110,7 @@ class ClusterVisualizer:
             axes[i].set_ylabel(f"Freq {class_name}")
 
     def show_hist(self, cols, xlabel, width):
-        """Muestra histogramas comparativos por clase."""
+        """Displays comparative histograms by class."""
         _, axes = plt.subplots(5, len(cols), figsize=(25, width), sharey="row")
 
         self.show_hist_of_class_name(axes[0], self.reformed_tracks, "Global", cols, xlabel)
@@ -122,11 +122,11 @@ class ClusterVisualizer:
         plt.show()
 
     def get_cols(self):
-        """Devuelve las columnas del DataFrame."""
+        """Returns the DataFrame columns."""
         return list(self.reformed_tracks.columns)
 
     def show_clusters(self, df, filtro, n_clusters=2, init='k-means++', n_init=10, random_state=0):
-        """Muestra clusters visuales de los crops de camisetas."""
+        """Displays visual clusters of shirt crops."""
         if len(filtro) > 0:
             df = df.drop_duplicates(subset=filtro)
 
@@ -174,12 +174,12 @@ class ClusterVisualizer:
 
     def show_clusters_3d(self, class_name, n_frames, team_colors=None):
         """
-        Muestra un scatter 3D en espacio LAB por equipo.
+        Displays a 3D scatter plot in LAB color space by team.
 
         Args:
-            class_name: Clase a visualizar (ej: 'player')
-            n_frames: Numero maximo de frames a incluir
-            team_colors: Dict opcional {nombre_equipo: np.array([L, A, B])}
+            class_name: Class to visualize (e.g., 'player')
+            n_frames: Maximum number of frames to include
+            team_colors: Optional dict {team_name: np.array([L, A, B])}
         """
         df = self.reformed_tracks[self.reformed_tracks["class_name"] == class_name]
         df = df[df["frame"] <= n_frames]
@@ -207,7 +207,7 @@ class ClusterVisualizer:
         ax.set_xlabel('L')
         ax.set_ylabel('A')
         ax.set_zlabel('B')
-        ax.set_title('Espacio de Color LAB por Equipo')
+        ax.set_title('LAB Color Space by Team')
 
         plt.tight_layout()
         plt.legend()

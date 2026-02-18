@@ -1,5 +1,5 @@
 """
-Módulo de identificación - Detección de camisetas y equipos.
+Identification module - Shirt and team detection.
 """
 
 from .shirt_detector import ShirtDetector

@@ -42,7 +42,7 @@ class TrackVisualizer:
 
     def show_hist(self, nparray, column, bins=30):
         nparray.hist(bins=bins)
-        plt.title(f"Histograma de {column}")
+        plt.title(f"Histogram of {column}")
         plt.show()
 
     def show_tracks_evolution(self, y, cov_threshold, tracks_per_row, vertical_offset):
@@ -55,7 +55,7 @@ class TrackVisualizer:
         if num_rows == 1:   axes = [axes]
         else:               axes = axes.flatten()
 
-        # Colores distintos para cada TID
+        # Distinct colors for each TID
         colors = plt.cm.tab10(np.linspace(0, 1, len(aux)))
 
         for row_idx, ax in enumerate(axes):
@@ -69,13 +69,13 @@ class TrackVisualizer:
                 frames_seen = row["frames_seen"]
                 confidences = row[y]
                 
-                # Crear array completo con 0 para frames no vistos
+                # Create full array with 0 for unseen frames
                 y_full = np.zeros(self.n_frames)
                 for frame, conf in zip(frames_seen, confidences):
                     if frame < self.n_frames:
                         y_full[frame] = conf
                 
-                # Plot con offset vertical para separar tracks
+                # Plot with vertical offset to separate tracks
                 v_offset = i * 0.02 if vertical_offset else 0
                 ax.plot(range(self.n_frames), y_full + v_offset, 
                         color=colors[start_tid_idx + i], 
@@ -88,6 +88,6 @@ class TrackVisualizer:
                 ax.set_xlabel("Frames")
             ax.set_title(f"Tracks {start_tid_idx}-{end_tid_idx-1}")
 
-        plt.suptitle("Confidence vs Frames por TID (Agrupado)", fontsize=16)
+        plt.suptitle("Confidence vs Frames per TID (Grouped)", fontsize=16)
         plt.tight_layout()
         plt.show()

@@ -1,8 +1,8 @@
 """
-Módulo de logging para el sistema de narración de fútbol con IA.
+Logging module for the AI football commentary system.
 
-Proporciona configuración centralizada de logging con soporte para
-múltiples niveles, formateo personalizado y salida a archivo y consola.
+Provides centralized logging configuration with support for
+multiple levels, custom formatting, and file/console output.
 """
 
 import logging
@@ -13,10 +13,10 @@ from typing import Optional
 
 class Logger:
     """
-    Clase para gestionar el logging del proyecto.
+    Class to manage project logging.
     
-    Proporciona configuración centralizada de logging con salida
-    a archivo y consola, niveles configurables y formateo personalizado.
+    Provides centralized logging configuration with file and console
+    output, configurable levels, and custom formatting.
     """
     
     _initialized = False
@@ -32,43 +32,43 @@ class Logger:
         log_to_file: bool = True
     ) -> None:
         """
-        Configura el sistema de logging.
+        Configure the logging system.
         
         Args:
-            log_file: Ruta al archivo de log (relativa o absoluta)
-            level: Nivel de logging (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-            format_str: Formato personalizado para los mensajes de log
-            log_to_console: Si True, también imprime logs en consola
-            log_to_file: Si True, guarda logs en archivo
+            log_file: Path to the log file (relative or absolute)
+            level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+            format_str: Custom format for log messages
+            log_to_console: If True, also prints logs to console
+            log_to_file: If True, saves logs to file
         """
         if cls._initialized:
             return
         
-        # Formato por defecto
+        # Default format
         if format_str is None:
             format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         
-        # Convertir nivel de string a constante de logging
+        # Convert string level to logging constant
         numeric_level = getattr(logging, level.upper(), logging.INFO)
         
-        # Crear formateador
+        # Create formatter
         formatter = logging.Formatter(format_str, datefmt="%Y-%m-%d %H:%M:%S")
         
-        # Configurar root logger
+        # Configure root logger
         root_logger = logging.getLogger()
         root_logger.setLevel(numeric_level)
         
-        # Limpiar handlers existentes
+        # Clear existing handlers
         root_logger.handlers = []
         
-        # Handler para consola
+        # Console handler
         if log_to_console:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setLevel(numeric_level)
             console_handler.setFormatter(formatter)
             root_logger.addHandler(console_handler)
         
-        # Handler para archivo
+        # File handler
         if log_to_file and log_file:
             log_path = Path(log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,13 +83,13 @@ class Logger:
     @classmethod
     def get_logger(cls, name: str) -> logging.Logger:
         """
-        Obtiene un logger con el nombre especificado.
+        Get a logger with the specified name.
         
         Args:
-            name: Nombre del logger (generalmente __name__ del módulo)
+            name: Logger name (typically __name__ of the module)
             
         Returns:
-            Logger configurado
+            Configured logger
         """
         if name not in cls._loggers:
             logger = logging.getLogger(name)
@@ -100,10 +100,10 @@ class Logger:
     @classmethod
     def setup_from_config(cls, config) -> None:
         """
-        Configura el logging desde un objeto Config.
+        Configure logging from a Config object.
         
         Args:
-            config: Instancia de Config con la configuración de logging
+            config: Config instance with the logging configuration
         """
         log_config = config.logging_config
         
@@ -120,12 +120,12 @@ class Logger:
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Función de conveniencia para obtener un logger.
+    Convenience function to get a logger.
     
     Args:
-        name: Nombre del logger (usar __name__)
+        name: Logger name (use __name__)
         
     Returns:
-        Logger configurado
+        Configured logger
     """
     return Logger.get_logger(name)

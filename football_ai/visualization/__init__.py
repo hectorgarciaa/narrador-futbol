@@ -1,5 +1,5 @@
 """
-Módulo de visualización - Dibujo de tracks sobre video.
+Visualization module - Drawing tracks on video.
 """
 
 from .drawer import Drawer

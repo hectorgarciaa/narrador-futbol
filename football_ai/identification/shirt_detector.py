@@ -8,7 +8,7 @@ class ShirtDetector:
                          random_state=random_state)
 
     def get_color_kmeans(self, image):
-        """Obtiene el color dominante de la camiseta mediante KMeans en espacio LAB."""
+        """Gets the dominant shirt color using KMeans in LAB color space."""
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
         pixels = lab.reshape(-1, 3)
         if len(pixels) < 2:

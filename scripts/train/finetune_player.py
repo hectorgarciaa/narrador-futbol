@@ -4,17 +4,17 @@ from ultralytics import YOLO
 
 from football_ai.core import get_config, get_logger, Logger
 
-def finetuning(ruta_modelo, ruta_data_yaml, epochs, batch, imgsz, output_dir, logger):
-    """Realiza fine-tuning de modelo YOLO para detección de fútbol."""
+def finetuning(model_path, data_yaml_path, epochs, batch, imgsz, output_dir, logger):
+    """Performs fine-tuning of a YOLO model for football detection."""
     try:
-        logger.info(f"Cargando modelo base: {ruta_modelo}")
-        model = YOLO(ruta_modelo)
+        logger.info(f"Loading base model: {model_path}")
+        model = YOLO(model_path)
         
-        logger.info(f"Iniciando fine-tuning con dataset: {ruta_data_yaml}")
-        logger.info(f"Parámetros: epochs={epochs}, batch={batch}, imgsz={imgsz}")
+        logger.info(f"Starting fine-tuning with dataset: {data_yaml_path}")
+        logger.info(f"Parameters: epochs={epochs}, batch={batch}, imgsz={imgsz}")
         
         model.train(
-            data=ruta_data_yaml,
+            data=data_yaml_path,
             epochs=epochs,
             imgsz=imgsz,
             batch=batch,
@@ -22,39 +22,39 @@ def finetuning(ruta_modelo, ruta_data_yaml, epochs, batch, imgsz, output_dir, lo
             project=output_dir,
         )
         
-        logger.info(f"Fine-tuning completado. Modelo guardado en: {output_dir}/finetuning")
+        logger.info(f"Fine-tuning completed. Model saved to: {output_dir}/finetuning")
     except FileNotFoundError as e:
-        logger.error(f"Archivo no encontrado: {e}")
+        logger.error(f"File not found: {e}")
         raise
     except Exception as e:
-        logger.error(f"Error durante el fine-tuning: {e}", exc_info=True)
+        logger.error(f"Error during fine-tuning: {e}", exc_info=True)
         raise
 
 if __name__ == "__main__":
-    # Cargar configuración
+    # Load configuration
     config = get_config()
     
-    # Configurar logging
+    # Configure logging
     Logger.setup_from_config(config)
     logger = get_logger(__name__)
     
-    logger.info("Iniciando proceso de fine-tuning")
+    logger.info("Starting fine-tuning process")
     
     try:
-        ruta_modelo = str(config.get_path('paths', 'models', 'yolo_v11_m'))
-        ruta_data_yaml = str(config.get_path('paths', 'data', 'dataset_football_ai'))
+        model_path = str(config.get_path('paths', 'models', 'yolo_v11_m'))
+        data_yaml_path = str(config.get_path('paths', 'data', 'dataset_football_ai'))
         
-        # Construir directorio de salida
+        # Build output directory
         output_base = config.get_path('paths', 'models', 'finetuned_player').parent.parent
         output_dir = str(output_base)
         
-        # Parámetros de fine-tuning desde config
+        # Fine-tuning parameters from config
         epochs = config.get('finetuning', 'epochs')
         batch = config.get('finetuning', 'batch')
         imgsz = config.get('finetuning', 'imgsz')
         
-        finetuning(ruta_modelo, ruta_data_yaml, epochs, batch, imgsz, output_dir, logger)
-        logger.info("Fine-tuning completado exitosamente")
+        finetuning(model_path, data_yaml_path, epochs, batch, imgsz, output_dir, logger)
+        logger.info("Fine-tuning completed successfully")
     except Exception as e:
-        logger.error(f"Error en la ejecución: {e}")
+        logger.error(f"Execution error: {e}")
         sys.exit(1)

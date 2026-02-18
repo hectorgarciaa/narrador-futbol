@@ -28,7 +28,7 @@ class Evaluator:
     def get_gaps_and_speed(self, tid, frames_seen_sorted, id_bboxes):
         gap_lengths = []
         speed_values = []
-        speed_frames = []    # lista de (frame_prev, frame_curr)
+        speed_frames = []    # list of (frame_prev, frame_curr)
 
         prev = frames_seen_sorted[0]
         bbox_prev = id_bboxes[tid][0]
@@ -137,7 +137,7 @@ class Evaluator:
 
         mean_conf = float(np.mean(id_conf[tid])) if id_conf.get(tid) else None
 
-        # -------- metric_events como LISTAS de eventos por métrica --------
+        # -------- metric_events as LISTS of events per metric --------
         metrics_events = {}
         metrics_list = { "frames_seen": frames_seen_sorted,
                         "speed_values": speed_values, "speed_frames": speed_frames,
@@ -150,7 +150,7 @@ class Evaluator:
                 event = {"id": int(tid), "frame": int(frame), "value": float(value)}
             metrics_events.setdefault(key, []).append(event)
 
-        # métricas agregadas (1 por track)
+        # aggregated metrics (1 per track)
         add_metric_event("coverage", coverage)
         add_metric_event("total_seen", total_seen)
         add_metric_event("fragments", gaps)
@@ -166,10 +166,10 @@ class Evaluator:
         add_metric_event("bbox_size_cv", size_cv)
         add_metric_event("mean_confidence", mean_conf)
 
-        metrics_events["speed_events"] =  list(zip(speed_frames, speed_values))        # por compatibilidad
+        metrics_events["speed_events"] =  list(zip(speed_frames, speed_values))        # for compatibility
         metrics_events["team_mode"] =  team_mode
 
-        # métrica speed: un evento por (frame_prev, frame_curr)
+        # speed metric: one event per (frame_prev, frame_curr)
         speed_metric_events = []
         for (frame_prev, frame_next), speed in zip(speed_frames, speed_values):
             speed_metric_events.append({
@@ -212,7 +212,7 @@ class Evaluator:
             metrics[tid] = metrics_tid
             metrics_list[tid] = metrics_list_tid
 
-        # -------- summary global --------
+        # -------- global summary --------
         covs = [m["coverage"][0]["value"] for m in metrics.values()]
         total_seen = [m["total_seen"][0]["value"] for m in metrics.values()]
         frag = [m["fragments"][0]["value"] for m in metrics.values()]

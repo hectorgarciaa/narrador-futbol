@@ -1,5 +1,5 @@
 """
-Módulo de evaluación - Métricas y visualización de resultados.
+Evaluation module - Metrics and result visualization.
 """
 
 from .evaluator import Evaluator

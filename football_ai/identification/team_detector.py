@@ -18,7 +18,7 @@ class TeamDetector:
         self.shirt_detector = ShirtDetector()
 
     def update_team_colors(self, shirt_color):
-        """Actualiza los colores de equipo confirmados basándose en muestras acumuladas."""
+        """Updates confirmed team colors based on accumulated samples."""
         if len(self.confirmed_teams) == len(self.team_colors):
             return
         
@@ -46,12 +46,12 @@ class TeamDetector:
             self.color_samples[closest_team][tuple(shirt_color)] = 1
 
     def assign_team(self, shirt_color):
-        """Asigna el equipo más cercano en distancia de color."""
+        """Assigns the closest team by color distance."""
         distances = {team: np.linalg.norm(shirt_color - color) for team, color in self.team_colors.items()}
         return min(distances, key=distances.get), distances
     
     def get_team_of_players(self, frame, shirts, bbox):
-        """Detecta el equipo de un jugador a partir de su crop de camiseta."""
+        """Detects a player's team from their shirt crop."""
         x1, y1, x2, y2 = map(int, bbox[0])
         player_pixels = frame[y1:y2, x1:x2]
         bbox_area = float((x2 - x1) * (y2 - y1))
@@ -66,7 +66,7 @@ class TeamDetector:
         return None, None, None, bbox_area
     
     def detect_teams(self, frame_detections, show_plot=False):
-        """Detecta el equipo de cada objeto detectado en el frame."""
+        """Detects the team for each detected object in the frame."""
         shirts = []
         teams_of_detected_objects = []
 

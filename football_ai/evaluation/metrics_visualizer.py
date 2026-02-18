@@ -10,16 +10,16 @@ logger = logging.getLogger(__name__)
 class MetricsVisualizer:
 
     # ============================================================
-    # SPEED EVENTS (por frame)
+    # SPEED EVENTS (per frame)
     # ============================================================
     def collect_speed_events(self, metrics):
         """
-        Devuelve lista de dicts:
+        Returns a list of dicts:
         [
             {id, frame_prev, frame_next, frame, speed},
             ...
         ]
-        Usando metrics[tid]["speed_events"]
+        Using metrics[tid]["speed_events"]
         """
         events = []
         for tid, m in metrics.items():
@@ -28,7 +28,7 @@ class MetricsVisualizer:
                     "id": int(tid),
                     "frame_prev": int(frame_prev),
                     "frame_next": int(frame_next),
-                    "frame": int(frame_next),   # usamos frame_next como referencia
+                    "frame": int(frame_next),   # we use frame_next as reference
                     "speed": float(speed)
                 })
         return events
@@ -56,14 +56,14 @@ class MetricsVisualizer:
     # ============================================================
     def collect_metric_events(self, metrics, metric_key):
         """
-        Devuelve lista:
+        Returns a list:
         [
             {"id": X, "frame": Y, "value": Z, ...},
             ...
         ]
-        metric_events[metric_key] puede ser:
-          - una lista de eventos (caso general)
-          - o un solo dict (compatibilidad)
+        metric_events[metric_key] can be:
+          - a list of events (general case)
+          - or a single dict (compatibility)
         """
         events = []
         for tid, m in metrics.items():
@@ -74,25 +74,25 @@ class MetricsVisualizer:
             if entry is None:
                 continue
 
-            # si es un solo dict
+            # if it's a single dict
             if isinstance(entry, dict):
                 if entry.get("value") is not None:
                     events.append(entry)
-            # si es lista de eventos
+            # if it's a list of events
             else:
                 try:
                     for ev in entry:
                         if ev.get("value") is not None:
                             events.append(ev)
                 except TypeError:
-                    # por si es algo raro
+                    # in case it's something unexpected
                     pass
 
         return events
 
     def plot_metric_events_scatter(self, metric_events, metric_key):
         """
-        Scatter interactivo: frame vs valor, hover => id, frame, valor (+ otros campos)
+        Interactive scatter: frame vs value, hover => id, frame, value (+ other fields)
         """
         if not metric_events:
             logger.warning(f"No metric events for '{metric_key}'.")
@@ -100,7 +100,7 @@ class MetricsVisualizer:
         
         df = pd.DataFrame(metric_events)
 
-        # queremos ver todo lo útil en el hover
+        # we want to see all useful info in hover
         hover_cols = list(df.columns)
 
         fig = px.scatter(
@@ -115,7 +115,7 @@ class MetricsVisualizer:
         fig.show()
 
     # ============================================================
-    # HISTOGRAMAS OPCIONALES
+    # OPTIONAL HISTOGRAMS
     # ============================================================
     def plot_metric_histogram(self, metric_events, metric_key, bins=40):
         if not metric_events:

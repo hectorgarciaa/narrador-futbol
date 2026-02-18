@@ -1,11 +1,11 @@
 """
-Detector de balón con reg_max reducido.
+Ball detector with reduced reg_max.
 
-DetectR8 hereda de ultralytics Detect y reduce reg_max de 16 (por defecto en YOLO)
-a 8. Esto disminuye la granularidad de la regresión de bounding boxes, lo cual
-puede ser beneficioso para objetos pequeños como el balón, ya que reduce
-la complejidad del modelo y el riesgo de sobreajuste en las predicciones
-de localización.
+DetectR8 inherits from ultralytics Detect and reduces reg_max from 16 (default in YOLO)
+to 8. This decreases the granularity of bounding box regression, which
+can be beneficial for small objects like the ball, as it reduces
+model complexity and the risk of overfitting in location
+predictions.
 """
 
 import torch.nn as nn
@@ -16,14 +16,14 @@ from ultralytics.nn.modules.block import DFL
 
 class DetectR8(Detect):
     """
-    Cabeza de detección YOLO con reg_max=8 en lugar del default 16.
+    YOLO detection head with reg_max=8 instead of the default 16.
     
-    Reduce la granularidad de DFL (Distribution Focal Loss) para regresión
-    de bounding boxes, útil para detección de objetos pequeños como el balón.
+    Reduces the granularity of DFL (Distribution Focal Loss) for bounding
+    box regression, useful for detecting small objects like the ball.
     
     Args:
-        nc: Número de clases a detectar
-        ch: Tupla con canales de entrada de cada escala del FPN
+        nc: Number of classes to detect
+        ch: Tuple with input channels from each FPN scale
     """
     def __init__(self, nc=80, ch=()):
         super().__init__(nc, ch)
@@ -35,7 +35,7 @@ class DetectR8(Detect):
         self._build_heads(old_ch)
 
     def _build_heads(self, ch):
-        """Reconstruye las cabezas de regresión con el nuevo reg_max."""
+        """Rebuild the regression heads with the new reg_max."""
         c2 = max((16, ch[0] // 4, self.reg_max * 4))
         self.cv2 = nn.ModuleList(
             nn.Sequential(

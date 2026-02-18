@@ -1,5 +1,5 @@
 """
-Módulo de detección - Detectores YOLO y variantes.
+Detection module - YOLO detectors and variants.
 """
 
 from .detector import Detector

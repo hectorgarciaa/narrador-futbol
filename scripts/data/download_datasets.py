@@ -5,25 +5,25 @@ from dotenv import load_dotenv
 
 from football_ai.core import get_config
 
-# Cargar variables de entorno desde .env
+# Load environment variables from .env
 load_dotenv()
 
-# Obtener API keys y configuración desde variables de entorno
+# Get API keys and configuration from environment variables
 API_KEY = os.getenv("ROBOFLOW_API_KEY")
 WORKSPACE = os.getenv("ROBOFLOW_WORKSPACE")
 PROJECT = os.getenv("ROBOFLOW_PROJECT")
 
-# Validar que las claves estén configuradas
+# Validate that the keys are configured
 if not API_KEY:
-    raise ValueError("ROBOFLOW_API_KEY no está configurada. Crea un archivo .env basado en .env.example")
+    raise ValueError("ROBOFLOW_API_KEY is not configured. Create a .env file based on .env.example")
 if not WORKSPACE:
-    raise ValueError("ROBOFLOW_WORKSPACE no está configurado en el archivo .env")
+    raise ValueError("ROBOFLOW_WORKSPACE is not configured in the .env file")
 if not PROJECT:
-    raise ValueError("ROBOFLOW_PROJECT no está configurado en el archivo .env")
+    raise ValueError("ROBOFLOW_PROJECT is not configured in the .env file")
 
 
 def download_dataset(output_dir):
-    """Descarga el dataset desde Roboflow y lo mueve al directorio de salida."""
+    """Downloads the dataset from Roboflow and moves it to the output directory."""
     rf = Roboflow(api_key=API_KEY)
     project = rf.workspace(WORKSPACE).project(PROJECT)
     dataset = project.version(1).download("yolov11")

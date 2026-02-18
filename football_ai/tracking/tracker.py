@@ -31,7 +31,7 @@ class Tracker:
             teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
             teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
 
-            # Guardar índice original para poder alinear tras el filtrado del tracker
+            # Save original index to align after tracker filtering
             detections_sv.data['original_idx'] = np.arange(len(detections_sv))
 
             tracks_detection = self.tracker.update_with_detections(detections_sv, teams_labels)
@@ -57,7 +57,7 @@ class Tracker:
                     "bbox_size": teams_of_detected_objects[original_idx]["bbox_size"],
                 }
 
-            # Si el tracker no activó el balón, usar detecciones crudas (sin tracking)
+            # If the tracker did not activate the ball, use raw detections (without tracking)
             if not has_tracked_ball and detections.boxes is not None and len(detections.boxes) > 0:
                 boxes = detections.boxes
                 xyxy = boxes.xyxy.cpu().numpy()

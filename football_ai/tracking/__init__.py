@@ -1,5 +1,5 @@
 """
-Módulo de tracking - ByteTrack y orquestador de tracking.
+Tracking module - ByteTrack and tracking orchestrator.
 """
 
 from .byte_tracker import ByteTrack

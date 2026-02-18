@@ -1,12 +1,12 @@
 """
-Utilidad de serialización para convertir objetos numpy a tipos nativos de Python.
+Serialization utility to convert numpy objects to native Python types.
 """
 
 import numpy as np
 
 
 def convert_to_serializable(obj):
-    """Convierte objetos numpy a tipos serializables en JSON."""
+    """Converts numpy objects to JSON-serializable types."""
     if isinstance(obj, dict):
         return {convert_to_serializable(k): convert_to_serializable(v) for k, v in obj.items()}
     elif isinstance(obj, list):
