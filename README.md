@@ -103,43 +103,98 @@ narrador-futbol/
 ## 📦 Instalación
 
 ### Requisitos previos
-- Python 3.10+
-- CUDA (opcional, para aceleración GPU)
+- **Python 3.10+** (compatible con 3.8, se recomienda 3.10.x)
+- **~10 GB de espacio libre** (modelos + datasets)
+- **CUDA 12.4 + GPU NVIDIA** (opcional, para aceleración — CPU funciona pero es lento)
 
-### 1. Clonar el repositorio
+### Paso 1: Clonar el repositorio
 ```bash
 git clone <repository-url>
 cd narrador-futbol
 ```
 
-### 2. Crear entorno virtual e instalar dependencias
+### Paso 2: Crear entorno virtual limpio
 ```bash
-python -m venv venv
-
 # Windows
-venv\Scripts\activate
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 
 # Linux/Mac
-source venv/bin/activate
-
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
 ```
 
-### 3. Configurar variables de entorno
-Crea un archivo `.env` en la raíz basándote en `.env.example`:
-```env
-ROBOFLOW_API_KEY=tu_clave_aqui
-ROBOFLOW_PUBLISHABLE_KEY=tu_clave_publicable_aqui
-```
-
-### 4. Descargar modelos y datos
+### Paso 3: Actualizar pip e instalar PyTorch con CUDA support
 ```bash
-# Modelos YOLO base desde Ultralytics
+# Actualizar pip
+python -m pip install --upgrade pip
+
+# Instalar PyTorch 2.6.0 con soporte CUDA 12.4 (funciona en CPU también)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# Si prefieres solo CPU (sin preparación para GPU futura):
+# pip install torch torchvision
+```
+
+### Paso 4: Instalar dependencias del proyecto
+```bash
+# Instalar todos los paquetes del requirements.txt
+pip install -r requirements.txt
+
+# Instalar el paquete 'football_ai' en modo editable (importante!)
+pip install -e .
+```
+
+### Paso 5: Configurar variables de entorno
+```bash
+# Copia .env.example a .env
+cp .env.example .env
+
+# Edita .env con tu API key de Roboflow
+# ROBOFLOW_API_KEY=<tu_clave_aqui>
+```
+
+### Paso 6: Verificar la instalación
+```bash
+# Ejecuta el script de verificación
+python verify_setup.py
+
+# Debería mostrar 8/9 o 9/9 chequeos pasados (el .env needs API key es warning, no error)
+```
+
+### Paso 7: Descargar modelos y datos (opcional pero recomendado)
+```bash
+# Descargar modelos YOLO base desde Ultralytics
 python scripts/data/download_models.py
 
-# Dataset de detección desde Roboflow (requiere .env)
+# Descargar dataset de detección desde Roboflow (requiere ROBOFLOW_API_KEY válida)
 python scripts/data/download_datasets.py
 ```
+
+### Seleccionar intérprete en VS Code
+1. **Ctrl+Shift+P** → **Python: Select Interpreter**
+2. Si no aparece `.venv`, selecciona **"Enter interpreter path..."**
+3. Escribe: `C:\Users\hecto\UNI\4\TFG\narrador-futbol\.venv\Scripts\python.exe`
+4. Presiona Enter
+
+---
+
+## 🔍 Verificación de instalación
+
+Siempre que hagas cambios en dependencias o uses el proyecto en una nueva terminal:
+
+```bash
+python verify_setup.py
+```
+
+Este script verifica:
+- ✓ Python version >= 3.8
+- ✓ Venv activo
+- ✓ Archivos de configuración (config.yaml, .env)
+- ✓ Dependencias instaladas
+- ✓ Módulos de football_ai importables
+- ✓ PyTorch y estado de CUDA
+- ✓ Variables de entorno configuradas
 
 ---
 
@@ -251,6 +306,117 @@ python clean_project.py --models    # Solo modelos base (regenerables)
 **`CUDA out of memory`** — Reduce el batch en `config.yaml → finetuning.batch` o añade `device='cpu'` al script.
 
 **Imports fallando** — Asegúrate de que el entorno virtual está activado y `pip install -r requirements.txt` se ejecutó correctamente.
+
+---
+
+## ❓ Preguntas Frecuentes
+
+### ¿Qué es `football_ai.egg-info/` y por qué aparece?
+
+`football_ai.egg-info/` es una **carpeta de metadatos** generada automáticamente por `pip install -e .` (instalación en modo editable). Contiene:
+- `METADATA`: Información del paquete (versión, dependencias, autor)
+- `WHEEL`: Información de la distribución
+- `RECORD`: Lista de archivos instalados
+- `entry_points.txt`: Scripts ejecutables del paquete
+
+**¿Necesito regenerarla?** No. Se regenera automáticamente cuando:
+- Cambias `pyproject.toml` o `setup.py`
+- Ejecutas `pip install -e .` de nuevo
+- Cambias dependencias en `setup.py`
+
+**Para cambios normales en código Python**, no necesitas hacer nada. El modo editable permite cambios sin reinstalar.
+
+**Si quieres hacer una limpieza completa:**
+```bash
+rm -r football_ai.egg-info/      # Linux/Mac
+rmdir /s football_ai.egg-info/   # Windows
+pip install -e .                  # Regenera
+```
+
+---
+
+### ¿Puedo instalar NVIDIA CUDA Toolkit 12.4 ahora?
+
+**Sí, es recomendable.** PyTorch ya está preparado con soporte CUDA 12.4 (`torch 2.6.0+cu124`).
+
+#### Pasos para instalar CUDA 12.4:
+
+1. **Verifica tu GPU NVIDIA:**
+   ```bash
+   nvidia-smi        # Si funciona, tienes NVIDIA instalado
+   ```
+
+2. **Descarga CUDA Toolkit 12.4:**
+   - Ir a: https://developer.nvidia.com/cuda-12-4-0-download-archive
+   - Seleccionar OS (Windows/Linux) y arquitectura
+   - Descargar e instalar
+
+3. **Descarga cuDNN (acelerador para redes neuronales):**
+   - Ir a: https://developer.nvidia.com/cudnn
+   - Descargar cuDNN para CUDA 12.4
+   - Seguir instrucciones de instalación del archivo README
+
+4. **Verifica que PyTorch detecta CUDA:**
+   ```bash
+   python -c "import torch; print(f'CUDA disponible: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda}')"
+   ```
+   Debería mostrar: `CUDA disponible: True` y `CUDA version: 12.4`
+
+5. **Benchmark (opcional):**
+   ```bash
+   python -c "import torch; t = torch.randn(10000, 10000, device='cuda'); print((t @ t).sum())"
+   ```
+   Debería ejecutarse rápidamente (GPU) en lugar de lentamente (CPU).
+
+**Beneficio:** Los fine-tunings y detecciones serán **10-100x más rápidos**.
+
+---
+
+### ¿El venv se va a romper con actualizaciones?
+
+No. El venv es **completamente independiente** del Python global:
+- Actualizaciones de Windows o sistema no afectan
+- Otros proyectos pueden usar otros venvs sin conflictos
+- Si algo falla, simplemente `rm -r .venv` y crea uno nuevo
+
+---
+
+### ¿Cómo actualizar dependencias sin romper nada?
+
+```bash
+# Ver qué versiones hay disponibles
+pip index versions ultralytics
+
+# Actualizar una dependencia específica
+pip install --upgrade ultralytics
+
+# Actualizar todas las dependencias
+pip install --upgrade -r requirements.txt
+
+# Después, regenera el lock (recomendado):
+pip freeze > requirements-lock.txt
+```
+
+---
+
+## 📋 Mantenimiento del entorno
+
+### Limpiar caché y archivos temporales
+```bash
+python clean_project.py --cache
+```
+
+### Verificar integridad periódicamente
+```bash
+python verify_setup.py
+```
+
+### Actualizar football_ai si editaste código
+```bash
+# No es necesario. El modo editable permite cambios inmediatos.
+# Solo si cambiaste setup.py o pyproject.toml:
+pip install -e .
+```
 
 ---
 

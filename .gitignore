@@ -28,7 +28,7 @@ ENV/
 *~
 
 # Dataset files
-data/detection
+data/detection/
 football-ai-2
 FootBall-Detection-2
 
@@ -49,7 +49,3 @@ pruebaTracker
 # OS
 .DS_Store
 Thumbs.db
-
-# Old source directory (migrated to football_ai/)
-src/
-
