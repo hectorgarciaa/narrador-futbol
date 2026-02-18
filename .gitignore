@@ -1,8 +1,55 @@
+# Python
 __pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environment variables
+.env
+.venv
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Dataset files
+data/detection
+football-ai-2
+FootBall-Detection-2
+
+# Model files (large binary files, exclude all)
+models/
 yolov8x.pt
 yolov11x.pt
+
+# Output files
+output/
 *.avi
+*.mp4
 pruebaTracker
 
-# Exclude models directory (large files)
-models/
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old source directory (migrated to football_ai/)
+src/
+
