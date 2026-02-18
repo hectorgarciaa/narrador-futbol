@@ -124,7 +124,7 @@ def clean_datasets(project_root):
                 print(f"  ✓ Eliminado dataset: {item.name}")
         
         print(f"✅ Liberados ~{size_before:.1f} MB de datasets")
-        print("  ℹ️  Para regenerar: python src/detection/descargarDataSetDeteccion.py")
+        print("  ℹ️  Para regenerar: python scripts/data/download_datasets.py")
         
         # Crear .gitkeep
         (detection_dir / ".gitkeep").touch()
@@ -150,10 +150,31 @@ def clean_yolo_models(project_root):
             print(f"  ✓ Eliminado: {item.relative_to(project_root)}")
         
         print(f"✅ Liberados ~{size_before:.1f} MB de modelos YOLO")
-        print("  ℹ️  Para regenerar: python src/detection/descargarModelosYolo.py")
+        print("  ℹ️  Para regenerar: python scripts/data/download_models.py")
         
     except Exception as e:
         print(f"  ✗ Error limpiando modelos YOLO: {e}")
+
+
+def clean_egg_info(project_root):
+    """Elimina archivos egg-info generados por pip install -e ."""
+    print("\n🧹 Limpiando egg-info...")
+    
+    egg_info_dirs = list(project_root.glob('*.egg-info'))
+    
+    count = 0
+    for egg_dir in egg_info_dirs:
+        try:
+            shutil.rmtree(egg_dir)
+            count += 1
+            print(f"  ✓ Eliminado: {egg_dir.name}")
+        except Exception as e:
+            print(f"  ✗ Error eliminando {egg_dir}: {e}")
+    
+    if count > 0:
+        print(f"✅ Eliminados {count} directorios egg-info")
+    else:
+        print("  ℹ️  No hay directorios egg-info para eliminar")
 
 
 def clean_logs(project_root):
@@ -196,11 +217,13 @@ def main():
                        help='Limpia modelos YOLO base')
     parser.add_argument('--logs', action='store_true',
                        help='Limpia archivos de log')
+    parser.add_argument('--egg-info', action='store_true',
+                       help='Limpia directorios egg-info generados por pip')
     
     args = parser.parse_args()
     
     # Si no se especifica nada, mostrar ayuda
-    if not any([args.all, args.cache, args.output, args.datasets, args.models, args.logs]):
+    if not any([args.all, args.cache, args.output, args.datasets, args.models, args.logs, getattr(args, 'egg_info', False)]):
         parser.print_help()
         return
     
@@ -210,6 +233,7 @@ def main():
     
     if args.all:
         args.cache = args.output = args.datasets = args.models = args.logs = True
+        args.egg_info = True
     
     if args.cache:
         clean_cache(project_root)
@@ -225,6 +249,9 @@ def main():
     
     if args.logs:
         clean_logs(project_root)
+    
+    if getattr(args, 'egg_info', False):
+        clean_egg_info(project_root)
     
     print("\n" + "="*60)
     print("✨ Limpieza completada")
