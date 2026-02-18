@@ -18,7 +18,7 @@ modelos = {
     }
 }
 
-def downlaodYoloModels(carpeta_modelos, modelos):
+def downloadYoloModels(carpeta_modelos, modelos):
     # Descargar y guardar cada modelo
     for version, models in modelos.items():
         for nombre, archivo in models.items():
@@ -28,4 +28,4 @@ def downlaodYoloModels(carpeta_modelos, modelos):
             print(f"{nombre} guardado en {ruta_guardado}")
 
 if __name__ == "__main__":
-    downlaodYoloModels(carpeta_modelos, modelos)
+    downloadYoloModels(carpeta_modelos, modelos)

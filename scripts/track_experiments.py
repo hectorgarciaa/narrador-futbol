@@ -43,7 +43,7 @@ if __name__ == "__main__":
                     drawer = Drawer(colors = { "player": (0, 255, 0), "goalkeeper": (0, 255, 255), "referee": (255, 0, 0), "ball": (0, 0, 255) })
                     drawer.draw_tracks(tracks, VIDEO, output)
                     
-                    if prueba_id == 0:
+                    if prueba_id == 1:  # Guardar tracks del primer experimento como referencia
                         with open("./tracks_prueba.json", "w", encoding="utf-8") as f:
                             json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
                     fin = time.time()

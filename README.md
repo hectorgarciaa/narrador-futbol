@@ -1,108 +1,118 @@
 # 🎙️ AI Football Commentator
 
-Sistema de inteligencia artificial capaz de narrar partidos de fútbol de manera automática, combinando detección de jugadores, tracking, reconocimiento de acciones, generación de comentarios con LLM y síntesis de voz.
+Sistema de inteligencia artificial para narración automática de partidos de fútbol, combinando detección de objetos, tracking multi-objeto, identificación de equipos, reconocimiento de acciones, generación de comentarios con LLM y síntesis de voz.
+
+> **Estado actual:** Fase 1 completada (detección, tracking e identificación de equipos). Fases 2-5 pendientes.
 
 ---
 
 ## 📖 Descripción del Proyecto
 
-El objetivo de este proyecto es crear un **pipeline completo de narración de partidos de fútbol** usando IA. El sistema es capaz de:
+El objetivo es construir un **pipeline completo de narración automática de fútbol** capaz de:
 
-1. Detectar jugadores, árbitros y balón.
-2. Identificar a cada jugador con su nombre y dorsal.
-3. Reconocer las acciones del partido (pases, tiros, goles, faltas, tarjetas, penales…).
-4. Generar comentarios expresivos y contextualizados usando un LLM.
-5. Convertir los comentarios en audio para narración en tiempo real.
+1. Detectar jugadores, árbitros y balón en cada frame del vídeo.
+2. Hacer tracking multi-objeto para mantener IDs persistentes entre frames.
+3. Identificar a qué equipo pertenece cada jugador por el color de camiseta.
+4. Reconocer acciones del partido (pases, tiros, goles, faltas…).
+5. Generar comentarios expresivos y contextualizados con un LLM.
+6. Convertir los comentarios en audio para narración en tiempo real.
 
 ---
 
 ## 🏟️ Fases del Proyecto
 
-### **Fase 1: Detección de jugadores y objetos**
-- Entrada: Video del partido y un documento con información de los jugadores (nombre, dorsal, posición, color de piel, altura, peso, posición en el campo).  
-- Tareas:
-  - Detectar los 22 jugadores, árbitros y balón.
-  - Fine-tuning de un modelo YOLO para clases específicas de fútbol: jugador, portero, árbitro, pelota.
-  - Tracking de jugadores para asignar un ID único y mantener seguimiento durante el partido.
-  - Identificación de jugadores y equipos mediante técnicas clásicas de visión por computador (análisis de pixels del bounding box, clustering de colores de camiseta con KMeans, etc.).
+### ✅ Fase 1: Detección, tracking e identificación de equipos
+- Fine-tuning de YOLOv11 para las clases `player`, `goalkeeper`, `referee`, `ball`.
+- Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo.
+- Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
+- Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
 
-### **Fase 2: Detección de acciones**
-- Objetivo: Detectar acciones como pase, pase largo, tiro, gol, falta, tarjeta, penal, etc.  
-- Enfoque:
-  - Seleccionar una red preentrenada para detección de acciones humanas.
-  - Reentrenarla para acciones de fútbol mediante fine-tuning.
+### 🚧 Fase 2: Detección de acciones
+- Seleccionar y adaptar una red preentrenada para detectar acciones de fútbol (pase, tiro, gol, falta, tarjeta, penal…).
 
-### **Fase 3: Generación de comentarios con LLM**
-- Integrar la información de detección de jugadores y acciones.
-- Enviar los datos al LLM para generar comentarios expresivos y coherentes con el contexto del partido.
+### 📅 Fase 3: Generación de comentarios con LLM
+- Integrar información de tracking y acciones y enviarla a un LLM para generar comentarios expresivos y contextualizados.
 
-### **Fase 4: Conversión de texto a audio**
-- Transformar los comentarios generados en audio para crear una experiencia de narración completa.
+### 📅 Fase 4: Conversión de texto a audio
+- Transformar los comentarios a audio con una solución de TTS.
 
-### **Fase 5: Optimización para transmisión en tiempo real**
-- Integrar todas las fases en un pipeline eficiente capaz de hacer inferencia en directo como si fuese una retransmisión en vivo.
-
----
-
-## 🛠️ Tecnologías y Herramientas
-
-- **Detección de Objetos:** YOLOv8 / YOLOv11, fine-tuning para clases de fútbol.  
-- **Tracking de Jugadores:** Asignación de IDs, seguimiento y mapeo a nombre/dorsal.  
-- **Reconocimiento de Equipos y Jugadores:** Análisis de pixels, clustering de colores (KMeans) y ML clásico.  
-- **Detección de Acciones:** Redes preentrenadas para acción humana, adaptadas a fútbol.  
-- **Generación de Comentarios:** LLM contextual y expresivo.  
-- **Síntesis de Voz:** Conversión de texto a audio.  
-- **Optimización:** Pipeline para transmisión en tiempo real.
+### 📅 Fase 5: Pipeline en tiempo real
+- Integrar todas las fases en un pipeline eficiente para retransmisión en vivo.
 
 ---
 
 ## 🗂️ Estructura del Proyecto
 
-data/
-├─ detection/FootBall-Detection-2/
-│ ├─ train/ # Imágenes y labels para entrenamiento
-│ ├─ valid/ # Imágenes y labels para validación
-│ ├─ test/ # Imágenes y labels para pruebas
-│ └─ data.yaml # Configuración de dataset
-├─ partidoPrueba/
-│ └─ 08fd33_4.mp4 # Video de prueba
+```
+narrador-futbol/
+├── config.yaml             # Configuración central (rutas, hiperparámetros, equipos)
+├── pyproject.toml          # Metadatos del paquete Python
+├── requirements.txt        # Dependencias
+├── clean_project.py        # Script de limpieza de archivos generados
+│
+├── football_ai/            # Paquete principal (toda la lógica de negocio)
+│   ├── core/               # Configuración, logging, serialización
+│   ├── detection/          # Wrapper YOLO + cabeza DetectR8 para balón
+│   ├── tracking/           # Tracker (orquestador) + ByteTrack extendido
+│   ├── identification/     # ShirtDetector (KMeans LAB) + TeamDetector
+│   ├── evaluation/         # Métricas por track y comparador de experimentos
+│   └── visualization/      # Drawer: genera vídeo anotado
+│
+├── scripts/                # Scripts ejecutables de línea de comandos
+│   ├── detect.py           # Detección base con YOLO sin fine-tuning
+│   ├── detect_finetuned.py # Detección con modelo fine-tuned de jugadores
+│   ├── detect_ball.py      # Detección de balón con DetectR8
+│   ├── track.py            # Pipeline completo: tracking + evaluación + vídeo
+│   ├── track_experiments.py# Grid search de hiperparámetros del tracker
+│   ├── data/
+│   │   ├── download_models.py    # Descarga modelos YOLO base
+│   │   └── download_datasets.py  # Descarga datasets desde Roboflow
+│   └── train/
+│       └── finetune_player.py    # Fine-tuning de YOLO para fútbol
+│
+├── data/                   # Datos de entrada (no versionados, ver data/README.md)
+│   ├── detection/          # Datasets de detección (formato YOLOv11)
+│   └── partidoPrueba/      # Vídeos de partido para desarrollo
+│
+├── models/                 # Pesos de modelos (no versionados, ver models/README.md)
+│   ├── yolo/               # Modelos base YOLOv8 y YOLOv11
+│   ├── finetuning/         # Modelo fine-tuned de jugadores
+│   └── finetuning-balon/   # Modelo fine-tuned de balón
+│
+└── experiments/            # Notebooks de análisis y visualización
+    ├── detection/
+    ├── tracking/
+    └── visualization/
+```
 
-models/
-├─ finetuning/v11/yolov11m/weights/best.pt
-├─ yolo/v8/yolov8m.pt
-├─ yolo/v8/yolov8x.pt
-├─ yolo/v11/yolov11m.pt
-└─ yolo/v11/yolov11x.pt
+---
 
-output/
-├─ pruebaDeteccionYolo/08fd33_4.avi
-└─ pruebaDeteccionFinetuning/08fd33_4.avi
+## 🛠️ Tecnologías
 
-src/
-├─ detection/
-│ ├─ detection/ # Scripts YOLO
-│ ├─ tracking/ # Scripts de seguimiento de jugadores
-│ └─ identificacion/ # Scripts de identificación de jugadores (nombre, dorsal, equipo)
-├─ deteccionAcciones/ # Scripts para la segunda fase (detección de acciones)
-├─ llm/ # Scripts para generar comentarios
-└─ audio/ # Scripts para conversión de texto a voz
+| Área | Tecnología |
+|---|---|
+| Detección | YOLOv8 / YOLOv11 (Ultralytics), fine-tuning con dataset Roboflow |
+| Tracking | ByteTrack (supervision), extendido con restricción de equipo |
+| Identificación de equipo | KMeans (scikit-learn), espacio de color LAB (OpenCV) |
+| Evaluación | NumPy, pandas, Plotly, seaborn, matplotlib |
+| Configuración | YAML (`config.yaml` centralizado) |
+| Datasets | Roboflow (descarga automatizada) |
 
 ---
 
 ## 📦 Instalación
 
-### **Requisitos Previos**
-- Python 3.8 o superior
+### Requisitos previos
+- Python 3.10+
 - CUDA (opcional, para aceleración GPU)
-- Git
 
-### **1. Clonar el repositorio**
+### 1. Clonar el repositorio
 ```bash
 git clone <repository-url>
 cd narrador-futbol
 ```
 
-### **2. Crear entorno virtual**
+### 2. Crear entorno virtual e instalar dependencias
 ```bash
 python -m venv venv
 
@@ -111,171 +121,88 @@ venv\Scripts\activate
 
 # Linux/Mac
 source venv/bin/activate
-```
 
-### **3. Instalar dependencias**
-```bash
 pip install -r requirements.txt
 ```
 
-### **4. Configurar variables de entorno**
-Crea un archivo `.env` en la raíz del proyecto basándote en `.env.example`:
-
-```bash
-# Windows
-copy .env.example .env
-
-# Linux/Mac
-cp .env.example .env
-```
-
-Edita el archivo `.env` y añade tus credenciales de Roboflow:
+### 3. Configurar variables de entorno
+Crea un archivo `.env` en la raíz basándote en `.env.example`:
 ```env
 ROBOFLOW_API_KEY=tu_clave_aqui
 ROBOFLOW_PUBLISHABLE_KEY=tu_clave_publicable_aqui
 ```
 
-### **5. Descargar modelos YOLO (opcional)**
-Si necesitas descargar los modelos base de YOLO:
+### 4. Descargar modelos y datos
 ```bash
-python src/detection/descargarModelosYolo.py
-```
+# Modelos YOLO base desde Ultralytics
+python scripts/data/download_models.py
 
-### **6. Verificar instalación**
-```bash
-python -c "from src.utils import get_config; config = get_config(); print('✓ Configuración cargada correctamente')"
+# Dataset de detección desde Roboflow (requiere .env)
+python scripts/data/download_datasets.py
 ```
 
 ---
 
 ## 🚀 Uso
 
-### **Tracking de Jugadores**
-Para ejecutar el sistema completo de detección y tracking:
+Todos los scripts se ejecutan desde la **raíz del proyecto**. La configuración se lee automáticamente de `config.yaml`.
 
+### Pipeline completo de tracking
 ```bash
-cd src/tracking
-python main.py
+python scripts/track.py
 ```
+Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 
-El script:
-1. Carga el modelo fine-tuned de YOLO
-2. Procesa el video especificado en `config.yaml`
-3. Detecta y rastrea jugadores, porteros, árbitros y balón
-4. Identifica equipos mediante clustering de colores
-5. Genera un video con las anotaciones
-6. Muestra métricas de evaluación
-
-### **Detección con YOLO Base**
-Para probar detección con modelos YOLO preentrenados:
-
+### Detección básica (sin fine-tuning)
 ```bash
-cd src/detection
-python pruebaDeteccionYolo.py
+python scripts/detect.py
 ```
 
-### **Fine-tuning de YOLO**
-Para entrenar un modelo en tu propio dataset:
-
+### Detección con modelo fine-tuned de jugadores
 ```bash
-cd src/detection
-python finetuning.py
+python scripts/detect_finetuned.py
 ```
 
-Configura los parámetros en `config.yaml`:
-```yaml
-finetuning:
-  epochs: 50
-  batch: 16
-  imgsz: 640
-```
-
-### **Detección de Balón**
-Para detección especializada del balón con arquitectura DetectR8:
-
+### Detección de balón (con DetectR8)
 ```bash
-cd src/detection
-python detectionBall.py
+python scripts/detect_ball.py
 ```
 
----
-
-## 🧹 Limpieza del Proyecto
-
-El proyecto incluye un script de limpieza para eliminar archivos generados y liberar espacio (~5 GB):
-
-### **Limpieza completa**
+### Fine-tuning del modelo
 ```bash
-python clean_project.py --all
+python scripts/train/finetune_player.py
 ```
 
-### **Limpieza selectiva**
+### Grid search de hiperparámetros del tracker
 ```bash
-# Solo caché de Python
-python clean_project.py --cache
-
-# Solo archivos de output (videos procesados, JSONs)
-python clean_project.py --output
-
-# Solo datasets (pueden descargarse de nuevo)
-python clean_project.py --datasets
-
-# Solo modelos YOLO base (pueden descargarse de nuevo)
-python clean_project.py --models
-
-# Combinaciones
-python clean_project.py --cache --output --logs
+python scripts/track_experiments.py
 ```
-
-### **¿Qué se elimina?**
-
-| Categoría | Tamaño | Regenerable | Comando |
-|-----------|--------|-------------|---------|
-| Caché Python (`__pycache__`, `*.pyc`) | < 1 MB | Automático | `--cache` |
-| Output (videos, JSONs) | ~1.3 GB | Reejecutando scripts | `--output` |
-| Datasets | ~3.3 GB | `descargarDataSetDeteccion.py` | `--datasets` |
-| Modelos YOLO base | ~500 MB | `descargarModelosYolo.py` | `--models` |
-| Logs | < 1 MB | Automático | `--logs` |
-
-**⚠️ Nota:** Los modelos fine-tuned **NO se eliminan** (requieren horas de entrenamiento).
-
-### **Regenerar archivos eliminados**
-
-Después de la limpieza, puedes regenerar lo necesario:
-
-```bash
-# Descargar datasets
-python src/detection/descargarDataSetDeteccion.py
-
-# Descargar modelos YOLO base
-python src/detection/descargarModelosYolo.py
-
-# Generar output (ejecutar tracking)
-cd src/tracking
-python main.py
-```
+Genera `scripts/tracks.json` con todos los experimentos para analizar con `experiments/visualization/experiments_comparator.ipynb`.
 
 ---
 
 ## ⚙️ Configuración
 
-Toda la configuración del sistema se gestiona desde `config.yaml` en la raíz del proyecto:
+Toda la configuración está centralizada en `config.yaml`. Los valores más relevantes a ajustar:
 
 ```yaml
-# Rutas de modelos y datos
 paths:
   models:
     finetuned_player: "models/finetuning/v11/yolov11m/weights/best.pt"
   data:
     video_prueba: "data/partidoPrueba/partido.mp4"
 
-# Parámetros de tracking
+detection:
+  conf_threshold: 0.01
+  ball_min_conf: 0.01
+
 tracking:
-  track_thresh: 0.5
-  match_thresh: 0.945
+  track_thresh: 0.5           # Confianza mínima para activar un track
+  track_buffer: 90            # Frames que sobrevive un track sin ser visto
+  match_thresh: 0.945         # IoU mínimo para asociar detección a track
+  frame_rate: 25
   minimum_consecutive_frames: 5
 
-# Colores de equipos (RGB)
 teams:
   Real Madrid:
     color_rgb: [255, 127, 127]
@@ -283,80 +210,64 @@ teams:
     color_rgb: [224, 77, 196]
 ```
 
-Modifica estos valores según tus necesidades.
+---
+
+## 📊 Métricas de evaluación
+
+El módulo `football_ai/evaluation/` calcula automáticamente estas métricas por track:
+
+| Métrica | Descripción |
+|---|---|
+| `coverage` | % de frames del vídeo en que el track fue visible |
+| `fragments` | Número de interrupciones en el track |
+| `mean_speed` | Velocidad media de movimiento (px/frame) |
+| `team_flip_rate` | Tasa de cambios incorrectos de equipo asignado |
+| `entropy` | Entropía de la distribución de equipos del track |
+| `color_var` | Varianza del color de camiseta detectado a lo largo del tiempo |
+| `bbox_size_cv` | Coeficiente de variación del tamaño del bounding box |
 
 ---
 
-## 📊 Métricas de Evaluación
+## 🧹 Limpieza del proyecto
 
-El sistema incluye evaluación automática de tracking con métricas:
-
-- **Coverage**: Porcentaje de frames donde aparece cada track
-- **Fragments**: Número de gaps en cada track
-- **Mean Speed**: Velocidad promedio de movimiento
-- **Team Flip Rate**: Tasa de cambios incorrectos de equipo
-- **Color Consistency**: Coherencia en el color de camiseta detectado
-
----
-
-## 🐛 Solución de Problemas
-
-### Error: "Archivo de configuración no encontrado"
-Asegúrate de que `config.yaml` existe en la raíz del proyecto.
-
-### Error: "Could not open video"
-Verifica que la ruta del video en `config.yaml` es correcta y el archivo existe.
-
-### Error: "CUDA out of memory"
-Reduce el tamaño del batch en `config.yaml` o usa CPU:
-```python
-device = 'cpu'  # en lugar de 'cuda'
-```
-
-### Imports fallando
-Asegúrate de ejecutar los scripts desde sus directorios correspondientes:
 ```bash
-cd src/tracking  # antes de ejecutar main.py
-cd src/detection # antes de ejecutar finetuning.py
+python clean_project.py --all       # Limpieza completa
+python clean_project.py --cache     # Solo caché de Python
+python clean_project.py --output    # Solo vídeos y JSONs generados
+python clean_project.py --datasets  # Solo datasets (regenerables)
+python clean_project.py --models    # Solo modelos base (regenerables)
 ```
 
----
-
-## 📝 Estado del Proyecto
-
-✅ **Completado (Fase 1)**
-- Detección de objetos con YOLO
-- Fine-tuning para clases de fútbol
-- Tracking multi-objeto con ByteTrack
-- Identificación de equipos
-- Sistema de evaluación
-
-🚧 **En desarrollo**
-- Mejoras en identificación de jugadores individuales
-- Optimización de rendimiento
-
-📅 **Pendiente (Fases 2-5)**
-- Detección de acciones
-- Generación de comentarios con LLM
-- Síntesis de voz
-- Pipeline en tiempo real
+> ⚠️ Los modelos **fine-tuned** no se eliminan en ningún caso (requieren horas de entrenamiento).
 
 ---
 
-## 🤝 Contribuciones
+## 🐛 Solución de problemas
 
-Este es un proyecto de TFG. Para reportar bugs o sugerencias, por favor contacta al autor.
+**`FileNotFoundError: config.yaml`** — Ejecuta los scripts desde la raíz del proyecto, no desde el directorio del script.
+
+**`Could not open video`** — Verifica que la ruta en `config.yaml → paths.data` es correcta y el archivo existe.
+
+**`CUDA out of memory`** — Reduce el batch en `config.yaml → finetuning.batch` o añade `device='cpu'` al script.
+
+**Imports fallando** — Asegúrate de que el entorno virtual está activado y `pip install -r requirements.txt` se ejecutó correctamente.
 
 ---
 
-## 📄 Licencia
+## 📝 Estado del proyecto
 
-[Especificar licencia]
+| Fase | Estado |
+|---|---|
+| Fase 1: Detección, tracking e identificación | ✅ Completada |
+| Fase 2: Detección de acciones | 📅 Pendiente |
+| Fase 3: Generación de comentarios (LLM) | 📅 Pendiente |
+| Fase 4: Síntesis de voz | 📅 Pendiente |
+| Fase 5: Pipeline en tiempo real | 📅 Pendiente |
 
 ---
 
 ## 👤 Autor
 
-Héctor García  y Carlos Mantilla 
-Universidad Complutense de Madrid 
-Trabajo de Fin de Grado 2026
+Héctor García y Carlos Mantilla  
+Universidad Complutense de Madrid  
+Trabajo de Fin de Grado — 2026
