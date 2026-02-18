@@ -7,9 +7,9 @@ from football_ai.evaluation.evaluator import Evaluator
 class ExperimentVisualizer:
     def __init__(self, experimentos_tracks, classes):
         self.evaluator = Evaluator()
-        self.exps = self.createExpsRows(experimentos_tracks, classes)
+        self.exps = self.create_exps_rows(experimentos_tracks, classes)
     
-    def createExpsRows(self, experimentos_tracks, classes):
+    def create_exps_rows(self, experimentos_tracks, classes):
         rows = {class_name: [] for class_name in classes}
         for i, exp in enumerate(experimentos_tracks):
             evaluation = self.evaluator.evaluate(classes, exp["track"])
@@ -22,7 +22,7 @@ class ExperimentVisualizer:
                 rows[class_name].append(row)
         return rows
     
-    def createDFSummary(self, class_name):
+    def create_df_summary(self, class_name):
         return pd.DataFrame([
             {
                 **{k: v for k, v in exp.items() if k not in ['metrics', 'summary', 'track']},
@@ -31,7 +31,7 @@ class ExperimentVisualizer:
             for exp in self.exps[class_name]
         ])
     
-    def createDfsMetrics(self, class_name):
+    def create_dfs_metrics(self, class_name):
         rows_detailed = []
         for exp in self.exps[class_name]:
             exp_info = {k: v for k, v in exp.items() if k not in ['metrics', 'summary', 'track']}
@@ -53,11 +53,11 @@ class ExperimentVisualizer:
 
         return pd.DataFrame(rows_detailed)
     
-    def shorBarsOfExperiments(self, class_name, df_filter=None):
+    def show_bars_of_experiments(self, class_name, df_filter=None):
         if df_filter is not None:
             df = df_filter
         else:
-            df = self.createDFSummary(class_name)
+            df = self.create_df_summary(class_name)
         
         nRows = len(df.columns[5:])
         fig, axes = plt.subplots(nRows, 1, figsize=(25,2*nRows), sharex=True)
@@ -69,11 +69,11 @@ class ExperimentVisualizer:
         plt.tight_layout()
         plt.show()
 
-    def showBoxplotOfExperiments(self, class_name, y, df_filter=None):
+    def show_boxplot_of_experiments(self, class_name, y, df_filter=None):
         if df_filter is not None:
             df = df_filter
         else:
-            df = self.createDfsMetrics(class_name)
+            df = self.create_dfs_metrics(class_name)
         # Distribución de cobertura por track
         plt.figure(figsize=(25, 5))
         sns.boxplot(data=df, x="experiment_id", y=y)
@@ -82,11 +82,11 @@ class ExperimentVisualizer:
         plt.ylabel("Cobertura")
         plt.show()
 
-    def showParamsComparation(self, class_name, df_filter=None):
+    def show_params_comparison(self, class_name, df_filter=None):
         if df_filter is not None:
             df = df_filter
         else:
-            df = self.createDFSummary(class_name)
+            df = self.create_df_summary(class_name)
         sns.set(style="whitegrid", palette="muted", font_scale=1.1)
 
         params = ['conf', 'mcf', 'mt', 'tt']
@@ -103,5 +103,5 @@ class ExperimentVisualizer:
         sns.despine()
         plt.show()
 
-    def getBestsExps(self, class_name, sortBy, ascending):
-        return self.createDFSummary(class_name).sort_values(by=sortBy, ascending=ascending)
+    def get_best_exps(self, class_name, sortBy, ascending):
+        return self.create_df_summary(class_name).sort_values(by=sortBy, ascending=ascending)

@@ -3,11 +3,12 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 class ShirtDetector:
-    def __init__(self,  n_clusters=2, init='k-means++', n_init=10, random_state=0,):
+    def __init__(self, n_clusters=2, init='k-means++', n_init=10, random_state=0):
         self.km = KMeans(n_clusters=n_clusters, init=init, n_init=n_init,
                          random_state=random_state)
 
-    def getColorKMeans(self, image):
+    def get_color_kmeans(self, image):
+        """Obtiene el color dominante de la camiseta mediante KMeans en espacio LAB."""
         lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
         pixels = lab.reshape(-1, 3)
         if len(pixels) < 2:
@@ -17,7 +18,10 @@ class ShirtDetector:
         centers = self.km.cluster_centers_
         
         height, width = image.shape[:2]
-        references_points = [ (0, 0), (width-1, 0), (0, height-1), (width-1, height-1), (width//2, 0), (0, height//2), (width-1, height//2) ]
+        references_points = [
+            (0, 0), (width-1, 0), (0, height-1), (width-1, height-1),
+            (width//2, 0), (0, height//2), (width-1, height//2)
+        ]
         references_pixels = np.array([lab[y, x] for x, y in references_points])
         references_labels = self.km.predict(references_pixels)
         unique_labels, counts = np.unique(references_labels, return_counts=True)

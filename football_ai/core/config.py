@@ -179,9 +179,23 @@ class Config:
         return self._config.get('finetuning', {})
     
     @property
+    def color_clustering(self) -> Dict[str, Any]:
+        """Configuración de clustering de colores."""
+        return self._config.get('color_clustering', {})
+    
+    @property
     def logging_config(self) -> Dict[str, Any]:
         """Configuración de logging."""
         return self._config.get('logging', {})
+    
+    def get_team_names(self) -> list:
+        """
+        Obtiene la lista de nombres de equipos configurados.
+        
+        Returns:
+            Lista con los nombres de los equipos
+        """
+        return list(self.teams.keys())
     
     def get_team_colors(self) -> Dict[str, np.ndarray]:
         """

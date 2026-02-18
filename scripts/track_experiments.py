@@ -1,28 +1,31 @@
 import json
+import sys
+import time
 import numpy as np
 
 from football_ai.tracking import Tracker
 from football_ai.visualization import Drawer
-from football_ai.core import convert_to_serializable
+from football_ai.core import get_config, get_logger, Logger, convert_to_serializable
 
 if __name__ == "__main__":
-    import time
+    config = get_config()
+    Logger.setup_from_config(config)
+    logger = get_logger(__name__)
 
-    MODEL_PATH = "../../models/finetuning/v11/yolov11m/weights/best.pt"
-    VIDEO = "../../data/partidoPrueba/08fd33_4_medio.mp4"
-    OUTPUT = "../../output/pruebaTracker/experimentos/"
-    SHOWKMEANS = False
-    TEAM_COLORS = { "Real Madrid": np.array([255, 127, 127]),       "Wolfsburgo":  np.array([224, 77, 196]) }
+    MODEL_PATH = str(config.get_path('paths', 'models', 'finetuned_player'))
+    VIDEO = str(config.get_path('paths', 'data', 'video_08fd33_medio'))
+    OUTPUT = str(config.get_path('paths', 'output', 'prueba_tracker', create_if_missing=True))
+    SHOWKMEANS = config.get('visualization', 'show_kmeans')
+    TEAM_COLORS = config.get_team_colors()
+
+    # Colores de visualización
+    vis_colors = config.get_visualization_colors()
 
     confs = [0.1]
     tts = [0.5]
     mts = [0.945]
     mcfs = [5]
-    # mts = [0.933, 0.966, 1]
-    # tts = [0.3, 0.4, 0.5]
-    # mts = [0.93, 0.945, 0.96]
-    # mcfs = [4, 5, 6]
-    
+
     prueba_id = 0
     total_pruebas = len(confs) * len(tts) * len(mts) * len(mcfs)
     tracks_todos = []
@@ -31,24 +34,29 @@ if __name__ == "__main__":
             for mt in mts:
                 for mcf in mcfs:
                     inicio = time.time()
-                    tracker_conf = { "track_thresh": tt, "track_buffer": 90, "match_thresh": mt, "frame_rate": 25, "minimum_consecutive_frames": mcf }
-                    output = OUTPUT + str(prueba_id) + ".mp4"
+                    tracker_conf = {
+                        "track_thresh": tt,
+                        "track_buffer": config.get('tracking', 'track_buffer'),
+                        "match_thresh": mt,
+                        "frame_rate": config.get('tracking', 'frame_rate'),
+                        "minimum_consecutive_frames": mcf,
+                    }
+                    output = OUTPUT + "/" + str(prueba_id) + ".mp4"
                     prueba_id += 1
 
                     tracker = Tracker(MODEL_PATH, conf, tracker_conf, TEAM_COLORS)
                     tracks = tracker.get_tracks(VIDEO, SHOWKMEANS)
-                
+
                     tracks_todos.append({"conf": conf, "tt": tt, "mt": mt, "mcf": mcf, "track": tracks})
 
-                    drawer = Drawer(colors = { "player": (0, 255, 0), "goalkeeper": (0, 255, 255), "referee": (255, 0, 0), "ball": (0, 0, 255) })
+                    drawer = Drawer(colors=vis_colors)
                     drawer.draw_tracks(tracks, VIDEO, output)
-                    
-                    if prueba_id == 1:  # Guardar tracks del primer experimento como referencia
+
+                    if prueba_id == 1:
                         with open("./tracks_prueba.json", "w", encoding="utf-8") as f:
                             json.dump(convert_to_serializable(tracks), f, indent=4, ensure_ascii=False, sort_keys=True)
                     fin = time.time()
-                    print("Prueba: ", prueba_id, "/", total_pruebas, end="   ")
-                    print(f"{int(fin - inicio)}", end="\n\n")
+                    logger.info(f"Prueba {prueba_id}/{total_pruebas} - {int(fin - inicio)}s")
 
             with open("./tracks.json", "w", encoding="utf-8") as f:
                 json.dump(convert_to_serializable(tracks_todos), f, indent=4, ensure_ascii=False, sort_keys=True)

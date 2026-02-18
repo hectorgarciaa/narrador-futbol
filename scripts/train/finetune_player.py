@@ -4,19 +4,19 @@ from ultralytics import YOLO
 
 from football_ai.core import get_config, get_logger, Logger
 
-def finetuning(ruta_modelo, ruta_data_yaml, epochs, batch, output_dir, logger):
+def finetuning(ruta_modelo, ruta_data_yaml, epochs, batch, imgsz, output_dir, logger):
     """Realiza fine-tuning de modelo YOLO para detección de fútbol."""
     try:
         logger.info(f"Cargando modelo base: {ruta_modelo}")
         model = YOLO(ruta_modelo)
         
         logger.info(f"Iniciando fine-tuning con dataset: {ruta_data_yaml}")
-        logger.info(f"Parámetros: epochs={epochs}, batch={batch}")
+        logger.info(f"Parámetros: epochs={epochs}, batch={batch}, imgsz={imgsz}")
         
         model.train(
             data=ruta_data_yaml,
             epochs=epochs,
-            imgsz=640,
+            imgsz=imgsz,
             batch=batch,
             name="finetuning",
             project=output_dir,
@@ -51,8 +51,9 @@ if __name__ == "__main__":
         # Parámetros de fine-tuning desde config
         epochs = config.get('finetuning', 'epochs')
         batch = config.get('finetuning', 'batch')
+        imgsz = config.get('finetuning', 'imgsz')
         
-        finetuning(ruta_modelo, ruta_data_yaml, epochs, batch, output_dir, logger)
+        finetuning(ruta_modelo, ruta_data_yaml, epochs, batch, imgsz, output_dir, logger)
         logger.info("Fine-tuning completado exitosamente")
     except Exception as e:
         logger.error(f"Error en la ejecución: {e}")

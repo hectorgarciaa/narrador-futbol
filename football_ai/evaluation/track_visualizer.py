@@ -8,15 +8,15 @@ from football_ai.evaluation.evaluator import Evaluator
 class TrackVisualizer:
     def __init__(self, tracks, class_name):
         self.evaluator = Evaluator()
-        _, metrics_list, _, n_frames = self.evaluator.evaluateClass(tracks, class_name)
+        _, metrics_list, _, n_frames = self.evaluator.evaluate_class(tracks, class_name)
 
         self.df_metrics_list = pd.DataFrame(metrics_list).T
         self.n_frames = n_frames
     
-    def getDfMetricsList(self):
+    def get_df_metrics_list(self):
         return self.df_metrics_list
     
-    def showAllHistsMetricsList(self):
+    def show_all_hists_metrics_list(self):
         columns = [c for c in self.df_metrics_list.columns if c not in ['frames_seen', 'speed_frames']]
         print(columns)
         ncols = min(7, len(columns))
@@ -36,12 +36,12 @@ class TrackVisualizer:
         plt.tight_layout()
         plt.show()
 
-    def showHist(self, nparray, column, bins=30):
+    def show_hist(self, nparray, column, bins=30):
         nparray.hist(bins=bins)
         plt.title(f"Histograma de {column}")
         plt.show()
 
-    def showTracksEvolution(self, y, cov_threshold, tracksPerRow, verticalOffset):
+    def show_tracks_evolution(self, y, cov_threshold, tracksPerRow, verticalOffset):
         self.df_metrics_list["mean_coverage"] = self.df_metrics_list["frames_seen"].str.len() / self.n_frames
         aux = self.df_metrics_list[self.df_metrics_list["mean_coverage"] < cov_threshold]
 

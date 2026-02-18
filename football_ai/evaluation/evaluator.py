@@ -9,10 +9,10 @@ class Evaluator:
     # ----------------------------------------------
     # UTILS
     # ----------------------------------------------
-    def createDefaultDicts(self, num_dicts):
+    def create_default_dicts(self, num_dicts):
         return [defaultdict(list) for _ in range(num_dicts)]
     
-    def initDicts(self, frames, id_frames, id_teams, id_colors, id_bboxes, id_conf, id_bbox_sizes):
+    def init_dicts(self, frames, id_frames, id_teams, id_colors, id_bboxes, id_conf, id_bbox_sizes):
         for t, frame_dict in enumerate(frames):
             for tid, info in frame_dict.items():
                 id_frames[tid].append(t)
@@ -25,7 +25,7 @@ class Evaluator:
     # ----------------------------------------------
     # SPEED + GAPS
     # ----------------------------------------------
-    def getGapsAndSpeed(self, tid, frames_seen_sorted, id_bboxes):
+    def get_gaps_and_speed(self, tid, frames_seen_sorted, id_bboxes):
         gap_lengths = []
         speed_values = []
         speed_frames = []    # lista de (frame_prev, frame_curr)
@@ -65,7 +65,7 @@ class Evaluator:
     # ----------------------------------------------
     # TEAM + ENTROPY
     # ----------------------------------------------
-    def getFlipsAndEntropy(self, tid, id_teams):
+    def get_flips_and_entropy(self, tid, id_teams):
         teams = id_teams.get(tid, [])
         team_mode = None
         flip_rate_static = 0.0
@@ -91,7 +91,7 @@ class Evaluator:
     # ----------------------------------------------
     # COLOR METRICS
     # ----------------------------------------------
-    def getColorsVar(self, tid, id_colors):
+    def get_colors_var(self, tid, id_colors):
         colors = np.array(id_colors.get(tid, []), dtype=float) if id_colors.get(tid) else None
 
         if colors is None or len(colors) == 0:
@@ -105,7 +105,7 @@ class Evaluator:
     # ----------------------------------------------
     # BBOX SIZE CONSISTENCY
     # ----------------------------------------------
-    def getBBoxSize(self, tid, id_bbox_sizes):
+    def get_bbox_size(self, tid, id_bbox_sizes):
         sizes = np.array(id_bbox_sizes.get(tid, []), dtype=float) if id_bbox_sizes.get(tid) else None
 
         if sizes is None or len(sizes) <= 1:
@@ -116,7 +116,7 @@ class Evaluator:
     # ----------------------------------------------
     # METRICS FOR ONE TRACK
     # ----------------------------------------------
-    def metricsOfTic(self, T, tid, frames_seen, id_bboxes, id_teams, id_colors, id_bbox_sizes, id_conf):
+    def metrics_of_tid(self, T, tid, frames_seen, id_bboxes, id_teams, id_colors, id_bbox_sizes, id_conf):
         frames_seen_sorted = sorted(frames_seen)
         total_seen = len(frames_seen_sorted)
         coverage = total_seen / T
@@ -126,14 +126,14 @@ class Evaluator:
         mid_frame = (start_frame + end_frame) // 2
 
         gaps, mean_gap_len, mean_speed, max_speed, speed_values, speed_frames = \
-            self.getGapsAndSpeed(tid, frames_seen_sorted, id_bboxes)
+            self.get_gaps_and_speed(tid, frames_seen_sorted, id_bboxes)
 
         team_mode, flips_dynamic_bool, flip_rate_static, flip_rate_dynamic, entropy = \
-            self.getFlipsAndEntropy(tid, id_teams)
+            self.get_flips_and_entropy(tid, id_teams)
 
-        color_var, color_diff = self.getColorsVar(tid, id_colors)
+        color_var, color_diff = self.get_colors_var(tid, id_colors)
 
-        sizes, size_cv = self.getBBoxSize(tid, id_bbox_sizes)
+        sizes, size_cv = self.get_bbox_size(tid, id_bbox_sizes)
 
         mean_conf = float(np.mean(id_conf[tid])) if id_conf.get(tid) else None
 
@@ -186,14 +186,14 @@ class Evaluator:
     # ----------------------------------------------
     # MAIN EVALUATION
     # ----------------------------------------------
-    def evaluateClass(self, tracks, class_name="player"):
+    def evaluate_class(self, tracks, class_name="player"):
         frames = tracks[class_name]
         T = len(frames)
 
         id_frames, id_teams, id_colors, id_bboxes, id_conf, id_bbox_sizes = \
-            self.createDefaultDicts(6)
+            self.create_default_dicts(6)
 
-        self.initDicts(frames, id_frames, id_teams, id_colors,
+        self.init_dicts(frames, id_frames, id_teams, id_colors,
                        id_bboxes, id_conf, id_bbox_sizes)
 
         metrics = {}
@@ -204,12 +204,12 @@ class Evaluator:
             if int(tid) > num_tracks:
                 num_tracks = int(tid)
 
-            metricsTid, metrics_list_tid = self.metricsOfTic(
+            metrics_tid, metrics_list_tid = self.metrics_of_tid(
                 T, tid, frames_seen,
                 id_bboxes, id_teams, id_colors,
                 id_bbox_sizes, id_conf
             )
-            metrics[tid] = metricsTid
+            metrics[tid] = metrics_tid
             metrics_list[tid] = metrics_list_tid
 
         # -------- summary global --------
@@ -285,7 +285,7 @@ class Evaluator:
     def evaluate(self, classes, tracks):
         evaluation = {}
         for class_name in classes:
-            metrics, metrics_list, summary, n_frames = self.evaluateClass(tracks, class_name)
+            metrics, metrics_list, summary, n_frames = self.evaluate_class(tracks, class_name)
             evaluation[class_name] = {
                 "metrics": metrics,
                 "metrics_list": metrics_list,

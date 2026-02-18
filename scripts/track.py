@@ -8,7 +8,7 @@ from football_ai.evaluation import Evaluator, MetricsVisualizer
 from football_ai.visualization import Drawer
 from football_ai.core import get_config, get_logger, Logger, convert_to_serializable
 
-def saveResult(tracks, output_path, logger):
+def save_result(tracks, output_path, logger):
     """Guarda los tracks en formato JSON con manejo de errores."""
     try:
         output_path = Path(output_path)
@@ -83,7 +83,7 @@ if __name__ == "__main__":
         summary = evaluation["player"]["summary"]
         
         # Guardar resultados (comentado por defecto)
-        # saveResult(tracks, OUTPUT_PATH, logger)
+        # save_result(tracks, OUTPUT_PATH, logger)
         
         # Mostrar resumen
         logger.info("Resumen de evaluación:")

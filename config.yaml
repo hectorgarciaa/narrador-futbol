@@ -20,7 +20,15 @@ paths:
     video_08fd33_medio: "data/partidoPrueba/08fd33_4_medio.mp4"
     dataset_football_ai: "data/detection/football-ai-2/data.yaml"
     dataset_football_detection: "data/detection/FootBall-Detection-2/data.yaml"
+    download_detection_output: "data/detection"
   
+  # Modelos descargados
+  models_download:
+    base_dir: "models/yolo"
+    versions:
+      v8: ["yolov8m", "yolov8l", "yolov8x"]
+      v11: ["yolov11m", "yolov11l", "yolov11x"]
+
   # Salidas
   output:
     base: "output"
@@ -49,6 +57,10 @@ tracking:
   frame_rate: 25
   # Frames consecutivos mínimos para confirmar un track
   minimum_consecutive_frames: 5
+  # Penalización de distancia cuando el equipo detectado difiere del track
+  team_penalty: 1000
+  # Frames consecutivos con equipo distinto para confirmar cambio real
+  team_switch_threshold: 5
 
 # Configuración de equipos
 teams:

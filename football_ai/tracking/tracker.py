@@ -1,3 +1,4 @@
+import numpy as np
 import supervision as sv
 
 from football_ai.detection import Detector
@@ -7,40 +8,53 @@ from football_ai.tracking.byte_tracker import ByteTrack
 class Tracker:
     def __init__(self, model_path, conf, tracker_conf, team_colors, ball_min_conf=0.01):
         self.model = Detector(model_path, conf)
-        self.teamDetector = TeamDetector(team_colors)
-        self.tracker = ByteTrack(tracker_conf["track_thresh"], tracker_conf["track_buffer"], tracker_conf["match_thresh"], tracker_conf["frame_rate"], tracker_conf["minimum_consecutive_frames"])
+        self.team_detector = TeamDetector(team_colors)
+        self.tracker = ByteTrack(
+            tracker_conf["track_thresh"],
+            tracker_conf["track_buffer"],
+            tracker_conf["match_thresh"],
+            tracker_conf["frame_rate"],
+            tracker_conf["minimum_consecutive_frames"],
+            team_penalty=tracker_conf.get("team_penalty", 1000),
+            team_switch_threshold=tracker_conf.get("team_switch_threshold", 5),
+        )
         self.ball_min_conf = ball_min_conf
     
-    def get_tracks(self, video, showKMeans):
+    def get_tracks(self, video, show_kmeans=False):
         model_detections = self.model.detect(video)
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [] }
-        fallback_id_counter = 0  # Contador global para detecciones de balón sin tracking
-        
+        fallback_id_counter = 0
+
         for n_frame, detections in enumerate(model_detections):
             detections_sv = sv.Detections.from_ultralytics(detections)
 
-            teams_of_detected_objects = self.teamDetector.detectTeams(detections, showKMeans)
+            teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
             teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
-            
+
+            # Guardar índice original para poder alinear tras el filtrado del tracker
+            detections_sv.data['original_idx'] = np.arange(len(detections_sv))
+
             tracks_detection = self.tracker.update_with_detections(detections_sv, teams_labels)
             
             for key in tracks.keys():
                 tracks[key].append({})
 
             has_tracked_ball = False
-            for i, object_detected in enumerate(tracks_detection):
-                bbox, _, confidence, _, tracker_id, class_name = object_detected
-                class_name = class_name["class_name"]
+            for object_detected in tracks_detection:
+                bbox, _, confidence, _, tracker_id, data = object_detected
+                class_name = data["class_name"]
+                original_idx = int(data["original_idx"])
+
                 if class_name == "ball":
                     has_tracked_ball = True
 
                 tracks[class_name][n_frame][tracker_id] = {
                     "bbox": bbox,
                     "confidence": confidence,
-                    "team": teams_of_detected_objects[i]["team"],
-                    "distances": teams_of_detected_objects[i]["distances"],
-                    "shirt_color": teams_of_detected_objects[i]["shirt_color"],
-                    "bbox_size": teams_of_detected_objects[i]["bbox_size"],
+                    "team": teams_of_detected_objects[original_idx]["team"],
+                    "distances": teams_of_detected_objects[original_idx]["distances"],
+                    "shirt_color": teams_of_detected_objects[original_idx]["shirt_color"],
+                    "bbox_size": teams_of_detected_objects[original_idx]["bbox_size"],
                 }
 
             # Si el tracker no activó el balón, usar detecciones crudas (sin tracking)

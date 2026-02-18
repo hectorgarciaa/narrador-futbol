@@ -1,31 +1,23 @@
-from ultralytics import YOLO
 import os
+from ultralytics import YOLO
 
-carpeta_modelos = "../models/yolo"
+from football_ai.core import get_config
 
-# Listado de modelos a descargar
-modelos = {
-    "v8": {
-        "yolov8m": "yolov8m.pt",
-        "yolov8l": "yolov8l.pt",
-        "yolov8x": "yolov8x.pt"
-    },
 
-    "v11": {
-        "yolo11m": "yolov11m.pt",
-        "yolo11l": "yolov11l.pt",
-        "yolo11x": "yolov11x.pt"
-    }
-}
-
-def downloadYoloModels(carpeta_modelos, modelos):
-    # Descargar y guardar cada modelo
-    for version, models in modelos.items():
-        for nombre, archivo in models.items():
+def download_yolo_models(base_dir, versions):
+    """Descarga y guarda modelos YOLO según la configuración."""
+    for version, model_names in versions.items():
+        for nombre in model_names:
             modelo = YOLO(nombre)
-            ruta_guardado = os.path.join(carpeta_modelos, version, archivo)
+            archivo = f"{nombre}.pt"
+            ruta_guardado = os.path.join(base_dir, version, archivo)
+            os.makedirs(os.path.dirname(ruta_guardado), exist_ok=True)
             modelo.save(ruta_guardado)
             print(f"{nombre} guardado en {ruta_guardado}")
 
+
 if __name__ == "__main__":
-    downloadYoloModels(carpeta_modelos, modelos)
+    config = get_config()
+    base_dir = str(config.get_path('paths', 'models_download', 'base_dir', create_if_missing=True))
+    versions = config.get('paths', 'models_download', 'versions')
+    download_yolo_models(base_dir, versions)

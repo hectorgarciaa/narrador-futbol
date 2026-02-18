@@ -6,7 +6,7 @@ class Drawer:
         self.colors = colors
         self.DEFAULT_COLOR = default_color
 
-    def createWriter(self, video, output_path):
+    def create_writer(self, video, output_path):
         """
         Crea un VideoWriter para guardar el video procesado.
         
@@ -60,25 +60,26 @@ class Drawer:
                 cap.release()
             raise RuntimeError(f"Error creating video writer: {e}") from e
     
-    def drawDetection(self, frame, class_name, data, color, track_id):
+    def draw_detection(self, frame, class_name, data, color, track_id):
+        """Dibuja una detección individual sobre el frame."""
         x1, y1, x2, y2 = map(int, data["bbox"])
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         label = f"{class_name} #{track_id}"
         distances = data.get("distances")
         team = data.get("team")
         if distances is not None and team is not None:
-            label += "\n"
-            d = [distances["Real Madrid"].round(1), distances["Wolfsburgo"].round(1)]
-            label += f"{team}: {d}"
+            d_str = ", ".join(f"{t}: {d:.1f}" for t, d in distances.items())
+            label += f" [{team}] ({d_str})"
 
         cv2.putText(frame, label, (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
-    def drawAllDetectionsInFrame(self, frame, class_name, class_tracks, frame_id):
+    def draw_all_detections_in_frame(self, frame, class_name, class_tracks, frame_id):
+        """Dibuja todas las detecciones de una clase en un frame."""
         frame_data = class_tracks[frame_id]
         color = self.colors.get(class_name, self.DEFAULT_COLOR)
         for track_id, data in frame_data.items():
-            self.drawDetection(frame, class_name, data, color, track_id)
+            self.draw_detection(frame, class_name, data, color, track_id)
 
     def draw_tracks(self, tracks, video, output_path, show=False, window_name="Tracking"):
         """
@@ -98,7 +99,7 @@ class Drawer:
         out = None
         
         try:
-            cap, out = self.createWriter(video, output_path)
+            cap, out = self.create_writer(video, output_path)
             num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
             frame_id = 0
@@ -109,7 +110,7 @@ class Drawer:
                 
                 for class_name, class_tracks in tracks.items():
                     if frame_id < len(class_tracks):
-                        self.drawAllDetectionsInFrame(frame, class_name, class_tracks, frame_id)
+                        self.draw_all_detections_in_frame(frame, class_name, class_tracks, frame_id)
                 
                 out.write(frame)
                 if show:

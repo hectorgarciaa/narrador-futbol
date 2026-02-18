@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 
 from supervision.detection.core import Detections
@@ -6,6 +8,8 @@ from supervision.tracker.byte_tracker import matching
 from supervision.tracker.byte_tracker.kalman_filter import KalmanFilter
 from supervision.tracker.byte_tracker.single_object_track import STrack, TrackState
 from supervision.tracker.byte_tracker.utils import IdCounter
+
+logger = logging.getLogger(__name__)
 
 
 class ByteTrack:
@@ -42,9 +46,13 @@ class ByteTrack:
         minimum_matching_threshold: float = 0.8,
         frame_rate: int = 30,
         minimum_consecutive_frames: int = 1,
+        team_penalty: float = 1000,
+        team_switch_threshold: int = 5,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
+        self.team_penalty = team_penalty
+        self.team_switch_threshold = team_switch_threshold
 
         self.frame_id = 0
         self.det_thresh = self.track_activation_threshold + 0.1
@@ -177,6 +185,13 @@ class ByteTrack:
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
 
+        # Filtrar team_labels con los mismos índices que las detecciones de alta confianza
+        if team_labels is not None:
+            remain_indices = np.where(remain_inds)[0]
+            team_labels_keep = [team_labels[j] for j in remain_indices]
+        else:
+            team_labels_keep = None
+
         detections = []
         for i, (tlbr, s) in enumerate(zip(dets, scores_keep)):
             det = STrack(
@@ -187,9 +202,8 @@ class ByteTrack:
                 self.internal_id_counter,
                 self.external_id_counter,
             )
-            if team_labels is not None and i < len(team_labels):
-                det.equipo = team_labels[i]  # 🔹 asigna el equipo correspondiente
-                #print("Asignado equipo:", det.equipo)
+            if team_labels_keep is not None and i < len(team_labels_keep):
+                det.equipo = team_labels_keep[i]
             else:
                 det.equipo = None
             
@@ -211,18 +225,18 @@ class ByteTrack:
         STrack.multi_predict(strack_pool, self.shared_kalman)
         dists = matching.iou_distance(strack_pool, detections)
 
-        # 🔹 Penalización extra si equipos distintos
+        # Penalización extra si equipos distintos
         for i, track in enumerate(strack_pool):
             for j, det in enumerate(detections):
                 if hasattr(track, "equipo") and hasattr(det, "equipo"):
                     if track.equipo != det.equipo:
-                        dists[i, j] += 1000  # penalización configurable
+                        dists[i, j] += self.team_penalty
 
         dists = matching.fuse_score(dists, detections)
         matches, u_track, u_detection = matching.linear_assignment(
             dists, thresh=self.minimum_matching_threshold
         )
-        # --- Penalización por equipo distinto ---
+        # Manejo de cambios de equipo en tracks
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
@@ -230,31 +244,23 @@ class ByteTrack:
             old_team = getattr(track, "equipo", None)
             new_team = getattr(det, "equipo", None)
 
-            # --- Si cambia de equipo ---
             if old_team is not None and new_team is not None and old_team != new_team:
-                #print(f"⚠️ Track {track.track_id}: cambio temporal de equipo ({old_team} → {new_team})")
-
-                # Aumentar contador de inconsistencias
                 if not hasattr(track, "team_switch_frames"):
                     track.team_switch_frames = 1
                 else:
                     track.team_switch_frames += 1
 
-                # Si se mantiene el error muchos frames, asumimos que sí cambió realmente
-                if track.team_switch_frames >= 5:
-                    print(f"🔄 Cambio confirmado: Track  ahora es {new_team}")
+                if track.team_switch_frames >= self.team_switch_threshold:
+                    logger.info(f"Cambio de equipo confirmado: Track ahora es {new_team}")
                     track.equipo = new_team
-                    track.team_switch_frames = 0  # reset
+                    track.team_switch_frames = 0
                 else:
-                    # ⚠️ Cambio momentáneo: mantener equipo anterior
                     new_team = old_team
 
             else:
-                # Resetear el contador si el equipo coincide
                 if hasattr(track, "team_switch_frames"):
                     track.team_switch_frames = 0
 
-                # Asignar equipo si no tenía
                 if old_team is None and new_team is not None:
                     track.equipo = new_team
 
@@ -380,7 +386,7 @@ def joint_tracks(
     return result
 
 
-def sub_tracks(track_list_a: list[STrack], track_list_b: list[STrack]) -> list[int]:
+def sub_tracks(track_list_a: list[STrack], track_list_b: list[STrack]) -> list[STrack]:
     """
     Returns a list of tracks from track_list_a after removing any tracks
     that share the same internal_track_id with tracks in track_list_b.
