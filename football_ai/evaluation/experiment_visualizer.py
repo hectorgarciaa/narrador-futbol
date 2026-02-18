@@ -1,8 +1,12 @@
+import logging
+
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 from football_ai.evaluation.evaluator import Evaluator
+
+logger = logging.getLogger(__name__)
 
 class ExperimentVisualizer:
     def __init__(self, experimentos_tracks, classes):
@@ -42,7 +46,7 @@ class ExperimentVisualizer:
                         try:
                             flat_metrics[k] = v[0]["value"]
                         except Exception as e:
-                            print(v)
+                            logger.debug(f"Unexpected metric format for key '{k}': {v}")
                             raise e
 
                 rows_detailed.append({
@@ -59,8 +63,8 @@ class ExperimentVisualizer:
         else:
             df = self.create_df_summary(class_name)
         
-        nRows = len(df.columns[5:])
-        fig, axes = plt.subplots(nRows, 1, figsize=(25,2*nRows), sharex=True)
+        n_rows = len(df.columns[5:])
+        fig, axes = plt.subplots(n_rows, 1, figsize=(25, 2 * n_rows), sharex=True)
         axes = axes.flatten()
         for i, c in enumerate(df.iloc[:, 5:]):
             sns.barplot(data=df, x="experiment_id", y=c, ax=axes[i])
@@ -103,5 +107,5 @@ class ExperimentVisualizer:
         sns.despine()
         plt.show()
 
-    def get_best_exps(self, class_name, sortBy, ascending):
-        return self.create_df_summary(class_name).sort_values(by=sortBy, ascending=ascending)
+    def get_best_exps(self, class_name, sort_by, ascending):
+        return self.create_df_summary(class_name).sort_values(by=sort_by, ascending=ascending)

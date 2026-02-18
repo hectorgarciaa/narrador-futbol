@@ -1,6 +1,10 @@
+import logging
+
 import pandas as pd
 import plotly.express as px
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsVisualizer:
@@ -31,7 +35,7 @@ class MetricsVisualizer:
 
     def plot_speed_events_scatter(self, speed_events, title="Speed per frame"):
         if not speed_events:
-            print("No speed events available.")
+            logger.warning("No speed events available.")
             return
         
         df = pd.DataFrame(speed_events)
@@ -91,7 +95,7 @@ class MetricsVisualizer:
         Scatter interactivo: frame vs valor, hover => id, frame, valor (+ otros campos)
         """
         if not metric_events:
-            print(f"No metric events for '{metric_key}'.")
+            logger.warning(f"No metric events for '{metric_key}'.")
             return
         
         df = pd.DataFrame(metric_events)
@@ -115,7 +119,7 @@ class MetricsVisualizer:
     # ============================================================
     def plot_metric_histogram(self, metric_events, metric_key, bins=40):
         if not metric_events:
-            print(f"No metric events for '{metric_key}'.")
+            logger.warning(f"No metric events for '{metric_key}'.")
             return
         
         df = pd.DataFrame(metric_events)
@@ -131,7 +135,7 @@ class MetricsVisualizer:
 
     def plot_speed_histogram(self, speed_events, bins=40):
         if not speed_events:
-            print("No speed events available.")
+            logger.warning("No speed events available.")
             return
         
         df = pd.DataFrame(speed_events)

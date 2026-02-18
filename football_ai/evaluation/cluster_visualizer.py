@@ -16,7 +16,6 @@ def visualize_shirt_clusters(shirt_crops, max_players=20):
     shirt_crops = shirt_crops[:max_players]
     n = len(shirt_crops)
     if n == 0:
-        print("No hay crops para visualizar.")
         return
 
     cols_players = 5
