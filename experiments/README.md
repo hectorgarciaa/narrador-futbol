@@ -86,7 +86,7 @@ with open("scripts/tracks.json") as f:
 
 # Comparar experimentos
 ev = ExperimentVisualizer(tracks_todos, classes=["player", "ball"])
-ev.shorBarsOfExperiments("player")
+ev.show_bars_of_experiments("player")
 ```
 
 Ejecución con Jupyter:

@@ -39,18 +39,18 @@ drawer.draw_tracks(
 ```
 
 **Flujo interno:**
-1. `createWriter(video, output_path)`: abre el video con `cv2.VideoCapture`, extrae FPS, ancho y alto, y crea un `cv2.VideoWriter` con codec `mp4v`. Crea el directorio de salida si no existe.
+1. `create_writer(video, output_path)`: abre el video con `cv2.VideoCapture`, extrae FPS, ancho y alto, y crea un `cv2.VideoWriter` con codec `mp4v`. Crea el directorio de salida si no existe.
 2. Itera frame a frame con `cap.read()`.
-3. Para cada clase y frame, llama a `drawAllDetectionsInFrame`, que itera sobre todos los tracks del frame.
-4. `drawDetection` pinta el bounding box con `cv2.rectangle` y la etiqueta con `cv2.putText`. La etiqueta incluye:
+3. Para cada clase y frame, llama a `draw_all_detections_in_frame`, que itera sobre todos los tracks del frame.
+4. `draw_detection` pinta el bounding box con `cv2.rectangle` y la etiqueta con `cv2.putText`. La etiqueta incluye:
    - Clase y track_id (`"player #7"`)
-   - Si hay información de equipo: el equipo asignado y la distancia a cada equipo (`"Real Madrid: [12.3, 45.6]"`)
+   - Si hay información de equipo: el equipo asignado y las distancias a cada equipo dinámicamente (`"Real Madrid: [12.3, 45.6]"`)
 5. Escribe el frame anotado con `out.write(frame)`.
 6. En el bloque `finally`, libera `cap` y `out` siempre, incluso si hubo error.
 
 ### Manejo de errores
 
-`createWriter` levanta excepciones tipadas:
+`create_writer` levanta excepciones tipadas:
 - `ValueError`: ruta de video vacía.
 - `FileNotFoundError`: el archivo de video no existe.
 - `RuntimeError`: no se puede abrir el video o crear el writer (codec no disponible, permisos...).
@@ -59,9 +59,9 @@ drawer.draw_tracks(
 
 | Método | Descripción |
 |---|---|
-| `createWriter(video, output_path)` | Prepara `VideoCapture` y `VideoWriter`, añade `.mp4` si falta extensión |
-| `drawDetection(frame, class_name, data, color, track_id)` | Dibuja un único bbox con etiqueta |
-| `drawAllDetectionsInFrame(frame, class_name, class_tracks, frame_id)` | Dibuja todos los tracks de una clase en un frame |
+| `create_writer(video, output_path)` | Prepara `VideoCapture` y `VideoWriter`, añade `.mp4` si falta extensión |
+| `draw_detection(frame, class_name, data, color, track_id)` | Dibuja un único bbox con etiqueta |
+| `draw_all_detections_in_frame(frame, class_name, class_tracks, frame_id)` | Dibuja todos los tracks de una clase en un frame |
 | `draw_tracks(tracks, video, output_path, show, window_name)` | Pipeline completo |
 
-> **Limitación conocida:** `drawDetection` formatea las distancias asumiendo que las claves del diccionario son "Real Madrid" y "Wolfsburgo". Si se cambian los equipos en `config.yaml`, hay que actualizar la cadena de texto de la etiqueta.
+> **Nota:** El método `draw_detection` itera dinámicamente sobre las claves del diccionario `distances` para formatear las distancias, por lo que es compatible con cualquier configuración de equipos en config.yaml.

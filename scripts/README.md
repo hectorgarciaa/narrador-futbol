@@ -27,7 +27,10 @@ python scripts/<nombre>.py
 
 **Objetivo:** Verificar el modelo fine-tuned de jugadores sobre un clip del partido.
 
-**Cuidado:** Usa rutas **hardcodeadas** en lugar de `config.yaml`. Pendiente de migrar.
+**Flujo:**
+1. Carga el modelo desde `paths.models.finetuned_player` en `config.yaml`.
+2. Ejecuta la detección sobre el vídeo configurado.
+3. Guarda el video anotado en el directorio de salida configurado.
 
 ---
 
@@ -66,12 +69,12 @@ Es el script principal del proyecto y sirve como referencia de cómo usar el paq
 **Flujo:**
 1. Define listas de valores para cada hiperparámetro.
 2. Hace un nested loop sobre todas las combinaciones.
-3. Por cada combinación: crea el `Tracker`, ejecuta el tracking, añade el resultado a `tracks_todos`.
+3. Por cada combinación: crea el `Tracker`, ejecuta el tracking, añade el resultado a `all_tracks`.
 4. Genera el video anotado de cada experimento.
-5. Guarda el primer experimento como `tracks_prueba.json` (referencia rápida).
-6. Al terminar cada nivel externo, guarda todos los tracks en `tracks.json` para recuperar progreso si se interrumpe.
+5. Guarda el primer experimento como `tracks_sample.json` (referencia rápida).
+6. Al terminar todos los experimentos, guarda todos los tracks en `tracks.json`.
 
-**Cuidado:** Usa rutas **hardcodeadas**. Pendiente de migrar a `config.yaml`.
+Todas las rutas se leen desde `config.yaml`.
 
 ---
 

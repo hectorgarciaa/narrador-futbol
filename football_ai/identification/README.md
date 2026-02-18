@@ -13,7 +13,7 @@ Extraer el color representativo de la camiseta de un jugador a partir del crop d
 
 **¿Por qué LAB?** El espacio de color CIE L*a*b* es perceptualmente uniforme: la distancia euclidiana entre dos colores LAB se correlaciona mejor con la diferencia perceptual que en RGB o HSV. Esto hace que el clustering sea más estable ante cambios de iluminación en el campo.
 
-**Pasos de `getColorKMeans(image)`:**
+**Pasos de `get_color_kmeans(image)`:**
 1. Convierte `image` (BGR) a LAB con `cv2.cvtColor`.
 2. Aplana la imagen a una lista de píxeles `(N, 3)`.
 3. Aplica **KMeans con k=2**: dos clusters, uno para la camiseta y otro para el fondo (césped, zona de piel, publicidad...).
@@ -27,7 +27,7 @@ from football_ai.identification import ShirtDetector
 sd = ShirtDetector(n_clusters=2, init='k-means++', n_init=10, random_state=0)
 
 # crop es la región superior del bounding box del jugador (BGR NumPy)
-color_lab = sd.getColorKMeans(crop_bgr)  # → np.array([L, A, B])
+color_lab = sd.get_color_kmeans(crop_bgr)  # → np.array([L, A, B])
 ```
 
 Los parámetros `n_clusters`, `init`, `n_init` y `random_state` son configurables desde `config.yaml` bajo `color_clustering`.
@@ -44,7 +44,7 @@ Asignar cada detección del modelo YOLO al equipo correspondiente y mantener un 
 #### 1. Inicialización con colores de referencia
 Se inicializa con los colores RGB de cada equipo definidos en `config.yaml`. Estos son los colores **iniciales** de referencia, que se afinarán con las primeras detecciones reales.
 
-#### 2. Sistema de confirmación adaptativo (`updateTeamColors`)
+#### 2. Sistema de confirmación adaptativo (`update_team_colors`)
 Antes de que un equipo tenga suficientes muestras, el color de referencia puede ser impreciso. El sistema:
 1. Extrae el color de camiseta del jugador con `ShirtDetector`.
 2. Calcula la distancia al equipo más cercano.
@@ -57,7 +57,7 @@ Esto permite que el sistema se adapte automáticamente al color exacto de las ca
 #### 3. Asignación (`assign_team`)
 Con los colores (iniciales o confirmados), asigna el equipo por **distancia euclidiana mínima en espacio RGB** entre el color de camiseta detectado y los colores de referencia actualizados.
 
-#### 4. Extracción de región de camiseta (`getTeamOfPlayers`)
+#### 4. Extracción de región de camiseta (`get_team_of_players`)
 El crop que se analiza es el **50% superior** del bounding box del jugador. Esto excluye el pantalón, las botas y el césped, que introducían ruido en el clustering.
 
 ```python
@@ -74,10 +74,15 @@ td = TeamDetector(
 )
 
 # frame_detections es el resultado YOLO de un frame (objeto Results)
-team_info_list = td.detectTeams(frame_detections, showPlot=False)
+team_info_list = td.detect_teams(frame_detections, show_plot=False)
 # → lista con un dict por detección:
 # [{"class": "player", "team": "Real Madrid", "distances": {...}, "shirt_color": np.array, "bbox_size": int}, ...]
 ```
 
 #### 5. Visualización de depuración (`visualize_shirt_clusters`)
-Función standalone (fuera de la clase) que muestra una cuadrícula con hasta 20 jugadores. Cada jugador ocupa dos columnas: la imagen original del crop y la imagen segmentada por KMeans coloreada con los centroides. Útil para depurar el comportamiento del clustering.
+Función standalone disponible en `football_ai.evaluation.cluster_visualizer` que muestra una cuadrícula con hasta 20 jugadores. Cada jugador ocupa dos columnas: la imagen original del crop y la imagen segmentada por KMeans coloreada con los centroides. Útil para depurar el comportamiento del clustering.
+
+```python
+from football_ai.evaluation import visualize_shirt_clusters
+
+visualize_shirt_clusters(tracks, video_path="partido.mp4", team_colors=config.get_team_colors())

@@ -33,12 +33,12 @@ tracker = Tracker(
 )
 ```
 
-### Pipeline interno de `get_tracks(video, showKMeans)`
+### Pipeline interno de `get_tracks(video, show_kmeans)`
 
 Por cada frame del vídeo:
 
 1. **Detección YOLO** (`Detector.detect`): genera las detecciones brutas del frame.
-2. **Identificación de equipo** (`TeamDetector.detectTeams`): por cada detección extrae el color de camiseta (KMeans en LAB) y asigna un equipo.
+2. **Identificación de equipo** (`TeamDetector.detect_teams`): por cada detección extrae el color de camiseta (KMeans en LAB) y asigna un equipo.
 3. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional en el coste de asociación.
 4. **Fallback de balón**: si ByteTrack no activó ningún track para el balón en ese frame (porque su confianza es demasiado baja para el umbral de activación), se añaden las detecciones YOLO crudas con IDs `"fallback_N"`. Esto garantiza que siempre haya información del balón aunque no sea trazable.
 
@@ -85,12 +85,12 @@ ByteTrack es un algoritmo de tracking multi-objeto que mejora otros métodos al 
 
 ### Extensión: penalización por equipo
 
-Se ha añadido un atributo `equipo` a cada `STrack`. Si en la primera asociación se intenta asociar una detección de un equipo distinto al del track, se añade una **penalización de +1000** a la matriz de costes IoU, haciendo esa asociación prácticamente imposible.
+Se ha añadido un atributo `team` a cada `STrack`. Si en la primera asociación se intenta asociar una detección de un equipo distinto al del track, se añade una **penalización** (configurable vía `team_penalty` en config.yaml, por defecto 1000) a la matriz de costes IoU, haciendo esa asociación prácticamente imposible.
 
 Además, se implementa un mecanismo de **tolerancia a cambios temporales de equipo**:
 - Si el equipo asignado cambia en un frame, no se actualiza inmediatamente.
 - Se contabilizan los frames de discordancia en `team_switch_frames`.
-- Solo después de 5 frames consecutivos con el nuevo equipo se confirma el cambio.
+- Solo después de `team_switch_threshold` frames consecutivos (configurable en config.yaml, por defecto 5) con el nuevo equipo se confirma el cambio.
 - Esto evita que falsos positivos del `TeamDetector` contaminen la asignación de equipo.
 
 ### Parámetros principales

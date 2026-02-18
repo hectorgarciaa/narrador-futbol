@@ -11,12 +11,12 @@ Calcular métricas cuantitativas por cada `track_id` y resumir el rendimiento gl
 
 ### ¿Cómo funciona?
 
-`evaluate(classes, tracks)` itera sobre cada clase y llama a `evaluateClass(tracks, class_name)`, que:
+`evaluate(classes, tracks)` itera sobre cada clase y llama a `evaluate_class(tracks, class_name)`, que:
 1. Recorre todos los frames de esa clase y agrupa la información por `track_id` (usando `defaultdict`).
-2. Para cada track, calcula las métricas con `metricsOfTic()`.
+2. Para cada track, calcula las métricas con `metrics_of_tid()`.
 3. Genera un `summary` global agregando las métricas de todos los tracks.
 
-### Métricas por track (`metricsOfTic`)
+### Métricas por track (`metrics_of_tid`)
 
 | Métrica | Descripción | Cómo se calcula |
 |---|---|---|
@@ -61,16 +61,16 @@ ev = ExperimentVisualizer(
 )
 
 # Resumen global por experimento
-df_summary = ev.createDFSummary("player")
+df_summary = ev.create_df_summary("player")
 
 # Métricas detalladas por track y experimento
-df_metrics  = ev.createDfsMetrics("player")
+df_metrics  = ev.create_dfs_metrics("player")
 
 # Gráficas de barras: una por métrica, eje X = experimento
-ev.shorBarsOfExperiments("player")
+ev.show_bars_of_experiments("player")
 
 # Boxplot de una métrica concreta
-ev.showBoxplotOfExperiments("player", y="coverage")
+ev.show_boxplot_of_experiments("player", y="coverage")
 ```
 
 ---
@@ -105,12 +105,12 @@ Analizar la distribución de métricas para todos los tracks de una clase concre
 
 ```python
 tv = TrackVisualizer(tracks=tracks, class_name="player")
-df = tv.getDfMetricsList()        # DataFrame con todas las métricas por track
-tv.showAllHistsMetricsList()      # cuadrícula de histogramas
-tv.showHist(df["coverage"], "coverage", bins=30)
+df = tv.get_df_metrics_list()        # DataFrame con todas las métricas por track
+tv.show_all_hists_metrics_list()      # cuadrícula de histogramas
+tv.show_hist(df["coverage"], "coverage", bins=30)
 ```
 
-Internamente llama a `Evaluator.evaluateClass()` en el constructor, por lo que no requiere pasar métricas precomputadas.
+Internamente llama a `Evaluator.evaluate_class()` en el constructor, por lo que no requiere pasar métricas precomputadas.
 
 ---
 
@@ -123,13 +123,13 @@ Visualizar la distribución de colores de camiseta detectados por el `TeamDetect
 cv = ClusterVisualizer(tracks=tracks, video_path="partido.mp4")
 
 # Acceder al DataFrame
-df = cv.getDataFrame()   # columnas: class_name, frame, tracker_id, x1, y1, w, h,
+df = cv.get_data_frame()   # columnas: class_name, frame, tracker_id, x1, y1, w, h,
                          #           bbox_size, confidence, Real Madrid, Wolfsburgo, L, A, B, team
 
 # Histogramas de distribución de colores
-cv.showHist(cols=["L", "A", "B"], xlabel="Color LAB", width=10)
+cv.show_hist(cols=["L", "A", "B"], xlabel="Color LAB", width=10)
 ```
 
 Construye internamente un DataFrame plano de todas las detecciones con sus colores LAB, lo que permite hacer filtros y análisis ad hoc con pandas.
 
-> **Limitación conocida:** `ClusterVisualizer` y `reformatTrack` tienen los nombres de equipo "Real Madrid" y "Wolfsburgo" hardcodeados en las columnas del DataFrame. Si se cambian los equipos en `config.yaml`, hay que actualizar este método.
+> **Nota:** El método `reformat_track` itera dinámicamente sobre los nombres de equipo desde config.yaml, por lo que es compatible con cualquier configuración de equipos.
