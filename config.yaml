@@ -1,0 +1,111 @@
+# Configuración del sistema de narración de fútbol con IA
+
+# Rutas de archivos y directorios (relativas a la raíz del proyecto)
+paths:
+  # Modelos YOLO
+  models:
+    yolo_base: "models/yolo/v11/yolov11m.pt"
+    yolo_v8_m: "models/yolo/v8/yolov8m.pt"
+    yolo_v8_x: "models/yolo/v8/yolov8x.pt"
+    yolo_v11_m: "models/yolo/v11/yolov11m.pt"
+    yolo_v11_x: "models/yolo/v11/yolov11x.pt"
+    finetuned_player: "models/finetuning/v11/yolov11m/weights/best.pt"
+    finetuned_ball: "models/finetuning-balon/v11/yolov11m/weights/best.pt"
+  
+  # Datos
+  data:
+    video_prueba: "data/partidoPrueba/partido.mp4"
+    video_prueba_medio: "data/partidoPrueba/partido_medio.mp4"
+    video_08fd33: "data/partidoPrueba/08fd33_4.mp4"
+    video_08fd33_medio: "data/partidoPrueba/08fd33_4_medio.mp4"
+    dataset_football_ai: "data/detection/football-ai-2/data.yaml"
+    dataset_football_detection: "data/detection/FootBall-Detection-2/data.yaml"
+  
+  # Salidas
+  output:
+    base: "output"
+    videos: "output/videos"
+    tracks_json: "output/tracks_json"
+    prueba_tracker: "output/pruebaTracker"
+    prueba_deteccion_yolo: "output/pruebaDeteccionYolo"
+    prueba_finetuning: "output/pruebaFinetuning"
+
+# Configuración de detección
+detection:
+  # Umbral de confianza para detecciones generales
+  conf_threshold: 0.01
+  # Umbral mínimo de confianza para detección de balón
+  ball_min_conf: 0.01
+
+# Configuración de tracking (ByteTrack)
+tracking:
+  # Umbral de activación de tracks (mayor = más estricto, menos falsos positivos)
+  track_thresh: 0.5
+  # Frames que se mantiene un track perdido antes de eliminarlo
+  track_buffer: 90
+  # Umbral de matching IoU (mayor = requiere más solapamiento para matching)
+  match_thresh: 0.945
+  # Frame rate del video
+  frame_rate: 25
+  # Frames consecutivos mínimos para confirmar un track
+  minimum_consecutive_frames: 5
+
+# Configuración de equipos
+teams:
+  Real Madrid:
+    color_rgb: [255, 127, 127]  # Color de referencia en RGB
+    name: "Real Madrid"
+  Wolfsburgo:
+    color_rgb: [224, 77, 196]  # Color de referencia en RGB
+    name: "Wolfsburgo"
+
+# Configuración de clustering de colores
+color_clustering:
+  # Número de clusters para KMeans
+  n_clusters: 2
+  # Método de inicialización
+  init: "k-means++"
+  # Número de inicializaciones
+  n_init: 10
+  # Semilla aleatoria para reproducibilidad
+  random_state: 0
+  # Umbral de confirmación para colores de equipo
+  confirmation_threshold: 3
+  # Tolerancia de color para considerar colores similares
+  color_tolerance: 25
+
+# Configuración de visualización
+visualization:
+  # Colores para dibujar bounding boxes (BGR para OpenCV)
+  colors:
+    player: [0, 255, 0]      # Verde
+    goalkeeper: [0, 255, 255] # Amarillo
+    referee: [255, 0, 0]      # Azul
+    ball: [0, 0, 255]         # Rojo
+  
+  # Configuración de visualización de KMeans
+  show_kmeans: false
+  # Mostrar salida en tiempo real durante procesamiento
+  show_output: true
+  # Grosor de las líneas de bounding boxes
+  line_thickness: 2
+  # Tamaño de fuente para etiquetas
+  font_scale: 0.5
+
+# Configuración de fine-tuning
+finetuning:
+  # Número de épocas para entrenamiento
+  epochs: 50
+  # Tamaño de batch
+  batch: 16
+  # Tamaño de imagen
+  imgsz: 640
+
+# Logging
+logging:
+  # Nivel de log: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  # Formato de log
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  # Archivo de log (relativo a la raíz del proyecto)
+  log_file: "narrador-futbol.log"
