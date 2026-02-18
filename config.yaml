@@ -9,13 +9,15 @@ paths:
     yolo_v8_x: "models/yolo/v8/yolov8x.pt"
     yolo_v11_m: "models/yolo/v11/yolov11m.pt"
     yolo_v11_x: "models/yolo/v11/yolov11x.pt"
-    finetuned_player: "models/finetuning/v11/yolov11m/weights/best.pt"
+    finetuned_player: "models/finetuning/yolov11m/weights/best.pt"
     finetuned_ball: "models/finetuning-balon/v11/yolov11m/weights/best.pt"
   
   # Datos
   data:
     video_prueba: "data/partidoPrueba/partido.mp4"
+    video_prueba_corto: "data/partidoPrueba/partido_corto.mp4"
     video_prueba_medio: "data/partidoPrueba/partido_medio.mp4"
+
     video_08fd33: "data/partidoPrueba/08fd33_4.mp4"
     video_08fd33_medio: "data/partidoPrueba/08fd33_4_medio.mp4"
     dataset_football_ai: "data/detection/football-ai-2/data.yaml"
