@@ -45,7 +45,7 @@ if __name__ == "__main__":
         data_yaml_path = str(config.get_path('paths', 'data', 'dataset_football_ai'))
         
         # Build output directory
-        output_base = config.get_path('paths', 'models', 'finetuned_player').parent.parent
+        output_base = config.get_path('paths', 'models', 'finetuned_player').parent
         output_dir = str(output_base)
         
         # Fine-tuning parameters from config

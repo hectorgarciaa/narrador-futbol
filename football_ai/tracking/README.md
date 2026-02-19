@@ -16,7 +16,7 @@ from football_ai.tracking import Tracker
 import numpy as np
 
 tracker = Tracker(
-    model_path="models/finetuning/v11/yolov11m/weights/best.pt",
+    model_path="models/finetuning/yolov11m.pt",
     conf=0.1,
     tracker_conf={
         "track_thresh": 0.5,

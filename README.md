@@ -243,7 +243,7 @@ Toda la configuración está centralizada en `config.yaml`. Los valores más rel
 ```yaml
 paths:
   models:
-    finetuned_player: "models/finetuning/v11/yolov11m/weights/best.pt"
+    finetuned_player: "models/finetuning/yolov11m.pt"
   data:
     video_prueba: "data/partidoPrueba/partido.mp4"
 

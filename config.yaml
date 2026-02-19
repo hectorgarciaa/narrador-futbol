@@ -9,8 +9,8 @@ paths:
     yolo_v8_x: "models/yolo/v8/yolov8x.pt"
     yolo_v11_m: "models/yolo/v11/yolov11m.pt"
     yolo_v11_x: "models/yolo/v11/yolov11x.pt"
-    finetuned_player: "models/finetuning/yolov11m/weights/best.pt"
-    finetuned_ball: "models/finetuning-balon/v11/yolov11m/weights/best.pt"
+    finetuned_player: "models/finetuning/yolov11m.pt"
+    finetuned_ball: "models/finetuning-balon/yolov11m.pt"
   
   # Datos
   data:

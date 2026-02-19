@@ -31,7 +31,7 @@ ENV/
 data/detection/
 
 # Model files (large binary files, exclude all)
-models/
+# models/
 
 # Output files
 output/
@@ -45,3 +45,8 @@ pruebaTracker
 # OS
 .DS_Store
 Thumbs.db
+
+# Ignorar todos los archivos dentro de las carpetas de modelos, pero mantener la estructura de carpetas
+models/finetuning/*.pt
+models/finetuning-balon/*.pt
+models/yolo/*.pt

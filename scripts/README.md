@@ -126,4 +126,9 @@ Ejecución:
 python scripts/train/finetune_player.py
 ```
 
-Los pesos resultantes se deben copiar manualmente a `models/finetuning/` para que los demás scripts los encuentren.
+Los pesos resultantes se deben copiar manualmente como `models/finetuning/yolov11m.pt` para que los demás scripts los encuentren.
+
+```bash
+# Windows
+copy runs\detect\finetuning\weights\best.pt models\finetuning\yolov11m.pt
+```
