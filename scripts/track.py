@@ -1,10 +1,9 @@
 import json
 import sys
 from pathlib import Path
-import numpy as np
 
 from football_ai.tracking import Tracker
-from football_ai.evaluation import Evaluator, MetricsVisualizer
+from football_ai.evaluation import Evaluator
 from football_ai.visualization import Drawer
 from football_ai.core import get_config, get_logger, Logger, convert_to_serializable
 
@@ -79,11 +78,10 @@ if __name__ == "__main__":
         logger.info("Evaluating tracks...")
         evaluator = Evaluator()
         evaluation = evaluator.evaluate(["player"], tracks)
-        metrics = evaluation["player"]["metrics"]
         summary = evaluation["player"]["summary"]
         
-        # Save results (commented out by default)
-        # save_result(tracks, OUTPUT_PATH, logger)
+        # Save tracks JSON
+        save_result(tracks, OUTPUT_PATH, logger)
         
         # Show summary
         logger.info("Evaluation summary:")
@@ -100,24 +98,4 @@ if __name__ == "__main__":
         sys.exit(1)
     
     logger.info("Process completed successfully")
-'''
-    vis = MetricsVisualizer()
-    # --- SPEED (per frame) ---
-    speed_events = vis.collect_speed_events(metrics)
-    vis.plot_speed_events_scatter(speed_events)  # interactive scatter speed vs frame
 
-    # --- COVERAGE (1 punto por track) ---
-    cov_events = vis.collect_metric_events(metrics, "coverage")
-    vis.plot_metric_events_scatter(cov_events, "coverage")
-
-    # --- mean_speed por track ---
-    mean_speed_events = vis.collect_metric_events(metrics, "mean_speed")
-    vis.plot_metric_events_scatter(mean_speed_events, "mean_speed")
-
-    # --- color_diff por track ---
-    color_diff_events = vis.collect_metric_events(metrics, "color_diff")
-    vis.plot_metric_events_scatter(color_diff_events, "color_diff")
-'''
-    
-
-    

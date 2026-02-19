@@ -31,7 +31,7 @@ Modelos preentrenados de Ultralytics en COCO (80 clases). Se usan como punto de 
 - **v8**: YOLOv8m, YOLOv8l, YOLOv8x (diferentes tamaños, velocidad/precisión)
 - **v11**: YOLOv11m, YOLOv11l, YOLOv11x (arquitectura más reciente)
 
-Referenciados en `config.yaml` como `paths.models.yolo_base`, `yolo_v8_m`, `yolo_v11_m`, etc.
+Referenciados en `config.yaml` como `paths.models.yolo_v8_m`, `yolo_v11_m`, etc.
 
 ### Modelo fine-tuned de jugadores (`finetuning/`)
 
@@ -61,11 +61,11 @@ Este script usa `YOLO(nombre)` de Ultralytics que descarga automáticamente desd
    ```bash
    python scripts/train/finetune_player.py
    ```
-2. YOLO guarda los pesos en `runs/detect/finetuning/weights/best.pt`.
+2. YOLO guarda los pesos en `models/finetuning/finetuning/weights/best.pt`.
 3. Copiar manualmente al directorio correspondiente:
    ```bash
    # Windows
-   copy runs\detect\finetuning\weights\best.pt models\finetuning\yolov11m.pt
+   copy models\finetuning\finetuning\weights\best.pt models\finetuning\yolov11m.pt
    ```
 
 ### Alternativa: copiar desde entrenamiento previo

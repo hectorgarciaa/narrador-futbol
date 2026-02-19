@@ -81,7 +81,7 @@ import json
 from football_ai.evaluation import Evaluator, ExperimentVisualizer
 
 # Cargar tracks de una ejecución
-with open("scripts/tracks.json") as f:
+with open("output/pruebaTracker/tracks.json") as f:
     tracks_todos = json.load(f)
 
 # Comparar experimentos

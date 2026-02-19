@@ -232,7 +232,7 @@ python scripts/train/finetune_player.py
 ```bash
 python scripts/track_experiments.py
 ```
-Genera `scripts/tracks.json` con todos los experimentos para analizar con `experiments/visualization/experiments_comparator.ipynb`.
+Genera `output/pruebaTracker/tracks.json` con todos los experimentos para analizar con `experiments/visualization/experiments_comparator.ipynb`.
 
 ---
 

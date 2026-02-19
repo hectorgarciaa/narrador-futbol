@@ -28,15 +28,18 @@ ENV/
 *~
 
 # Dataset files
-# data/detection
+data/detection/**
+!data/detection/.gitkeep
+data/partidoPrueba/*.mp4
 
 # Model files (large binary files, exclude all)
 models/finetuning/*.pt
 models/finetuning-balon/*.pt
-models/yolo/*.pt
+models/yolo/**/*.pt
 
 # Output files
-# outputs/
+output/**
+!output/.gitkeep
 *.avi
 *.mp4
 pruebaTracker

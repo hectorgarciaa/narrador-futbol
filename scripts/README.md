@@ -19,7 +19,7 @@ python scripts/<nombre>.py
 **Flujo:**
 1. Lee `paths.models.yolo_v11_m` y `paths.data.video_08fd33` de `config.yaml`.
 2. Instancia YOLO directamente (sin `Detector`) y llama a `model()` con `save=True`.
-3. Guarda el video anotado en `output/pruebaDeteccionYolo/`.
+3. Guarda el video anotado en `output/yoloDetectionTest/` (dentro del directorio base de output configurado).
 
 ---
 
@@ -56,7 +56,7 @@ python scripts/<nombre>.py
 2. Instancia `Tracker` y llama a `get_tracks()`.
 3. Guarda los tracks en `output/tracks_json/tracker/tracks.json` con `json.dump` + `convert_to_serializable`.
 4. Genera el video anotado con `Drawer.draw_tracks()`.
-5. Llama a `Evaluator` y `MetricsVisualizer` para imprimir métricas en consola.
+5. Llama a `Evaluator` para imprimir métricas en consola.
 
 Es el script principal del proyecto y sirve como referencia de cómo usar el paquete `football_ai` completo.
 
@@ -117,9 +117,9 @@ python scripts/data/download_datasets.py
 **Objetivo:** Entrenar un modelo YOLO preentrenado sobre el dataset de fútbol para las cuatro clases del proyecto.
 
 **Flujo:**
-1. Carga el modelo base definido en `config.yaml` (`paths.models.yolo_base`).
+1. Carga el modelo base definido en `config.yaml` (`paths.models.yolo_v11_m`).
 2. Llama a `model.train()` con el dataset (`paths.data.dataset_football_ai`), épocas y batch configurables en `config.yaml` bajo `finetuning`.
-3. YOLO guarda automáticamente los resultados en `runs/detect/finetuning/weights/best.pt`.
+3. YOLO guarda automáticamente los resultados en `models/finetuning/finetuning/weights/best.pt` (según `project` y `name` del script).
 
 Ejecución:
 ```bash
@@ -130,5 +130,5 @@ Los pesos resultantes se deben copiar manualmente como `models/finetuning/yolov1
 
 ```bash
 # Windows
-copy runs\detect\finetuning\weights\best.pt models\finetuning\yolov11m.pt
+copy models\finetuning\finetuning\weights\best.pt models\finetuning\yolov11m.pt
 ```
