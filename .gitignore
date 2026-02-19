@@ -29,8 +29,6 @@ ENV/
 
 # Dataset files
 data/detection/
-football-ai-2
-FootBall-Detection-2
 
 # Model files (large binary files, exclude all)
 models/
