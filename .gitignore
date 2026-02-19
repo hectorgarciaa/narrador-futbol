@@ -3,3 +3,8 @@ yolov8x.pt
 yolov11x.pt
 *.avi
 pruebaTracker
+
+
+.venv/
+
+football_ai.egg-info/
