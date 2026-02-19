@@ -34,8 +34,6 @@ FootBall-Detection-2
 
 # Model files (large binary files, exclude all)
 models/
-yolov8x.pt
-yolov11x.pt
 
 # Output files
 output/
