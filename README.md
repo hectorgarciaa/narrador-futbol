@@ -49,6 +49,7 @@ narrador-futbol/
 ├── pyproject.toml          # Metadatos del paquete Python
 ├── requirements.txt        # Dependencias
 ├── clean_project.py        # Script de limpieza de archivos generados
+├── verify_setup.py         # Script para verificar que todo esta listo
 │
 ├── football_ai/            # Paquete principal (toda la lógica de negocio)
 │   ├── core/               # Configuración, logging, serialización
