@@ -56,6 +56,76 @@ El objetivo de este proyecto es crear un **pipeline completo de narración de pa
 
 ---
 
+## 🐍 Entorno recomendado
+
+Este repositorio está orientado a `Python 3.13.7`.
+
+Configuración sugerida:
+
+```bash
+python3.13 -m venv .venv
+source .venv/bin/activate
+python --version
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
+```
+
+---
+
+## 🎯 Límites de tracking en Fase 1
+
+Para reducir creación de IDs nuevos y mantener estabilidad en el tracking, el pipeline de `src/tracking/main.py` usa límites de tracks por clase:
+
+- `player`: 22
+- `ball`: 1
+- `referee`: 3
+
+Se configuran en `MAX_TRACKS_PER_CLASS` y se pasan al `Tracker`.
+
+Además, en `TRACKER_CONF` se puede fijar un máximo global de IDs visibles con:
+- `max_total_tracks: 25`
+
+Cuando se alcanza ese máximo, los nuevos IDs crudos que devuelve ByteTrack se reasignan a IDs previos en la salida final, con estas reglas:
+- No se permite reasignar un jugador/portero a un ID previo de otro equipo.
+- Si un `raw tracker id` ya estaba asociado a una clase (por ejemplo `referee`) y en un frame aparece con otra incompatible (por ejemplo `player`), se mantiene la clase histórica del ID para evitar crear una nueva identidad en otra clase.
+- Si una detección entra como `player` pero hay un `referee` reciente y cercano perdido, se prioriza recuperar ese ID de árbitro antes de crear/asignar un ID de jugador.
+- Si una detección de `referee` no pasa el matching estricto, se intenta igualmente reutilizar el ID de árbitro previo más cercano antes de crear un ID nuevo.
+- En `referee`, además del orden por tiempo perdido, se aplica un umbral de cercanía espacial para evitar cambios de ID entre árbitros lejanos.
+- Cada candidato debe pasar un filtro de movimiento: el salto de posición entre `bbox` anterior y actual no puede ser desproporcionado frente a su movimiento histórico medio.
+- En reasignación, los IDs perdidos se procesan por orden de menor tiempo perdido y cada ID se asocia a la detección compatible más cercana disponible; luego se pasa al siguiente ID.
+- Si se alcanzó el límite por clase (`player=22`, `referee=3`, `ball=1`), no se crean IDs nuevos de esa clase.
+
+Nota: los conteos que imprime YOLO durante inferencia son detecciones crudas por frame y no representan los límites finales del tracker.  
+La validación del límite debe hacerse sobre la salida `tracks` generada por `Tracker.get_tracks(...)`.
+
+Con límites activos, se mantiene restricción estricta por equipo para evitar cruces de identidad:
+- `team_mismatch_penalty: 1000.0`
+- `second_match_threshold: 0.9`
+- `unconfirmed_match_threshold: 0.8`
+- `reassign_motion_factor: 1.0`
+- `reassign_min_distance: 25.0`
+- `reassign_min_samples: 3`
+- `referee_recovery_max_lost_frames: 3`
+- `referee_recovery_max_distance: 45.0`
+- `enforce_internal_class_limits: False` para priorizar reasignación a IDs previos y evitar descartar detecciones antes del remapeo.
+
+Estos parámetros se configuran dentro de `TRACKER_CONF` en `src/tracking/main.py`.
+
+---
+
+## ✅ Regla de validación antes de entregar cambios
+
+Cuando se cambie código ejecutable (especialmente en detección/tracking), se debe ejecutar al menos el comando principal afectado y confirmar que arranca sin error inicial.
+
+Ejemplo tracking:
+
+```bash
+cd src/tracking
+python main.py
+```
+
+---
+
 ## 🗂️ Estructura del Proyecto
 
 data/

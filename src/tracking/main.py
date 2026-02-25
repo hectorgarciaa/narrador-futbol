@@ -28,7 +28,7 @@ def saveResult(tracks):
 if __name__ == "__main__":
 
     MODEL_PATH  = "../../models/finetuning/v11/yolov11m/weights/best.pt"
-    VIDEO_PATH  = "../../data/partidoPrueba/partido.mp4"
+    VIDEO_PATH  = "../../data/partidoPrueba/partido_ajustado.mp4"
     TRACK_PATH  = "../../output/tracks_json/tracker/tracks_m.json"
     OUTPUT_PATH = "../../output/tracks_json/tracker/tracks.json"
     SHOWKMEANS = False
@@ -43,10 +43,38 @@ if __name__ == "__main__":
     MT = 0.945
     MCF = 5
     BALL_MIN_CONF = 0.01
+    MAX_TRACKS_PER_CLASS = {
+        "player": 22,
+        "ball": 1,
+        "referee": 3,
+    }
     
-    TRACKER_CONF = { "track_thresh": TT, "track_buffer": 90, "match_thresh": MT, "frame_rate": 25, "minimum_consecutive_frames": MCF }
+    TRACKER_CONF = {
+        "track_thresh": TT,
+        "track_buffer": 90,
+        "match_thresh": MT,
+        "frame_rate": 25,
+        "minimum_consecutive_frames": MCF,
+        "max_total_tracks": 25,
+        "enforce_internal_class_limits": False,
+        "team_mismatch_penalty": 1000.0,
+        "second_match_threshold": 0.9,
+        "unconfirmed_match_threshold": 0.8,
+        "reassign_motion_factor": 1.0,
+        "reassign_min_distance": 25.0,
+        "reassign_min_samples": 3,
+        "referee_recovery_max_lost_frames": 3,
+        "referee_recovery_max_distance": 45.0,
+    }
 
-    tracker = Tracker(MODEL_PATH, CONF, TRACKER_CONF, TEAM_COLORS, ball_min_conf=BALL_MIN_CONF)
+    tracker = Tracker(
+        MODEL_PATH,
+        CONF,
+        TRACKER_CONF,
+        TEAM_COLORS,
+        ball_min_conf=BALL_MIN_CONF,
+        max_tracks_per_class=MAX_TRACKS_PER_CLASS,
+    )
     tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
     drawer = Drawer(colors = { "player": (0, 255, 0), "goalkeeper": (0, 255, 255), "referee": (255, 0, 0), "ball": (0, 0, 255) })
     drawer.draw_tracks(tracks, VIDEO_PATH, OUTPUT, show=SHOW_OUTPUT)

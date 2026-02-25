@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Dict, Optional
 
 from supervision.detection.core import Detections
 from supervision.detection.utils.iou_and_nms import box_iou_batch
@@ -42,9 +43,20 @@ class ByteTrack:
         minimum_matching_threshold: float = 0.8,
         frame_rate: int = 30,
         minimum_consecutive_frames: int = 1,
+        max_tracks_per_class: Optional[Dict[str, int]] = None,
+        team_mismatch_penalty: float = 1000.0,
+        second_match_threshold: float = 0.7,
+        unconfirmed_match_threshold: float = 0.8,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
+        self.max_tracks_per_class = max_tracks_per_class or {}
+        self.team_mismatch_penalty = team_mismatch_penalty
+        self.second_match_threshold = second_match_threshold
+        self.unconfirmed_match_threshold = unconfirmed_match_threshold
+        self.assigned_track_ids_by_class = {
+            class_name: set() for class_name in self.max_tracks_per_class
+        }
 
         self.frame_id = 0
         self.det_thresh = self.track_activation_threshold + 0.1
@@ -62,7 +74,26 @@ class ByteTrack:
         self.internal_id_counter = IdCounter()
         self.external_id_counter = IdCounter(start_id=1)
 
-    def update_with_detections(self, detections: Detections, team_labels) -> Detections:
+    def _can_activate_track(self, class_name: Optional[str]) -> bool:
+        if class_name is None:
+            return True
+        class_limit = self.max_tracks_per_class.get(class_name)
+        if class_limit is None:
+            return True
+        assigned_ids = self.assigned_track_ids_by_class.setdefault(class_name, set())
+        return len(assigned_ids) < class_limit
+
+    def _register_track(self, track: STrack) -> None:
+        class_name = getattr(track, "class_name", None)
+        if class_name is None or class_name not in self.max_tracks_per_class:
+            return
+        self.assigned_track_ids_by_class.setdefault(class_name, set()).add(
+            int(track.external_track_id)
+        )
+
+    def update_with_detections(
+        self, detections: Detections, team_labels, class_labels=None
+    ) -> Detections:
         """
         Updates the tracker with the provided detections and returns the updated
         detection results.
@@ -107,7 +138,11 @@ class ByteTrack:
                 detections.confidence[:, np.newaxis],
             )
         )
-        tracks = self.update_with_tensors(tensors=tensors, team_labels=team_labels)
+        tracks = self.update_with_tensors(
+            tensors=tensors,
+            team_labels=team_labels,
+            class_labels=class_labels,
+        )
 
         if len(tracks) > 0:
             detection_bounding_boxes = np.asarray([det[:4] for det in tensors])
@@ -116,6 +151,12 @@ class ByteTrack:
             ious = box_iou_batch(detection_bounding_boxes, track_bounding_boxes)
 
             iou_costs = 1 - ious
+            if class_labels is not None:
+                for i_detection, det_class in enumerate(class_labels):
+                    for i_track, track in enumerate(tracks):
+                        track_class = getattr(track, "class_name", None)
+                        if track_class is not None and det_class != track_class:
+                            iou_costs[i_detection, i_track] += 1000
 
             matches, _, _ = matching.linear_assignment(iou_costs, 0.5)
             detections.tracker_id = np.full(len(detections), -1, dtype=int)
@@ -147,8 +188,16 @@ class ByteTrack:
         self.tracked_tracks = []
         self.lost_tracks = []
         self.removed_tracks = []
+        self.assigned_track_ids_by_class = {
+            class_name: set() for class_name in self.max_tracks_per_class
+        }
 
-    def update_with_tensors(self, tensors: np.ndarray, team_labels) -> list[STrack]:
+    def update_with_tensors(
+        self,
+        tensors: np.ndarray,
+        team_labels,
+        class_labels=None,
+    ) -> list[STrack]:
         """
         Updates the tracker with the provided tensors and returns the updated tracks.
 
@@ -176,9 +225,11 @@ class ByteTrack:
         dets = bboxes[remain_inds]
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
+        keep_indices = np.where(remain_inds)[0]
+        second_indices = np.where(inds_second)[0]
 
         detections = []
-        for i, (tlbr, s) in enumerate(zip(dets, scores_keep)):
+        for keep_idx, tlbr, s in zip(keep_indices, dets, scores_keep):
             det = STrack(
                 STrack.tlbr_to_tlwh(tlbr),
                 s,
@@ -187,11 +238,16 @@ class ByteTrack:
                 self.internal_id_counter,
                 self.external_id_counter,
             )
-            if team_labels is not None and i < len(team_labels):
-                det.equipo = team_labels[i]  # 🔹 asigna el equipo correspondiente
-                #print("Asignado equipo:", det.equipo)
-            else:
-                det.equipo = None
+            det.equipo = (
+                team_labels[keep_idx]
+                if team_labels is not None and keep_idx < len(team_labels)
+                else None
+            )
+            det.class_name = (
+                class_labels[keep_idx]
+                if class_labels is not None and keep_idx < len(class_labels)
+                else None
+            )
             
             detections.append(det)
 
@@ -211,12 +267,15 @@ class ByteTrack:
         STrack.multi_predict(strack_pool, self.shared_kalman)
         dists = matching.iou_distance(strack_pool, detections)
 
-        # 🔹 Penalización extra si equipos distintos
+        # Penalizaciones en matching.
         for i, track in enumerate(strack_pool):
             for j, det in enumerate(detections):
                 if hasattr(track, "equipo") and hasattr(det, "equipo"):
                     if track.equipo != det.equipo:
-                        dists[i, j] += 1000  # penalización configurable
+                        dists[i, j] += self.team_mismatch_penalty
+                if hasattr(track, "class_name") and hasattr(det, "class_name"):
+                    if track.class_name != det.class_name:
+                        dists[i, j] += 1000  # evita cruces de IDs entre clases
 
         dists = matching.fuse_score(dists, detections)
         matches, u_track, u_detection = matching.linear_assignment(
@@ -242,12 +301,8 @@ class ByteTrack:
 
                 # Si se mantiene el error muchos frames, asumimos que sí cambió realmente
                 if track.team_switch_frames >= 5:
-                    print(f"🔄 Cambio confirmado: Track  ahora es {new_team}")
                     track.equipo = new_team
                     track.team_switch_frames = 0  # reset
-                else:
-                    # ⚠️ Cambio momentáneo: mantener equipo anterior
-                    new_team = old_team
 
             else:
                 # Resetear el contador si el equipo coincide
@@ -257,6 +312,10 @@ class ByteTrack:
                 # Asignar equipo si no tenía
                 if old_team is None and new_team is not None:
                     track.equipo = new_team
+            if getattr(track, "class_name", None) is None and getattr(
+                det, "class_name", None
+            ) is not None:
+                track.class_name = det.class_name
 
             # --- Actualización normal del track ---
             if track.state == TrackState.Tracked:
@@ -266,23 +325,17 @@ class ByteTrack:
                 track.re_activate(det, self.frame_id)
                 refind_stracks.append(track)
 
-
-        for itracked, idet in matches:
-            track = strack_pool[itracked]
-            det = detections[idet]
-            if track.state == TrackState.Tracked:
-                track.update(detections[idet], self.frame_id)
-                activated_starcks.append(track)
-            else:
-                track.re_activate(det, self.frame_id)
-                refind_stracks.append(track)
-
         """ Step 3: Second association, with low score detection boxes"""
         # association the untrack to the low score detections
         if len(dets_second) > 0:
             """Detections"""
-            detections_second = [
-                STrack(
+            detections_second = []
+            for second_idx, tlbr, score_second in zip(
+                second_indices,
+                dets_second,
+                scores_second,
+            ):
+                det = STrack(
                     STrack.tlbr_to_tlwh(tlbr),
                     score_second,
                     self.minimum_consecutive_frames,
@@ -290,8 +343,17 @@ class ByteTrack:
                     self.internal_id_counter,
                     self.external_id_counter,
                 )
-                for (tlbr, score_second) in zip(dets_second, scores_second)
-            ]
+                det.equipo = (
+                    team_labels[second_idx]
+                    if team_labels is not None and second_idx < len(team_labels)
+                    else None
+                )
+                det.class_name = (
+                    class_labels[second_idx]
+                    if class_labels is not None and second_idx < len(class_labels)
+                    else None
+                )
+                detections_second.append(det)
         else:
             detections_second = []
         r_tracked_stracks = [
@@ -300,8 +362,13 @@ class ByteTrack:
             if strack_pool[i].state == TrackState.Tracked
         ]
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
+        for i, track in enumerate(r_tracked_stracks):
+            for j, det in enumerate(detections_second):
+                if hasattr(track, "class_name") and hasattr(det, "class_name"):
+                    if track.class_name != det.class_name:
+                        dists[i, j] += 1000
         matches, u_track, u_detection_second = matching.linear_assignment(
-            dists, thresh=0.5
+            dists, thresh=self.second_match_threshold
         )
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
@@ -325,7 +392,7 @@ class ByteTrack:
 
         dists = matching.fuse_score(dists, detections)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(
-            dists, thresh=0.7
+            dists, thresh=self.unconfirmed_match_threshold
         )
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)
@@ -340,7 +407,10 @@ class ByteTrack:
             track = detections[inew]
             if track.score < self.det_thresh:
                 continue
+            if not self._can_activate_track(getattr(track, "class_name", None)):
+                continue
             track.activate(self.kalman_filter, self.frame_id)
+            self._register_track(track)
             activated_starcks.append(track)
         """ Step 5: Update state"""
         for track in self.lost_tracks:
