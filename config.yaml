@@ -9,12 +9,13 @@ paths:
     yolo_v8_x: "models/yolo/v8/yolov8x.pt"
     yolo_v11_m: "models/yolo/v11/yolov11m.pt"
     yolo_v11_x: "models/yolo/v11/yolov11x.pt"
-    finetuned_player: "models/finetuning/yolov11m.pt"
-    finetuned_ball: "models/finetuning-balon/yolov11m.pt"
+    finetuned_player: "models/finetuning/yolov11m/weights/best.pt"
+    finetuned_ball: "models/finetuning-balon/v11/yolov11m/weights/best.pt"
   
   # Datos
   data:
     video_prueba: "data/partidoPrueba/partido.mp4"
+    video_prueba_ajustado: "data/partidoPrueba/partido_ajustado.mp4"
     video_prueba_corto: "data/partidoPrueba/partido_corto.mp4"
     video_prueba_medio: "data/partidoPrueba/partido_medio.mp4"
 
@@ -59,6 +60,28 @@ tracking:
   frame_rate: 25
   # Frames consecutivos mínimos para confirmar un track
   minimum_consecutive_frames: 5
+  # Límite global de IDs canónicos visibles
+  max_total_tracks: 25
+  # Si es false, el límite por clase se aplica en reasignación final, no dentro de ByteTrack
+  enforce_internal_class_limits: false
+  # Límite de tracks por clase en la salida final del tracker
+  max_tracks_per_class:
+    player: 22
+    ball: 1
+    referee: 3
+  # Penalización de distancia cuando el equipo detectado difiere del track
+  team_mismatch_penalty: 1000.0
+  # Umbral para segunda asociación (detecciones de baja confianza)
+  second_match_threshold: 0.9
+  # Umbral para tracks no confirmados
+  unconfirmed_match_threshold: 0.8
+  # Parámetros de reasignación y control de movimiento
+  reassign_motion_factor: 1.0
+  reassign_min_distance: 25.0
+  reassign_min_samples: 3
+  # Recuperación específica de árbitros
+  referee_recovery_max_lost_frames: 3
+  referee_recovery_max_distance: 45.0
   # Penalización de distancia cuando el equipo detectado difiere del track
   team_penalty: 1000
   # Frames consecutivos con equipo distinto para confirmar cambio real

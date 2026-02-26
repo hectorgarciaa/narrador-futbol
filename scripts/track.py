@@ -2,6 +2,11 @@ import json
 import sys
 from pathlib import Path
 
+# Permite ejecutar `python scripts/track.py` sin instalar el paquete en editable.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from football_ai.tracking import Tracker
 from football_ai.evaluation import Evaluator
 from football_ai.visualization import Drawer
@@ -35,7 +40,12 @@ if __name__ == "__main__":
     try:
         # Get paths and parameters from config
         MODEL_PATH = str(config.get_path('paths', 'models', 'finetuned_player'))
-        VIDEO_PATH = str(config.get_path('paths', 'data', 'video_prueba'))
+        video_config_key = (
+            "video_prueba_ajustado"
+            if config.get('paths', 'data', 'video_prueba_ajustado') is not None
+            else "video_prueba"
+        )
+        VIDEO_PATH = str(config.get_path('paths', 'data', video_config_key))
         OUTPUT = str(config.get_path('paths', 'output', 'prueba_tracker', create_if_missing=True) / "nueva_prueba.mp4")
         OUTPUT_PATH = str(config.get_path('paths', 'output', 'tracks_json', create_if_missing=True) / "tracker" / "tracks.json")
         
@@ -47,12 +57,34 @@ if __name__ == "__main__":
         
         # Tracking configuration
         tracking_cfg = config.tracking
+        MAX_TRACKS_PER_CLASS = tracking_cfg.get(
+            "max_tracks_per_class",
+            {"player": 22, "ball": 1, "referee": 3},
+        )
         TRACKER_CONF = {
             "track_thresh": tracking_cfg['track_thresh'],
             "track_buffer": tracking_cfg['track_buffer'],
             "match_thresh": tracking_cfg['match_thresh'],
             "frame_rate": tracking_cfg['frame_rate'],
-            "minimum_consecutive_frames": tracking_cfg['minimum_consecutive_frames']
+            "minimum_consecutive_frames": tracking_cfg['minimum_consecutive_frames'],
+            "max_total_tracks": tracking_cfg.get("max_total_tracks", 25),
+            "enforce_internal_class_limits": tracking_cfg.get(
+                "enforce_internal_class_limits", False
+            ),
+            "team_mismatch_penalty": tracking_cfg.get("team_mismatch_penalty", 1000.0),
+            "second_match_threshold": tracking_cfg.get("second_match_threshold", 0.9),
+            "unconfirmed_match_threshold": tracking_cfg.get(
+                "unconfirmed_match_threshold", 0.8
+            ),
+            "reassign_motion_factor": tracking_cfg.get("reassign_motion_factor", 1.0),
+            "reassign_min_distance": tracking_cfg.get("reassign_min_distance", 25.0),
+            "reassign_min_samples": tracking_cfg.get("reassign_min_samples", 3),
+            "referee_recovery_max_lost_frames": tracking_cfg.get(
+                "referee_recovery_max_lost_frames", 3
+            ),
+            "referee_recovery_max_distance": tracking_cfg.get(
+                "referee_recovery_max_distance", 45.0
+            ),
         }
         
         # Team colors
@@ -63,7 +95,14 @@ if __name__ == "__main__":
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         
         # Run tracking
-        tracker = Tracker(MODEL_PATH, CONF, TRACKER_CONF, TEAM_COLORS, ball_min_conf=BALL_MIN_CONF)
+        tracker = Tracker(
+            MODEL_PATH,
+            CONF,
+            TRACKER_CONF,
+            TEAM_COLORS,
+            ball_min_conf=BALL_MIN_CONF,
+            max_tracks_per_class=MAX_TRACKS_PER_CLASS,
+        )
         logger.info("Extracting tracks from video...")
         tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
         
@@ -98,4 +137,3 @@ if __name__ == "__main__":
         sys.exit(1)
     
     logger.info("Process completed successfully")
-

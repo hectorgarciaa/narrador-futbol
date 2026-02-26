@@ -104,7 +104,8 @@ narrador-futbol/
 ## 📦 Instalación
 
 ### Requisitos previos
-- **Python 3.10+** (compatible con 3.8, se recomienda 3.10.x)
+- **Python 3.13.7** (entorno objetivo recomendado del repositorio)
+- **Compatibilidad declarada del paquete:** `pyproject.toml` permite `>=3.8`
 - **~10 GB de espacio libre** (modelos + datasets)
 - **CUDA 12.4 + GPU NVIDIA** (opcional, para aceleración — CPU funciona pero es lento)
 
@@ -123,6 +124,9 @@ python -m venv .venv
 # Linux/Mac
 python -m venv .venv
 source .venv/bin/activate
+
+# Verifica la versión activa (objetivo recomendado: 3.13.7)
+python --version
 ```
 
 ### Paso 3: Actualizar pip e instalar PyTorch con CUDA support
@@ -189,7 +193,7 @@ python verify_setup.py
 ```
 
 Este script verifica:
-- ✓ Python version >= 3.8
+- ✓ Python disponible (objetivo recomendado: 3.13.7)
 - ✓ Venv activo
 - ✓ Archivos de configuración (config.yaml, .env)
 - ✓ Dependencias instaladas
@@ -208,6 +212,7 @@ Todos los scripts se ejecutan desde la **raíz del proyecto**. La configuración
 python scripts/track.py
 ```
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
+Si existe `paths.data.video_prueba_ajustado` en `config.yaml`, ese vídeo se usa por defecto.
 
 ### Detección básica (sin fine-tuning)
 ```bash
@@ -244,8 +249,9 @@ Toda la configuración está centralizada en `config.yaml`. Los valores más rel
 ```yaml
 paths:
   models:
-    finetuned_player: "models/finetuning/yolov11m.pt"
+    finetuned_player: "models/finetuning/yolov11m/weights/best.pt"
   data:
+    video_prueba_ajustado: "data/partidoPrueba/partido_ajustado.mp4"
     video_prueba: "data/partidoPrueba/partido.mp4"
 
 detection:
@@ -258,6 +264,11 @@ tracking:
   match_thresh: 0.945         # IoU mínimo para asociar detección a track
   frame_rate: 25
   minimum_consecutive_frames: 5
+  max_total_tracks: 25
+  max_tracks_per_class:
+    player: 22
+    ball: 1
+    referee: 3
 
 teams:
   Real Madrid:
@@ -265,6 +276,35 @@ teams:
   Wolfsburgo:
     color_rgb: [224, 77, 196]
 ```
+
+---
+
+## 🎯 Límites de tracking en Fase 1
+
+Para reducir creación de IDs nuevos y mantener estabilidad en el tracking, el sistema usa límites por clase sobre la salida final `tracks`:
+
+- `player`: 22
+- `ball`: 1
+- `referee`: 3
+
+Puntos importantes:
+
+- La validación de límites se hace sobre `Tracker.get_tracks(...)`, no sobre el conteo crudo de detecciones YOLO por frame.
+- Cuando se alcanza el máximo global de IDs visibles (`max_total_tracks`), se prioriza reasignar IDs previos compatibles antes de crear IDs nuevos.
+- La reasignación mantiene coherencia por clase/equipo y aplica filtros de movimiento/cercanía para evitar saltos de identidad.
+
+Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/tracking/byte_tracker.py`):
+
+- `max_total_tracks`
+- `enforce_internal_class_limits`
+- `team_mismatch_penalty`
+- `second_match_threshold`
+- `unconfirmed_match_threshold`
+- `reassign_motion_factor`
+- `reassign_min_distance`
+- `reassign_min_samples`
+- `referee_recovery_max_lost_frames`
+- `referee_recovery_max_distance`
 
 ---
 
@@ -418,6 +458,20 @@ python verify_setup.py
 # Solo si cambiaste setup.py o pyproject.toml:
 pip install -e .
 ```
+
+---
+
+## ✅ Validación mínima al cambiar código
+
+Si cambias código ejecutable (especialmente en detección/tracking), ejecuta al menos el pipeline principal afectado y verifica que arranca sin excepción inicial.
+
+Ejemplo:
+
+```bash
+python scripts/track.py
+```
+
+Si ejecutas en entorno headless, usa `show_output: false` en `config.yaml`.
 
 ---
 

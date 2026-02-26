@@ -49,3 +49,9 @@ pruebaTracker
 # OS
 .DS_Store
 Thumbs.db
+
+.venv/
+
+football_ai.egg-info/
+
+.env
