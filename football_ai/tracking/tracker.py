@@ -3,6 +3,7 @@ import supervision as sv
 
 from football_ai.detection import Detector
 from football_ai.identification import TeamDetector
+from football_ai.reference_points import PnLCalibFieldProjector
 from football_ai.tracking.byte_tracker import ByteTrack
 
 class Tracker:
@@ -14,9 +15,13 @@ class Tracker:
         team_colors,
         ball_min_conf=0.01,
         max_tracks_per_class=None,
+        field_tracking_conf=None,
+        project_root=None,
     ):
         if max_tracks_per_class is None:
             max_tracks_per_class = {"player": 22, "ball": 1, "referee": 3}
+        if field_tracking_conf is None:
+            field_tracking_conf = {}
 
         self.model = Detector(model_path, conf)
         # Compatibilidad: nueva convención snake_case y alias legacy camelCase.
@@ -42,6 +47,16 @@ class Tracker:
             team_mismatch_penalty=tracker_conf.get("team_mismatch_penalty", 1000.0),
             second_match_threshold=tracker_conf.get("second_match_threshold", 0.7),
             unconfirmed_match_threshold=tracker_conf.get("unconfirmed_match_threshold", 0.8),
+            use_field_positions=field_tracking_conf.get("enabled", False),
+            field_position_classes=field_tracking_conf.get(
+                "classes", ["player", "goalkeeper"]
+            ),
+            field_distance_gate_m=field_tracking_conf.get(
+                "match_distance_gate_m", 8.0
+            ),
+            field_distance_weight=field_tracking_conf.get(
+                "match_distance_weight", 0.25
+            ),
         )
         self.ball_min_conf = ball_min_conf
         self.reassign_motion_factor = float(
@@ -59,6 +74,39 @@ class Tracker:
         self.referee_recovery_max_distance = float(
             tracker_conf.get("referee_recovery_max_distance", 45.0)
         )
+        self.use_field_positions = bool(field_tracking_conf.get("enabled", False))
+        self.field_position_classes = frozenset(
+            field_tracking_conf.get("classes", ["player", "goalkeeper"])
+        )
+        self.reassign_min_field_distance_m = float(
+            field_tracking_conf.get("reassign_min_field_distance_m", 4.0)
+        )
+        self.field_projector = None
+        if self.use_field_positions:
+            method = field_tracking_conf.get("method", "pnlcalib")
+            if method != "pnlcalib":
+                raise ValueError(
+                    f"Método de proyección de campo no soportado: {method}"
+                )
+            self.field_projector = PnLCalibFieldProjector(
+                project_root=project_root,
+                field_length_m=float(field_tracking_conf.get("field_length_m", 106.0)),
+                field_width_m=float(field_tracking_conf.get("field_width_m", 68.0)),
+                max_width=int(field_tracking_conf.get("max_width", 1280)),
+                bottom_offset_ratio=float(
+                    field_tracking_conf.get("bottom_offset_ratio", 0.04)
+                ),
+                keypoint_threshold=float(
+                    field_tracking_conf.get("keypoint_threshold", 0.3434)
+                ),
+                line_threshold=float(
+                    field_tracking_conf.get("line_threshold", 0.7867)
+                ),
+                pnl_refine=bool(field_tracking_conf.get("pnl_refine", True)),
+                temporal_blend=float(field_tracking_conf.get("temporal_blend", 0.20)),
+                pixels_per_meter=int(field_tracking_conf.get("pixels_per_meter", 8)),
+                device=field_tracking_conf.get("device"),
+            )
 
     @staticmethod
     def _bbox_to_list(bbox):
@@ -72,6 +120,22 @@ class Tracker:
     def _bbox_center(bbox):
         x1, y1, x2, y2 = bbox
         return (0.5 * (x1 + x2), 0.5 * (y1 + y2))
+
+    @staticmethod
+    def _field_position_to_tuple(field_position):
+        if field_position is None:
+            return None
+        field_position = np.asarray(field_position, dtype=np.float32).reshape(-1)
+        if field_position.size < 2 or not np.all(np.isfinite(field_position[:2])):
+            return None
+        return (float(field_position[0]), float(field_position[1]))
+
+    def _use_field_position_for_class(self, class_name, field_position=None):
+        if not self.use_field_positions:
+            return False
+        if class_name not in self.field_position_classes:
+            return False
+        return self._field_position_to_tuple(field_position) is not None
 
     def _next_free_canonical_id(self, canonical_state):
         for canonical_id in range(1, self.max_total_tracks + 1):
@@ -95,16 +159,45 @@ class Tracker:
             return True
         return previous_team == new_team
 
-    def _step_distance(self, previous_bbox, new_bbox):
+    def _step_distance(
+        self,
+        previous_bbox,
+        new_bbox,
+        class_name=None,
+        previous_field_position=None,
+        new_field_position=None,
+    ):
+        if self._use_field_position_for_class(
+            class_name,
+            previous_field_position,
+        ) and self._use_field_position_for_class(class_name, new_field_position):
+            px, py = self._field_position_to_tuple(previous_field_position)
+            nx, ny = self._field_position_to_tuple(new_field_position)
+            return float(((nx - px) ** 2 + (ny - py) ** 2) ** 0.5)
         if previous_bbox is None or new_bbox is None:
             return None
         px, py = self._bbox_center(previous_bbox)
         nx, ny = self._bbox_center(new_bbox)
         return float(((nx - px) ** 2 + (ny - py) ** 2) ** 0.5)
 
-    def _is_motion_compatible(self, previous_state, new_bbox, current_frame):
+    def _is_motion_compatible(
+        self,
+        previous_state,
+        new_bbox,
+        current_frame,
+        class_name=None,
+        new_field_position=None,
+    ):
+        effective_class = class_name or previous_state.get("class_name")
         previous_bbox = previous_state.get("bbox")
-        step_distance = self._step_distance(previous_bbox, new_bbox)
+        previous_field_position = previous_state.get("field_position")
+        step_distance = self._step_distance(
+            previous_bbox,
+            new_bbox,
+            class_name=effective_class,
+            previous_field_position=previous_field_position,
+            new_field_position=new_field_position,
+        )
         if step_distance is None:
             return True
 
@@ -115,7 +208,10 @@ class Tracker:
         samples = int(previous_state.get("movement_samples", 0))
         mean_step_distance = float(previous_state.get("mean_step_distance", 0.0))
 
-        max_allowed_jump = self.reassign_min_distance
+        if self._use_field_position_for_class(effective_class, previous_field_position):
+            max_allowed_jump = self.reassign_min_field_distance_m
+        else:
+            max_allowed_jump = self.reassign_min_distance
         if samples >= self.reassign_min_samples:
             expected_jump = mean_step_distance * lost_frames
             max_allowed_jump = max(
@@ -125,7 +221,21 @@ class Tracker:
 
         return step_distance <= max_allowed_jump
 
-    def _bbox_distance_sq(self, bbox_a, bbox_b):
+    def _bbox_distance_sq(
+        self,
+        bbox_a,
+        bbox_b,
+        class_name=None,
+        field_position_a=None,
+        field_position_b=None,
+    ):
+        if self._use_field_position_for_class(
+            class_name,
+            field_position_a,
+        ) and self._use_field_position_for_class(class_name, field_position_b):
+            ax, ay = self._field_position_to_tuple(field_position_a)
+            bx, by = self._field_position_to_tuple(field_position_b)
+            return (ax - bx) ** 2 + (ay - by) ** 2
         if bbox_a is None or bbox_b is None:
             return None
         ax, ay = self._bbox_center(bbox_a)
@@ -138,6 +248,7 @@ class Tracker:
         detection_class,
         detection_team,
         detection_bbox,
+        detection_field_position,
         current_frame,
     ):
         candidate_class = candidate_state.get("class_name")
@@ -155,6 +266,8 @@ class Tracker:
                 candidate_state,
                 detection_bbox,
                 current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
             ):
                 return None
 
@@ -163,6 +276,9 @@ class Tracker:
                 distance_sq = self._bbox_distance_sq(
                     candidate_state.get("bbox"),
                     detection_bbox,
+                    class_name=candidate_class,
+                    field_position_a=candidate_state.get("field_position"),
+                    field_position_b=detection_field_position,
                 )
                 if distance_sq is None:
                     return None
@@ -180,11 +296,16 @@ class Tracker:
                 candidate_state,
                 detection_bbox,
                 current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
             ):
                 return None
             distance_sq = self._bbox_distance_sq(
                 candidate_state.get("bbox"),
                 detection_bbox,
+                class_name=candidate_class,
+                field_position_a=candidate_state.get("field_position"),
+                field_position_b=detection_field_position,
             )
             if distance_sq is None:
                 return None
@@ -230,6 +351,7 @@ class Tracker:
                     pending["preferred_class_name"],
                     pending["detected_team"],
                     pending["bbox"],
+                    pending.get("field_position"),
                     current_frame,
                 )
                 if output_class_name is None:
@@ -238,6 +360,9 @@ class Tracker:
                 distance_sq = self._bbox_distance_sq(
                     candidate_state.get("bbox"),
                     pending["bbox"],
+                    class_name=output_class_name,
+                    field_position_a=candidate_state.get("field_position"),
+                    field_position_b=pending.get("field_position"),
                 )
                 if distance_sq is None:
                     continue
@@ -265,16 +390,24 @@ class Tracker:
         candidate_state,
         current_frame,
         class_name=None,
+        field_position=None,
     ):
         prev_bbox = candidate_state.get("bbox")
-        if prev_bbox is None:
+        prev_field_position = candidate_state.get("field_position")
+        if prev_bbox is None and prev_field_position is None:
             return None
-        cx, cy = self._bbox_center(bbox)
-        px, py = self._bbox_center(prev_bbox)
-        distance = (cx - px) ** 2 + (cy - py) ** 2
+        effective_class = class_name or candidate_state.get("class_name")
+        distance = self._bbox_distance_sq(
+            bbox,
+            prev_bbox,
+            class_name=effective_class,
+            field_position_a=field_position,
+            field_position_b=prev_field_position,
+        )
+        if distance is None:
+            return None
         last_frame = int(candidate_state.get("last_frame", current_frame))
         lost_frames = max(0, current_frame - last_frame)
-        effective_class = class_name or candidate_state.get("class_name")
         return self._priority_tuple(effective_class, lost_frames, distance)
 
     def _nearest_recent_referee_id(
@@ -283,6 +416,7 @@ class Tracker:
         candidate_ids,
         canonical_state,
         current_frame,
+        field_position=None,
     ):
         best_id = None
         best_priority = None
@@ -296,18 +430,36 @@ class Tracker:
             lost_frames = max(0, current_frame - last_frame)
             if lost_frames > self.referee_recovery_max_lost_frames:
                 continue
-            if not self._is_motion_compatible(state, bbox, current_frame):
+            if not self._is_motion_compatible(
+                state,
+                bbox,
+                current_frame,
+                class_name="referee",
+                new_field_position=field_position,
+            ):
                 continue
 
-            priority = self._candidate_priority(bbox, state, current_frame)
+            priority = self._candidate_priority(
+                bbox,
+                state,
+                current_frame,
+                class_name="referee",
+                field_position=field_position,
+            )
             if priority is None:
                 continue
             prev_bbox = state.get("bbox")
             if prev_bbox is None:
                 continue
-            cx, cy = self._bbox_center(bbox)
-            px, py = self._bbox_center(prev_bbox)
-            distance_sq = (cx - px) ** 2 + (cy - py) ** 2
+            distance_sq = self._bbox_distance_sq(
+                bbox,
+                prev_bbox,
+                class_name="referee",
+                field_position_a=field_position,
+                field_position_b=state.get("field_position"),
+            )
+            if distance_sq is None:
+                continue
             if distance_sq > max_distance_sq:
                 continue
 
@@ -333,6 +485,7 @@ class Tracker:
         current_frame,
         require_motion=True,
         max_distance=None,
+        field_position=None,
     ):
         best_id = None
         best_priority = None
@@ -348,6 +501,8 @@ class Tracker:
                 state,
                 bbox,
                 current_frame,
+                class_name=class_name,
+                new_field_position=field_position,
             ):
                 continue
 
@@ -356,16 +511,21 @@ class Tracker:
                 state,
                 current_frame,
                 class_name=class_name,
+                field_position=field_position,
             )
             if priority is None:
                 continue
             if max_distance_sq is not None:
                 prev_bbox = state.get("bbox")
-                if prev_bbox is None:
+                distance_sq = self._bbox_distance_sq(
+                    bbox,
+                    prev_bbox,
+                    class_name=class_name,
+                    field_position_a=field_position,
+                    field_position_b=state.get("field_position"),
+                )
+                if distance_sq is None:
                     continue
-                cx, cy = self._bbox_center(bbox)
-                px, py = self._bbox_center(prev_bbox)
-                distance_sq = (cx - px) ** 2 + (cy - py) ** 2
                 if distance_sq > max_distance_sq:
                     continue
             if best_priority is None or priority < best_priority:
@@ -382,6 +542,7 @@ class Tracker:
         class_name,
         team_name,
         current_frame,
+        field_position=None,
     ):
         if not candidate_ids:
             return None
@@ -415,6 +576,8 @@ class Tracker:
                 canonical_state[canonical_id],
                 bbox,
                 current_frame,
+                class_name=class_name,
+                new_field_position=field_position,
             )
         ]
         if not motion_compatible_ids:
@@ -428,6 +591,7 @@ class Tracker:
                 canonical_state[canonical_id],
                 current_frame,
                 class_name=class_name,
+                field_position=field_position,
             )
             if priority is None:
                 continue
@@ -450,6 +614,19 @@ class Tracker:
             teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
             teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
             class_labels = [dicc["class"] for dicc in teams_of_detected_objects]
+            field_projection = None
+            field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
+            ground_points_projected = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
+            if self.field_projector is not None:
+                original_frame_bgr = getattr(detections, "orig_img", None)
+                if original_frame_bgr is not None:
+                    field_projection = self.field_projector.project_detections(
+                        original_frame_bgr,
+                        detections_sv.xyxy,
+                        class_names=class_labels,
+                    )
+                    field_positions = field_projection.field_positions_m
+                    ground_points_projected = field_projection.ground_points_image_projected
 
             # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
             if detections_sv.data is None:
@@ -465,6 +642,12 @@ class Tracker:
             )
             detections_sv.data["bbox_size"] = np.array(
                 [dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float
+            )
+            detections_sv.data["field_position"] = np.asarray(
+                field_positions, dtype=np.float32
+            )
+            detections_sv.data["ground_point_image"] = np.asarray(
+                ground_points_projected, dtype=np.float32
             )
 
             tracks_detection = self.tracker.update_with_detections(
@@ -492,6 +675,7 @@ class Tracker:
                 bbox,
                 confidence,
                 detected_team,
+                field_position,
                 metadata,
             ):
                 previous_owner_raw_id = canonical_to_raw_id.get(canonical_id)
@@ -506,7 +690,13 @@ class Tracker:
                 previous_state = canonical_state.get(canonical_id, {})
                 prev_samples = int(previous_state.get("movement_samples", 0))
                 prev_mean = float(previous_state.get("mean_step_distance", 0.0))
-                step_distance = self._step_distance(previous_state.get("bbox"), bbox)
+                step_distance = self._step_distance(
+                    previous_state.get("bbox"),
+                    bbox,
+                    class_name=output_class_name,
+                    previous_field_position=previous_state.get("field_position"),
+                    new_field_position=field_position,
+                )
                 if step_distance is not None:
                     movement_samples = prev_samples + 1
                     if prev_samples <= 0:
@@ -523,11 +713,16 @@ class Tracker:
                     if detected_team is not None
                     else previous_state.get("team")
                 )
+                resolved_field_position = (
+                    self._field_position_to_tuple(field_position)
+                    or previous_state.get("field_position")
+                )
                 canonical_state[canonical_id] = {
                     "bbox": bbox,
                     "class_name": output_class_name,
                     "last_frame": n_frame,
                     "team": resolved_team,
+                    "field_position": resolved_field_position,
                     "movement_samples": movement_samples,
                     "mean_step_distance": mean_step_distance,
                 }
@@ -540,6 +735,16 @@ class Tracker:
                     "distances": metadata.get("distances"),
                     "shirt_color": metadata.get("shirt_color"),
                     "bbox_size": metadata.get("bbox_size"),
+                    "field_position_m": (
+                        list(self._field_position_to_tuple(field_position))
+                        if self._field_position_to_tuple(field_position) is not None
+                        else None
+                    ),
+                    "ground_point_image": (
+                        metadata.get("ground_point_image").tolist()
+                        if hasattr(metadata.get("ground_point_image"), "tolist")
+                        else metadata.get("ground_point_image")
+                    ),
                 }
 
             for object_detected in sorted_tracked_detections:
@@ -550,6 +755,7 @@ class Tracker:
                 bbox = self._bbox_to_list(bbox)
                 confidence = float(confidence)
                 detected_team = metadata.get("team")
+                field_position = metadata.get("field_position")
 
                 if class_name == "ball":
                     has_tracked_ball = True
@@ -562,6 +768,8 @@ class Tracker:
                             "distances": metadata.get("distances"),
                             "shirt_color": metadata.get("shirt_color"),
                             "bbox_size": metadata.get("bbox_size"),
+                            "field_position_m": None,
+                            "ground_point_image": None,
                         }
                     continue
 
@@ -583,6 +791,7 @@ class Tracker:
                             output_class_name,
                             detected_team,
                             bbox,
+                            field_position,
                             n_frame,
                         ) is None:
                             canonical_id = None
@@ -594,6 +803,7 @@ class Tracker:
                             "bbox": bbox,
                             "confidence": confidence,
                             "detected_team": detected_team,
+                            "field_position": field_position,
                             "metadata": metadata,
                             "preferred_class_name": output_class_name,
                         }
@@ -607,6 +817,7 @@ class Tracker:
                     bbox,
                     confidence,
                     detected_team,
+                    field_position,
                     metadata,
                 )
 
@@ -648,6 +859,7 @@ class Tracker:
                     pending["bbox"],
                     pending["confidence"],
                     pending["detected_team"],
+                    pending.get("field_position"),
                     pending["metadata"],
                 )
 
@@ -675,6 +887,8 @@ class Tracker:
                         "distances": None,
                         "shirt_color": None,
                         "bbox_size": float((x2 - x1) * (y2 - y1)),
+                        "field_position_m": None,
+                        "ground_point_image": None,
                     }
         
         return tracks

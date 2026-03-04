@@ -51,6 +51,10 @@ class ByteTrack:
         team_mismatch_penalty: float = 1000.0,
         second_match_threshold: float = 0.7,
         unconfirmed_match_threshold: float = 0.8,
+        use_field_positions: bool = False,
+        field_position_classes: Optional[list[str]] = None,
+        field_distance_gate_m: float = 8.0,
+        field_distance_weight: float = 0.25,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
@@ -58,6 +62,12 @@ class ByteTrack:
         self.team_mismatch_penalty = team_mismatch_penalty
         self.second_match_threshold = second_match_threshold
         self.unconfirmed_match_threshold = unconfirmed_match_threshold
+        self.use_field_positions = bool(use_field_positions)
+        self.field_position_classes = frozenset(
+            field_position_classes or ["player", "goalkeeper"]
+        )
+        self.field_distance_gate_m = float(field_distance_gate_m)
+        self.field_distance_weight = float(field_distance_weight)
         self.assigned_track_ids_by_class = {
             class_name: set() for class_name in self.max_tracks_per_class
         }
@@ -95,8 +105,81 @@ class ByteTrack:
             int(track.external_track_id)
         )
 
+    @staticmethod
+    def _field_position_to_array(field_position) -> Optional[np.ndarray]:
+        if field_position is None:
+            return None
+        field_position = np.asarray(field_position, dtype=np.float32).reshape(-1)
+        if field_position.size < 2 or not np.all(np.isfinite(field_position[:2])):
+            return None
+        return field_position[:2]
+
+    def _uses_field_positions_for_class(self, class_name: Optional[str]) -> bool:
+        if not self.use_field_positions:
+            return False
+        return class_name in self.field_position_classes
+
+    def _track_distance_gate(self, track: STrack) -> float:
+        lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
+        return self.field_distance_gate_m * lost_frames
+
+    def _apply_field_position_costs(
+        self,
+        dists: np.ndarray,
+        tracks: list[STrack],
+        detections: list[STrack],
+    ) -> np.ndarray:
+        if (
+            not self.use_field_positions
+            or dists.size == 0
+            or len(tracks) == 0
+            or len(detections) == 0
+        ):
+            return dists
+
+        for i, track in enumerate(tracks):
+            track_class = getattr(track, "class_name", None)
+            track_position = self._field_position_to_array(
+                getattr(track, "field_position", None)
+            )
+            if track_position is None or not self._uses_field_positions_for_class(track_class):
+                continue
+
+            max_distance = max(self._track_distance_gate(track), 1e-6)
+            for j, det in enumerate(detections):
+                det_class = getattr(det, "class_name", None)
+                if det_class != track_class:
+                    continue
+                det_position = self._field_position_to_array(
+                    getattr(det, "field_position", None)
+                )
+                if det_position is None:
+                    continue
+                field_distance = float(np.linalg.norm(track_position - det_position))
+                if field_distance > max_distance:
+                    dists[i, j] += 1000.0
+                    continue
+                normalized_distance = min(field_distance / max_distance, 1.0)
+                dists[i, j] += self.field_distance_weight * normalized_distance
+
+        return dists
+
+    @staticmethod
+    def _apply_track_metadata(track: STrack, det: STrack) -> None:
+        if getattr(det, "equipo", None) is not None:
+            track.equipo = det.equipo
+        if getattr(track, "class_name", None) is None and getattr(
+            det, "class_name", None
+        ) is not None:
+            track.class_name = det.class_name
+        det_field_position = ByteTrack._field_position_to_array(
+            getattr(det, "field_position", None)
+        )
+        if det_field_position is not None:
+            track.field_position = det_field_position.copy()
+
     def update_with_detections(
-        self, detections: Detections, team_labels, class_labels=None
+        self, detections: Detections, team_labels, class_labels=None, field_positions=None
     ) -> Detections:
         """
         Updates the tracker with the provided detections and returns the updated
@@ -142,10 +225,14 @@ class ByteTrack:
                 detections.confidence[:, np.newaxis],
             )
         )
+        if field_positions is None and detections.data is not None:
+            field_positions = detections.data.get("field_position")
+
         tracks = self.update_with_tensors(
             tensors=tensors,
             team_labels=team_labels,
             class_labels=class_labels,
+            field_positions=field_positions,
         )
 
         if len(tracks) > 0:
@@ -161,6 +248,34 @@ class ByteTrack:
                         track_class = getattr(track, "class_name", None)
                         if track_class is not None and det_class != track_class:
                             iou_costs[i_detection, i_track] += 1000
+            if field_positions is not None:
+                detection_field_positions = np.asarray(field_positions, dtype=np.float32)
+                for i_detection, det_class in enumerate(class_labels or []):
+                    if det_class not in self.field_position_classes:
+                        continue
+                    det_position = self._field_position_to_array(
+                        detection_field_positions[i_detection]
+                    )
+                    if det_position is None:
+                        continue
+                    for i_track, track in enumerate(tracks):
+                        track_class = getattr(track, "class_name", None)
+                        if track_class != det_class:
+                            continue
+                        track_position = self._field_position_to_array(
+                            getattr(track, "field_position", None)
+                        )
+                        if track_position is None:
+                            continue
+                        max_distance = max(self._track_distance_gate(track), 1e-6)
+                        field_distance = float(np.linalg.norm(track_position - det_position))
+                        if field_distance > max_distance:
+                            iou_costs[i_detection, i_track] += 1000.0
+                        else:
+                            iou_costs[i_detection, i_track] += (
+                                self.field_distance_weight
+                                * min(field_distance / max_distance, 1.0)
+                            )
 
             matches, _, _ = matching.linear_assignment(iou_costs, 0.5)
             detections.tracker_id = np.full(len(detections), -1, dtype=int)
@@ -201,6 +316,7 @@ class ByteTrack:
         tensors: np.ndarray,
         team_labels,
         class_labels=None,
+        field_positions=None,
     ) -> list[STrack]:
         """
         Updates the tracker with the provided tensors and returns the updated tracks.
@@ -259,6 +375,11 @@ class ByteTrack:
                 if class_labels is not None and keep_idx < len(class_labels)
                 else None
             )
+            det.field_position = (
+                self._field_position_to_array(field_positions[keep_idx])
+                if field_positions is not None and keep_idx < len(field_positions)
+                else None
+            )
             
             detections.append(det)
 
@@ -288,6 +409,7 @@ class ByteTrack:
                     if track.class_name != det.class_name:
                         dists[i, j] += 1000  # evita cruces de IDs entre clases
 
+        dists = self._apply_field_position_costs(dists, strack_pool, detections)
         dists = matching.fuse_score(dists, detections)
         matches, u_track, u_detection = matching.linear_assignment(
             dists, thresh=self.minimum_matching_threshold
@@ -317,17 +439,16 @@ class ByteTrack:
 
                 if old_team is None and new_team is not None:
                     track.equipo = new_team
-            if getattr(track, "class_name", None) is None and getattr(
-                det, "class_name", None
-            ) is not None:
-                track.class_name = det.class_name
+            self._apply_track_metadata(track, det)
 
             # --- Normal track update ---
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id)
+                self._apply_track_metadata(track, det)
                 activated_starcks.append(track)
             else:
                 track.re_activate(det, self.frame_id)
+                self._apply_track_metadata(track, det)
                 refind_stracks.append(track)
 
         """ Step 3: Second association, with low score detection boxes"""
@@ -358,6 +479,11 @@ class ByteTrack:
                     if class_labels is not None and second_idx < len(class_labels)
                     else None
                 )
+                det.field_position = (
+                    self._field_position_to_array(field_positions[second_idx])
+                    if field_positions is not None and second_idx < len(field_positions)
+                    else None
+                )
                 detections_second.append(det)
         else:
             detections_second = []
@@ -372,6 +498,11 @@ class ByteTrack:
                 if hasattr(track, "class_name") and hasattr(det, "class_name"):
                     if track.class_name != det.class_name:
                         dists[i, j] += 1000
+        dists = self._apply_field_position_costs(
+            dists,
+            r_tracked_stracks,
+            detections_second,
+        )
         matches, u_track, u_detection_second = matching.linear_assignment(
             dists, thresh=self.second_match_threshold
         )
@@ -380,9 +511,11 @@ class ByteTrack:
             det = detections_second[idet]
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id)
+                self._apply_track_metadata(track, det)
                 activated_starcks.append(track)
             else:
                 track.re_activate(det, self.frame_id)
+                self._apply_track_metadata(track, det)
                 refind_stracks.append(track)
 
         for it in u_track:
@@ -395,12 +528,14 @@ class ByteTrack:
         detections = [detections[i] for i in u_detection]
         dists = matching.iou_distance(unconfirmed, detections)
 
+        dists = self._apply_field_position_costs(dists, unconfirmed, detections)
         dists = matching.fuse_score(dists, detections)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(
             dists, thresh=self.unconfirmed_match_threshold
         )
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)
+            self._apply_track_metadata(unconfirmed[itracked], detections[idet])
             activated_starcks.append(unconfirmed[itracked])
         for it in u_unconfirmed:
             track = unconfirmed[it]
@@ -415,6 +550,7 @@ class ByteTrack:
             if not self._can_activate_track(getattr(track, "class_name", None)):
                 continue
             track.activate(self.kalman_filter, self.frame_id)
+            self._apply_track_metadata(track, track)
             self._register_track(track)
             activated_starcks.append(track)
         """ Step 5: Update state"""

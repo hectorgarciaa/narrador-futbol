@@ -1,6 +1,6 @@
 # tracking
 
-Pipeline completo de tracking multi-objeto para un partido de fútbol. Combina detección YOLO, identificación de equipo por color de camiseta y el algoritmo ByteTrack en un único flujo frame a frame.
+Pipeline completo de tracking multi-objeto para un partido de fútbol. Combina detección YOLO, identificación de equipo por color de camiseta, proyección automática al campo 2D y el algoritmo ByteTrack en un único flujo frame a frame.
 
 ---
 
@@ -29,9 +29,19 @@ tracker = Tracker(
         "Real Madrid": np.array([255, 127, 127]),
         "Wolfsburgo": np.array([224, 77, 196])
     },
-    ball_min_conf=0.01
+    ball_min_conf=0.01,
+    field_tracking_conf={
+        "enabled": True,
+        "method": "pnlcalib",
+        "classes": ["player", "goalkeeper"],
+        "field_length_m": 106.0,
+        "field_width_m": 68.0,
+    }
 )
 ```
+
+Si no pasas `field_tracking_conf`, el tracker puede funcionar solo con `bbox` en imagen. En `scripts/track.py`, por defecto se lee esta configuración desde `config.yaml` y se activa la proyección 2D del campo.
+`PnLCalib` no se guarda dentro de este repositorio como código versionado: el propio tracker lo clona en `models/reference_points/pnlcalib_repo/` y descarga sus pesos en la primera ejecución. Por tanto, otra persona que ya tenga este repo solo necesita `git pull`; no tiene que clonar `PnLCalib` manualmente.
 
 ### Pipeline interno de `get_tracks(video, show_kmeans)`
 
@@ -39,8 +49,9 @@ Por cada frame del vídeo:
 
 1. **Detección YOLO** (`Detector.detect`): genera las detecciones brutas del frame.
 2. **Identificación de equipo** (`TeamDetector.detect_teams`): por cada detección extrae el color de camiseta (KMeans en LAB) y asigna un equipo.
-3. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional en el coste de asociación.
-4. **Fallback de balón**: si ByteTrack no activó ningún track para el balón en ese frame (porque su confianza es demasiado baja para el umbral de activación), se añaden las detecciones YOLO crudas con IDs `"fallback_N"`. Esto garantiza que siempre haya información del balón aunque no sea trazable.
+3. **PnLCalibFieldProjector**: calibra el campo en ese frame y proyecta `player` y `goalkeeper` a coordenadas métricas `[x_m, y_m]` sobre el césped.
+4. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional y, para `player`/`goalkeeper`, incorpora distancia en el campo 2D al coste de asociación.
+5. **Fallback de balón**: si ByteTrack no activó ningún track para el balón en ese frame (porque su confianza es demasiado baja para el umbral de activación), se añaden las detecciones YOLO crudas con IDs `"fallback_N"`. Esto garantiza que siempre haya información del balón aunque no sea trazable.
 
 ### Formato de salida
 
@@ -58,6 +69,8 @@ Cada `frame_N_dict` es `{track_id: datos_objeto}` donde `track_id` es un entero 
 ```python
 {
     "bbox":        [x1, y1, x2, y2],   # coordenadas en píxeles
+    "field_position_m": [x, y] | None, # coordenadas reales sobre el campo en metros
+    "ground_point_image": [x, y] | None,# punto imagen usado para proyectar al campo
     "confidence":  float,              # confianza de la detección YOLO
     "team":        str | None,         # nombre del equipo asignado
     "distances":   {"Equipo A": float, "Equipo B": float} | None,
@@ -71,7 +84,7 @@ Cada `frame_N_dict` es `{track_id: datos_objeto}` donde `track_id` es un entero 
 ## `byte_tracker.py` — `ByteTrack`
 
 ### Objetivo
-Implementar el algoritmo **ByteTrack** con una extensión propia para incorporar la información de equipo como restricción adicional en la asociación de detecciones a tracks.
+Implementar el algoritmo **ByteTrack** con extensiones propias para incorporar la información de equipo y la posición 2D sobre el campo como restricciones adicionales en la asociación de detecciones a tracks.
 
 ### Base: ByteTrack original
 
@@ -86,6 +99,16 @@ ByteTrack es un algoritmo de tracking multi-objeto que mejora otros métodos al 
 ### Extensión: penalización por equipo
 
 Se ha añadido un atributo `team` a cada `STrack`. Si en la primera asociación se intenta asociar una detección de un equipo distinto al del track, se añade una **penalización** (configurable vía `team_penalty` en config.yaml, por defecto 1000) a la matriz de costes IoU, haciendo esa asociación prácticamente imposible.
+
+### Extensión: coste espacial en campo 2D
+
+Para `player` y `goalkeeper`, si existe homografía válida en el frame:
+- cada detección se proyecta a una coordenada real del campo `[x_m, y_m]`;
+- cada track mantiene su última posición proyectada;
+- el coste de matching añade una penalización proporcional a la distancia recorrida sobre el campo;
+- además se bloquean asociaciones físicamente imposibles si la distancia en metros supera el umbral configurado.
+
+Esto reduce cambios de ID provocados solo por movimiento de cámara o paneos fuertes.
 
 Además, se implementa un mecanismo de **tolerancia a cambios temporales de equipo**:
 - Si el equipo asignado cambia en un frame, no se actualiza inmediatamente.

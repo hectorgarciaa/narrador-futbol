@@ -24,6 +24,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 ### ✅ Fase 1: Detección, tracking e identificación de equipos
 - Fine-tuning de YOLOv11 para las clases `player`, `goalkeeper`, `referee`, `ball`.
 - Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo.
+- Proyección automática al campo 2D con **PnLCalib** para usar posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
 
@@ -82,6 +83,7 @@ narrador-futbol/
 │
 └── experiments/            # Notebooks de análisis y visualización
     ├── detection/
+    ├── reference_points/
     ├── tracking/
     └── visualization/
 ```
@@ -93,7 +95,7 @@ narrador-futbol/
 | Área | Tecnología |
 |---|---|
 | Detección | YOLOv8 / YOLOv11 (Ultralytics), fine-tuning con dataset Roboflow |
-| Tracking | ByteTrack (supervision), extendido con restricción de equipo |
+| Tracking | ByteTrack (supervision), extendido con restricción de equipo y posiciones 2D sobre el campo |
 | Identificación de equipo | KMeans (scikit-learn), espacio de color LAB (OpenCV) |
 | Evaluación | NumPy, pandas, Plotly, seaborn, matplotlib |
 | Configuración | YAML (`config.yaml` centralizado) |
@@ -213,11 +215,54 @@ python scripts/track.py
 ```
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Si existe `paths.data.video_prueba_ajustado` en `config.yaml`, ese vídeo se usa por defecto.
+Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
+Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `models/reference_points/pnlcalib_repo/` y descarga sus pesos automáticamente. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
 
 ### Detección básica (sin fine-tuning)
 ```bash
 python scripts/detect.py
 ```
+
+## 🧪 Experimentos de geometría del campo
+
+Para empezar a proyectar jugadores a coordenadas del campo hay un notebook de investigación en:
+
+```bash
+jupyter lab experiments/reference_points/reference_points.ipynb
+```
+
+Ese experimento implementa un enfoque clásico de visión por computador:
+- segmentación del césped por color;
+- extracción de líneas blancas con brillo, baja saturación y filtros para eliminar blobs compactos de jugadores;
+- detección de segmentos con Hough y clustering por orientación;
+- construcción de rectángulos candidatos a partir de pares de líneas del campo;
+- estimación de homografía `imagen -> campo` y estabilización temporal frame a frame.
+
+La longitud y anchura del campo están parametrizadas en el notebook para poder ajustar la plantilla a cada fuente de vídeo.
+
+También hay una alternativa basada en modelo de keypoints del campo:
+
+```bash
+jupyter lab experiments/reference_points/soccana_keypoints.ipynb
+```
+
+Ese notebook descarga el modelo `Adit-jain/Soccana_Keypoint` desde Hugging Face, detecta 29 keypoints semánticos del campo y estima la homografía con RANSAC.
+
+Y hay un tercer experimento basado en `PnLCalib`:
+
+```bash
+jupyter lab experiments/reference_points/pnlcalib_reference_points.ipynb
+```
+
+Ese notebook:
+- clona `PnLCalib` bajo `models/reference_points/pnlcalib_repo/` si no existe;
+- descarga los pesos `SV_kp` y `SV_lines` desde GitHub Releases;
+- detecta keypoints y líneas del campo con los modelos originales del repositorio;
+- estima homografía `imagen -> campo`, hace warp a bird-eye y proyecta tracks al campo 2D reescalando sus coordenadas a la resolución real del frame usado por la homografía.
+
+Igual que en `scripts/track.py`, no hace falta clonar `PnLCalib` a mano en otra máquina: el notebook lo descarga automáticamente la primera vez.
+
+Importante: `PnLCalib` está publicado con licencia `GPL-2.0`, así que si este método se fuese a integrar en un producto cerrado habría que revisar esa implicación legal antes.
 
 ### Detección con modelo fine-tuned de jugadores
 ```bash

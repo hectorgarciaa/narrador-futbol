@@ -1,5 +1,5 @@
 # Python
-__pycache__
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -32,9 +32,11 @@ data/detection/**
 !data/detection/.gitkeep
 
 # Model files (large binary files, exclude all)
-models/finetuning/*.pt
-models/finetuning-balon/*.pt
+models/reference_points/
+models/finetuning/**/*.pt
+models/finetuning-balon/**/*.pt
 models/yolo/**/*.pt
+yolo11m-seg.pt
 
 # Output files
 output/**
@@ -42,6 +44,7 @@ output/**
 *.avi
 *.mp4
 pruebaTracker
+runs/
 
 # Logs
 *.log

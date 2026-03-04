@@ -9,6 +9,7 @@ football_ai/
 ├── __init__.py
 ├── core/           # Configuración global, logging centralizado, serialización
 ├── detection/      # Inferencia YOLO (jugadores, árbitros, balón)
+├── reference_points/ # Calibración del campo y proyección a coordenadas 2D reales
 ├── tracking/       # Pipeline completo de tracking multi-objeto con ByteTrack
 ├── identification/ # Identificación de equipo por color de camiseta (KMeans)
 ├── evaluation/     # Cálculo de métricas por track y comparación de experimentos
@@ -21,7 +22,8 @@ football_ai/
 |---|---|---|
 | [`core`](core/README.md) | Carga de `config.yaml`, logging, conversión a JSON | `Config`, `Logger`, `convert_to_serializable` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
-| [`tracking`](tracking/README.md) | Orquestación detección → equipo → ByteTrack → tracks | `Tracker`, `ByteTrack` |
+| [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
+| [`tracking`](tracking/README.md) | Orquestación detección → equipo → proyección 2D → ByteTrack → tracks | `Tracker`, `ByteTrack` |
 | [`identification`](identification/README.md) | Extracción de color de camiseta y asignación de equipo | `ShirtDetector`, `TeamDetector` |
 | [`evaluation`](evaluation/README.md) | Métricas cuantitativas por track y experimento | `Evaluator`, `ExperimentVisualizer`, ... |
 | [`visualization`](visualization/README.md) | Dibujado de bounding boxes y exportación de video | `Drawer` |
@@ -38,10 +40,13 @@ Detector (YOLO)          → detecciones por frame [bbox, conf, clase]
 TeamDetector (KMeans)    → color de camiseta + asignación de equipo
    │
    ▼
-ByteTrack                → IDs persistentes entre frames
+PnLCalibFieldProjector   → coordenadas del campo [x_m, y_m] por detección
    │
    ▼
-tracks dict              → {"player": [{id: {bbox, team, ...}}], "ball": [...], ...}
+ByteTrack                → IDs persistentes entre frames usando bbox + posición 2D
+   │
+   ▼
+tracks dict              → {"player": [{id: {bbox, field_position_m, team, ...}}], ...}
    │
    ├──▶ Drawer           → video MP4 anotado
    └──▶ Evaluator        → métricas JSON / gráficas
@@ -66,7 +71,12 @@ tracker = Tracker(
     conf=config.get('detection', 'conf_threshold'),
     tracker_conf=config.tracking,
     team_colors=config.get_team_colors(),
-    ball_min_conf=config.get('detection', 'ball_min_conf')
+    ball_min_conf=config.get('detection', 'ball_min_conf'),
+    field_tracking_conf={
+        "enabled": config.get('tracking', 'use_field_positions', default=True),
+        "method": config.get('tracking', 'field_position_method', default='pnlcalib')
+    },
+    project_root=config.project_root,
 )
 tracks = tracker.get_tracks(video_path, show_kmeans=False)
 

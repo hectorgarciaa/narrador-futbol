@@ -82,6 +82,23 @@ tracking:
   # Recuperación específica de árbitros
   referee_recovery_max_lost_frames: 3
   referee_recovery_max_distance: 45.0
+  # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching
+  use_field_positions: true
+  field_position_method: "pnlcalib"
+  field_position_classes: ["player", "goalkeeper"]
+  field_length_m: 106.0
+  field_width_m: 68.0
+  field_position_max_width: 1280
+  field_position_bottom_offset_ratio: 0.04
+  field_position_keypoint_threshold: 0.3434
+  field_position_line_threshold: 0.7867
+  field_position_pnl_refine: true
+  field_position_temporal_blend: 0.20
+  field_position_pixels_per_meter: 8
+  field_position_device: null
+  field_position_match_distance_gate_m: 8.0
+  field_position_match_distance_weight: 0.25
+  reassign_min_field_distance_m: 4.0
   # Penalización de distancia cuando el equipo detectado difiere del track
   team_penalty: 1000
   # Frames consecutivos con equipo distinto para confirmar cambio real
