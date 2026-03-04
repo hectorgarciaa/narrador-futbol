@@ -41,8 +41,8 @@ if __name__ == "__main__":
         # Get paths and parameters from config
         MODEL_PATH = str(config.get_path('paths', 'models', 'finetuned_player'))
         video_config_key = (
-            "video_prueba_ajustado"
-            if config.get('paths', 'data', 'video_prueba_ajustado') is not None
+            "video_prueba_corto"
+            if config.get('paths', 'data', 'video_prueba_corto') is not None
             else "video_prueba"
         )
         VIDEO_PATH = str(config.get_path('paths', 'data', video_config_key))
@@ -86,6 +86,40 @@ if __name__ == "__main__":
                 "referee_recovery_max_distance", 45.0
             ),
         }
+        FIELD_TRACKING_CONF = {
+            "enabled": tracking_cfg.get("use_field_positions", True),
+            "method": tracking_cfg.get("field_position_method", "pnlcalib"),
+            "classes": tracking_cfg.get("field_position_classes", ["player", "goalkeeper"]),
+            "field_length_m": tracking_cfg.get("field_length_m", 106.0),
+            "field_width_m": tracking_cfg.get("field_width_m", 68.0),
+            "max_width": tracking_cfg.get("field_position_max_width", 1280),
+            "bottom_offset_ratio": tracking_cfg.get(
+                "field_position_bottom_offset_ratio", 0.04
+            ),
+            "keypoint_threshold": tracking_cfg.get(
+                "field_position_keypoint_threshold", 0.3434
+            ),
+            "line_threshold": tracking_cfg.get(
+                "field_position_line_threshold", 0.7867
+            ),
+            "pnl_refine": tracking_cfg.get("field_position_pnl_refine", True),
+            "temporal_blend": tracking_cfg.get(
+                "field_position_temporal_blend", 0.20
+            ),
+            "pixels_per_meter": tracking_cfg.get(
+                "field_position_pixels_per_meter", 8
+            ),
+            "device": tracking_cfg.get("field_position_device"),
+            "match_distance_gate_m": tracking_cfg.get(
+                "field_position_match_distance_gate_m", 8.0
+            ),
+            "match_distance_weight": tracking_cfg.get(
+                "field_position_match_distance_weight", 0.25
+            ),
+            "reassign_min_field_distance_m": tracking_cfg.get(
+                "reassign_min_field_distance_m", 4.0
+            ),
+        }
         
         # Team colors
         TEAM_COLORS = config.get_team_colors()
@@ -93,6 +127,7 @@ if __name__ == "__main__":
         logger.info(f"Model: {MODEL_PATH}")
         logger.info(f"Video: {VIDEO_PATH}")
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
+        logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
         
         # Run tracking
         tracker = Tracker(
@@ -102,6 +137,8 @@ if __name__ == "__main__":
             TEAM_COLORS,
             ball_min_conf=BALL_MIN_CONF,
             max_tracks_per_class=MAX_TRACKS_PER_CLASS,
+            field_tracking_conf=FIELD_TRACKING_CONF,
+            project_root=config.project_root,
         )
         logger.info("Extracting tracks from video...")
         tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
