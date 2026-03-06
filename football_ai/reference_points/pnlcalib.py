@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
+from time import perf_counter
 
 import numpy as np
 
@@ -99,6 +100,7 @@ class PnLCalibFieldProjector:
             pixels_per_meter=pixels_per_meter,
             temporal_blend=temporal_blend,
         )
+        self.last_timing_detail = {}
 
     def _ground_points_from_bboxes(self, bboxes_xyxy: np.ndarray) -> np.ndarray:
         boxes = np.asarray(bboxes_xyxy, dtype=np.float32).reshape(-1, 4)
@@ -140,31 +142,64 @@ class PnLCalibFieldProjector:
         bboxes_xyxy: np.ndarray,
         class_names: Optional[Sequence[Optional[str]]] = None,
     ) -> FieldProjectionResult:
+        total_start = perf_counter()
         original_frame = np.asarray(frame_bgr)
+
+        resize_start = perf_counter()
         projected_frame = resize_frame(original_frame, max_width=self.max_width)
+        resize_s = perf_counter() - resize_start
+
+        estimate_start = perf_counter()
         estimate = self.estimator.estimate(projected_frame)
+        estimate_s = perf_counter() - estimate_start
+        estimator_timing = getattr(self.estimator, "last_timing_detail", {}) or {}
 
         original_shape_hw = original_frame.shape[:2]
         projected_shape_hw = projected_frame.shape[:2]
+
+        ground_points_start = perf_counter()
         ground_points_original = self._ground_points_from_bboxes(bboxes_xyxy)
+        ground_points_s = perf_counter() - ground_points_start
+
+        scale_points_start = perf_counter()
         ground_points_projected = self._scale_points(
             ground_points_original,
             source_shape_hw=original_shape_hw,
             target_shape_hw=projected_shape_hw,
         )
+        scale_points_s = perf_counter() - scale_points_start
 
         field_positions_m = np.full((len(ground_points_projected), 2), np.nan, dtype=np.float32)
+        project_points_s = 0.0
         if estimate.homography_image_to_field is not None and len(ground_points_projected) > 0:
+            project_points_start = perf_counter()
             field_positions_m = project_image_points(
                 ground_points_projected,
                 estimate.homography_image_to_field,
             ).astype(np.float32)
+            project_points_s = perf_counter() - project_points_start
 
+        class_filter_start = perf_counter()
         if class_names is not None:
             class_names = list(class_names)
             for idx, class_name in enumerate(class_names):
                 if class_name not in FIELD_POSITION_CLASSES and idx < len(field_positions_m):
                     field_positions_m[idx, :] = np.nan
+        class_filter_s = perf_counter() - class_filter_start
+
+        self.last_timing_detail = {
+            "field_projection_total_s": float(perf_counter() - total_start),
+            "field_resize_s": float(resize_s),
+            "field_homography_estimation_s": float(estimate_s),
+            "field_ground_points_s": float(ground_points_s),
+            "field_scale_points_s": float(scale_points_s),
+            "field_project_points_s": float(project_points_s),
+            "field_class_filter_s": float(class_filter_s),
+            "field_has_homography": float(
+                1.0 if estimate.homography_image_to_field is not None else 0.0
+            ),
+            **{str(key): float(value) for key, value in estimator_timing.items()},
+        }
 
         return FieldProjectionResult(
             frame_shape_original=original_shape_hw,

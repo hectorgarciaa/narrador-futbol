@@ -216,6 +216,11 @@ python scripts/track.py
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Si existe `paths.data.video_prueba_ajustado` en `config.yaml`, ese vídeo se usa por defecto.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
+Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`) y forzar visualización con `TRACK_SHOW_OUTPUT=0|1`.
+Además, si `tracking.timing_enabled=true`, se guardan tiempos por fase para detectar cuellos de botella en `output/timing_reports/`:
+- `<run_id>_timing_summary.json` con tiempos globales del script y agregados del tracker.
+- `<run_id>_tracking_frame_times.csv` con tiempos por frame (si `timing_save_per_frame=true`).
+El reporte por frame incluye desglose detallado de detección, identificación de equipos (`team_kmeans_s`/`team_clustering_s`), tracking (`bytetrack_*`, reasignación canónica) y transformación imagen→campo 2D (`field_homography_estimation_s`, `field_project_points_s`, y detalle interno `field_pnl_*` para inferencia kp/líneas, votación geométrica y suavizado temporal).
 Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `models/reference_points/pnlcalib_repo/` y descarga sus pesos automáticamente. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
 
 ### Detección básica (sin fine-tuning)
@@ -298,6 +303,8 @@ paths:
   data:
     video_prueba_ajustado: "data/partidoPrueba/partido_ajustado.mp4"
     video_prueba: "data/partidoPrueba/partido.mp4"
+  output:
+    timing_reports: "output/timing_reports"
 
 detection:
   conf_threshold: 0.01
@@ -314,6 +321,9 @@ tracking:
     player: 22
     ball: 1
     referee: 3
+  timing_enabled: true
+  timing_log_every_n_frames: 25
+  timing_save_per_frame: true
 
 teams:
   Real Madrid:

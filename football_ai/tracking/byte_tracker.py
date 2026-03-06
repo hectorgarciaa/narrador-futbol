@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 from typing import Dict, Optional
+from time import perf_counter
 
 from supervision.detection.core import Detections
 from supervision.detection.utils.iou_and_nms import box_iou_batch
@@ -82,6 +83,7 @@ class ByteTrack:
         self.tracked_tracks: list[STrack] = []
         self.lost_tracks: list[STrack] = []
         self.removed_tracks: list[STrack] = []
+        self.last_timing_detail = {}
 
         # Warning, possible bug: If you also set internal_id to start at 1,
         # all traces will be connected across objects.
@@ -219,6 +221,8 @@ class ByteTrack:
             )
             ```
         """
+        total_start = perf_counter()
+        preprocess_start = perf_counter()
         tensors = np.hstack(
             (
                 detections.xyxy,
@@ -227,14 +231,18 @@ class ByteTrack:
         )
         if field_positions is None and detections.data is not None:
             field_positions = detections.data.get("field_position")
+        preprocess_s = perf_counter() - preprocess_start
 
+        update_tensors_start = perf_counter()
         tracks = self.update_with_tensors(
             tensors=tensors,
             team_labels=team_labels,
             class_labels=class_labels,
             field_positions=field_positions,
         )
+        update_tensors_s = perf_counter() - update_tensors_start
 
+        output_match_start = perf_counter()
         if len(tracks) > 0:
             detection_bounding_boxes = np.asarray([det[:4] for det in tensors])
             track_bounding_boxes = np.asarray([track.tlbr for track in tracks])
@@ -284,12 +292,27 @@ class ByteTrack:
                     tracks[i_track].external_track_id
                 )
 
+            output_match_s = perf_counter() - output_match_start
+            self.last_timing_detail = {
+                "bytetrack_total_s": float(perf_counter() - total_start),
+                "bytetrack_preprocess_s": float(preprocess_s),
+                "bytetrack_update_tensors_s": float(update_tensors_s),
+                "bytetrack_output_match_s": float(output_match_s),
+                "bytetrack_tracks_output_count": float(len(tracks)),
+            }
             return detections[detections.tracker_id != -1]
 
         else:
             detections = Detections.empty()
             detections.tracker_id = np.array([], dtype=int)
-
+            output_match_s = perf_counter() - output_match_start
+            self.last_timing_detail = {
+                "bytetrack_total_s": float(perf_counter() - total_start),
+                "bytetrack_preprocess_s": float(preprocess_s),
+                "bytetrack_update_tensors_s": float(update_tensors_s),
+                "bytetrack_output_match_s": float(output_match_s),
+                "bytetrack_tracks_output_count": 0.0,
+            }
             return detections
 
     def reset(self) -> None:

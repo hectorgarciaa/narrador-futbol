@@ -1,6 +1,10 @@
+import csv
 import json
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
 # Permite ejecutar `python scripts/track.py` sin instalar el paquete en editable.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +15,14 @@ from football_ai.tracking import Tracker
 from football_ai.evaluation import Evaluator
 from football_ai.visualization import Drawer
 from football_ai.core import get_config, get_logger, Logger, convert_to_serializable
+
+
+def parse_bool_env(name):
+    value = os.getenv(name)
+    if value is None:
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def save_result(tracks, output_path, logger):
     """Saves tracks in JSON format with error handling."""
@@ -26,8 +38,53 @@ def save_result(tracks, output_path, logger):
     except Exception as e:
         logger.error(f"Unexpected error saving tracks: {e}")
 
+def save_timing_reports(
+    timing_output_dir,
+    run_id,
+    script_phase_times,
+    tracker_timing_summary,
+    tracker_timing_frames,
+    logger,
+):
+    """Saves timing data (global summary + per-frame tracker timings)."""
+    timing_output_dir = Path(timing_output_dir)
+    timing_output_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_payload = {
+        "run_id": run_id,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "script_phase_times_s": script_phase_times,
+        "tracker_timing_summary": tracker_timing_summary,
+    }
+    summary_path = timing_output_dir / f"{run_id}_timing_summary.json"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(
+            convert_to_serializable(summary_payload),
+            f,
+            indent=4,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+    frames_path = None
+    if tracker_timing_frames:
+        frames_path = timing_output_dir / f"{run_id}_tracking_frame_times.csv"
+        fieldnames = list(tracker_timing_frames[0].keys())
+        with open(frames_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(tracker_timing_frames)
+
+    logger.info(f"Timing summary saved to: {summary_path}")
+    if frames_path is not None:
+        logger.info(f"Per-frame timing CSV saved to: {frames_path}")
+    return summary_path, frames_path
+
 
 if __name__ == "__main__":
+    script_start = perf_counter()
+    phase_times = {}
+
     # Load configuration
     config = get_config()
     
@@ -40,11 +97,15 @@ if __name__ == "__main__":
     try:
         # Get paths and parameters from config
         MODEL_PATH = str(config.get_path('paths', 'models', 'finetuned_player'))
-        video_config_key = (
-            "video_prueba_corto"
-            if config.get('paths', 'data', 'video_prueba_corto') is not None
-            else "video_prueba"
-        )
+        video_key_override = os.getenv("TRACK_VIDEO_KEY")
+        if video_key_override:
+            video_config_key = video_key_override.strip()
+        else:
+            video_config_key = (
+                "video_prueba_ajustado"
+                if config.get('paths', 'data', 'video_prueba_ajustado') is not None
+                else "video_prueba"
+            )
         VIDEO_PATH = str(config.get_path('paths', 'data', video_config_key))
         OUTPUT = str(config.get_path('paths', 'output', 'prueba_tracker', create_if_missing=True) / "nueva_prueba.mp4")
         OUTPUT_PATH = str(config.get_path('paths', 'output', 'tracks_json', create_if_missing=True) / "tracker" / "tracks.json")
@@ -54,9 +115,25 @@ if __name__ == "__main__":
         BALL_MIN_CONF = config.get('detection', 'ball_min_conf')
         SHOWKMEANS = config.get('visualization', 'show_kmeans')
         SHOW_OUTPUT = config.get('visualization', 'show_output')
+        show_output_override = parse_bool_env("TRACK_SHOW_OUTPUT")
+        if show_output_override is not None:
+            SHOW_OUTPUT = show_output_override
         
         # Tracking configuration
         tracking_cfg = config.tracking
+        timing_enabled = bool(tracking_cfg.get("timing_enabled", True))
+        timing_log_every_n_frames = int(
+            tracking_cfg.get("timing_log_every_n_frames", 25)
+        )
+        timing_save_per_frame = bool(tracking_cfg.get("timing_save_per_frame", True))
+        timing_output_rel = config.get(
+            "paths",
+            "output",
+            "timing_reports",
+            default="output/timing_reports",
+        )
+        timing_output_dir = config.project_root / timing_output_rel
+
         MAX_TRACKS_PER_CLASS = tracking_cfg.get(
             "max_tracks_per_class",
             {"player": 22, "ball": 1, "referee": 3},
@@ -85,6 +162,9 @@ if __name__ == "__main__":
             "referee_recovery_max_distance": tracking_cfg.get(
                 "referee_recovery_max_distance", 45.0
             ),
+            "timing_enabled": timing_enabled,
+            "timing_log_every_n_frames": timing_log_every_n_frames,
+            "timing_save_per_frame": timing_save_per_frame,
         }
         FIELD_TRACKING_CONF = {
             "enabled": tracking_cfg.get("use_field_positions", True),
@@ -126,10 +206,22 @@ if __name__ == "__main__":
         
         logger.info(f"Model: {MODEL_PATH}")
         logger.info(f"Video: {VIDEO_PATH}")
+        logger.info(f"Video key: {video_config_key}")
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
+        logger.info(
+            (
+                "Timing configuration: enabled=%s, log_every_n_frames=%d, "
+                "save_per_frame=%s, output_dir=%s"
+            ),
+            timing_enabled,
+            timing_log_every_n_frames,
+            timing_save_per_frame,
+            timing_output_dir,
+        )
         
         # Run tracking
+        tracker_init_start = perf_counter()
         tracker = Tracker(
             MODEL_PATH,
             CONF,
@@ -140,24 +232,36 @@ if __name__ == "__main__":
             field_tracking_conf=FIELD_TRACKING_CONF,
             project_root=config.project_root,
         )
+        phase_times["tracker_init_s"] = float(perf_counter() - tracker_init_start)
+
         logger.info("Extracting tracks from video...")
+        tracking_start = perf_counter()
         tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
+        phase_times["tracking_s"] = float(perf_counter() - tracking_start)
         
         # Draw tracks
         colors = config.get_visualization_colors()
         drawer = Drawer(colors=colors)
         logger.info("Drawing tracks on video...")
+        drawing_start = perf_counter()
         drawer.draw_tracks(tracks, VIDEO_PATH, OUTPUT, show=SHOW_OUTPUT)
+        phase_times["drawing_s"] = float(perf_counter() - drawing_start)
         logger.info(f"Video with tracks saved to: {OUTPUT}")
         
         # Evaluation
         logger.info("Evaluating tracks...")
+        evaluation_start = perf_counter()
         evaluator = Evaluator()
         evaluation = evaluator.evaluate(["player"], tracks)
         summary = evaluation["player"]["summary"]
+        phase_times["evaluation_s"] = float(perf_counter() - evaluation_start)
         
         # Save tracks JSON
+        save_tracks_start = perf_counter()
         save_result(tracks, OUTPUT_PATH, logger)
+        phase_times["save_tracks_s"] = float(perf_counter() - save_tracks_start)
+
+        phase_times["total_pipeline_s"] = float(perf_counter() - script_start)
         
         # Show summary
         logger.info("Evaluation summary:")
@@ -165,6 +269,52 @@ if __name__ == "__main__":
             logger.info(f"  {key}: {value}")
         print("\n=== TRACKING SUMMARY ===")
         print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+        if timing_enabled:
+            tracker_timing_summary = tracker.last_timing_summary
+            tracker_timing_frames = tracker.last_timing_frames
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_timing_reports(
+                timing_output_dir=timing_output_dir,
+                run_id=run_id,
+                script_phase_times=phase_times,
+                tracker_timing_summary=tracker_timing_summary,
+                tracker_timing_frames=tracker_timing_frames,
+                logger=logger,
+            )
+
+            logger.info("Timing summary (script phases):")
+            for phase_name, duration_s in sorted(
+                phase_times.items(), key=lambda item: item[1], reverse=True
+            ):
+                logger.info(f"  {phase_name}: {duration_s:.4f}s")
+            if tracker_timing_summary:
+                logger.info("Timing summary (tracker per-frame mean):")
+                for phase_name, stats in sorted(
+                    tracker_timing_summary.get("phases", {}).items(),
+                    key=lambda item: item[1].get("mean_s", 0.0),
+                    reverse=True,
+                ):
+                    logger.info(
+                        "  %s: mean=%.4fs total=%.4fs p95=%.4fs max=%.4fs",
+                        phase_name,
+                        stats.get("mean_s", 0.0),
+                        stats.get("total_s", 0.0),
+                        stats.get("p95_s", 0.0),
+                        stats.get("max_s", 0.0),
+                    )
+                tracker_metrics = tracker_timing_summary.get("metrics", {})
+                if tracker_metrics:
+                    logger.info("Tracker metrics (no tiempo):")
+                    for metric_name, stats in sorted(tracker_metrics.items()):
+                        logger.info(
+                            "  %s: mean=%.4f min=%.4f p95=%.4f max=%.4f",
+                            metric_name,
+                            stats.get("mean", 0.0),
+                            stats.get("min", 0.0),
+                            stats.get("p95", 0.0),
+                            stats.get("max", 0.0),
+                        )
         
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

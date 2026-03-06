@@ -37,6 +37,7 @@ paths:
     base: "output"
     videos: "output/videos"
     tracks_json: "output/tracks_json"
+    timing_reports: "output/timing_reports"
     prueba_tracker: "output/pruebaTracker"
     prueba_deteccion_yolo: "output/pruebaDeteccionYolo"
     prueba_finetuning: "output/pruebaFinetuning"
@@ -99,6 +100,10 @@ tracking:
   field_position_match_distance_gate_m: 8.0
   field_position_match_distance_weight: 0.25
   reassign_min_field_distance_m: 4.0
+  # Logs de rendimiento por fase y por frame
+  timing_enabled: true
+  timing_log_every_n_frames: 25
+  timing_save_per_frame: true
   # Penalización de distancia cuando el equipo detectado difiere del track
   team_penalty: 1000
   # Frames consecutivos con equipo distinto para confirmar cambio real

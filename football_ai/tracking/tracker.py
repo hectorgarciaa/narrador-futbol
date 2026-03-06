@@ -1,3 +1,6 @@
+import logging
+from time import perf_counter
+
 import numpy as np
 import supervision as sv
 
@@ -5,6 +8,8 @@ from football_ai.detection import Detector
 from football_ai.identification import TeamDetector
 from football_ai.reference_points import PnLCalibFieldProjector
 from football_ai.tracking.byte_tracker import ByteTrack
+
+logger = logging.getLogger(__name__)
 
 class Tracker:
     def __init__(
@@ -107,6 +112,15 @@ class Tracker:
                 pixels_per_meter=int(field_tracking_conf.get("pixels_per_meter", 8)),
                 device=field_tracking_conf.get("device"),
             )
+        self.timing_enabled = bool(tracker_conf.get("timing_enabled", False))
+        self.timing_log_every_n_frames = max(
+            1, int(tracker_conf.get("timing_log_every_n_frames", 25))
+        )
+        self.timing_save_per_frame = bool(
+            tracker_conf.get("timing_save_per_frame", True)
+        )
+        self.last_timing_summary = {}
+        self.last_timing_frames = []
 
     @staticmethod
     def _bbox_to_list(bbox):
@@ -601,22 +615,84 @@ class Tracker:
                 best_id = canonical_id
 
         return best_id
+
+    @staticmethod
+    def _summarize_timing_frames(timing_frames):
+        if not timing_frames:
+            return {"frames": 0, "phases": {}, "metrics": {}}
+
+        keys = [key for key in timing_frames[0].keys() if key != "frame_index"]
+        phase_names = [key for key in keys if key.endswith("_s")]
+        metric_names = [key for key in keys if not key.endswith("_s")]
+
+        phase_summary = {}
+        for phase_name in phase_names:
+            phase_values = np.array(
+                [frame_timing[phase_name] for frame_timing in timing_frames],
+                dtype=np.float64,
+            )
+            phase_summary[phase_name] = {
+                "total_s": float(np.sum(phase_values)),
+                "mean_s": float(np.mean(phase_values)),
+                "max_s": float(np.max(phase_values)),
+                "p95_s": float(np.percentile(phase_values, 95)),
+            }
+
+        metrics_summary = {}
+        for metric_name in metric_names:
+            metric_values = np.array(
+                [frame_timing[metric_name] for frame_timing in timing_frames],
+                dtype=np.float64,
+            )
+            metrics_summary[metric_name] = {
+                "mean": float(np.mean(metric_values)),
+                "min": float(np.min(metric_values)),
+                "max": float(np.max(metric_values)),
+                "p95": float(np.percentile(metric_values, 95)),
+            }
+
+        return {
+            "frames": len(timing_frames),
+            "phases": phase_summary,
+            "metrics": metrics_summary,
+        }
     
     def get_tracks(self, video, show_kmeans=False):
-        model_detections = self.model.detect(video)
-        tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [] }
+        model_detections_iter = iter(self.model.detect(video))
+        tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": []}
         raw_to_canonical_id = {}
         canonical_to_raw_id = {}
         canonical_state = {}
-        for n_frame, detections in enumerate(model_detections):
-            detections_sv = sv.Detections.from_ultralytics(detections)
+        timing_frames = []
+        n_frame = 0
 
-            teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
+        while True:
+            frame_start = perf_counter()
+            try:
+                detections = next(model_detections_iter)
+            except StopIteration:
+                break
+            detection_fetch_s = perf_counter() - frame_start
+
+            sv_start = perf_counter()
+            detections_sv = sv.Detections.from_ultralytics(detections)
+            detections_to_sv_s = perf_counter() - sv_start
+
+            team_detection_start = perf_counter()
+            teams_of_detected_objects = self.team_detector.detect_teams(
+                detections, show_kmeans
+            )
+            team_timing = getattr(self.team_detector, "last_timing_detail", {}) or {}
             teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
             class_labels = [dicc["class"] for dicc in teams_of_detected_objects]
-            field_projection = None
+            team_detection_s = perf_counter() - team_detection_start
+
+            field_projection_start = perf_counter()
             field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
-            ground_points_projected = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
+            ground_points_projected = np.full(
+                (len(detections_sv), 2), np.nan, dtype=np.float32
+            )
+            field_timing = {}
             if self.field_projector is not None:
                 original_frame_bgr = getattr(detections, "orig_img", None)
                 if original_frame_bgr is not None:
@@ -626,8 +702,15 @@ class Tracker:
                         class_names=class_labels,
                     )
                     field_positions = field_projection.field_positions_m
-                    ground_points_projected = field_projection.ground_points_image_projected
+                    ground_points_projected = (
+                        field_projection.ground_points_image_projected
+                    )
+                    field_timing = (
+                        getattr(self.field_projector, "last_timing_detail", {}) or {}
+                    )
+            field_projection_s = perf_counter() - field_projection_start
 
+            metadata_pack_start = perf_counter()
             # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
             if detections_sv.data is None:
                 detections_sv.data = {}
@@ -649,13 +732,18 @@ class Tracker:
             detections_sv.data["ground_point_image"] = np.asarray(
                 ground_points_projected, dtype=np.float32
             )
+            metadata_pack_s = perf_counter() - metadata_pack_start
 
+            tracker_update_start = perf_counter()
             tracks_detection = self.tracker.update_with_detections(
                 detections_sv,
                 teams_labels,
                 class_labels,
             )
-            
+            bytetrack_timing = getattr(self.tracker, "last_timing_detail", {}) or {}
+            tracker_update_s = perf_counter() - tracker_update_start
+
+            assignment_start = perf_counter()
             for key in tracks.keys():
                 tracks[key].append({})
 
@@ -760,7 +848,9 @@ class Tracker:
                 if class_name == "ball":
                     has_tracked_ball = True
                     current_ball = tracks["ball"][n_frame].get(0)
-                    if current_ball is None or confidence > float(current_ball["confidence"]):
+                    if current_ball is None or confidence > float(
+                        current_ball["confidence"]
+                    ):
                         tracks["ball"][n_frame][0] = {
                             "bbox": bbox,
                             "confidence": confidence,
@@ -862,9 +952,15 @@ class Tracker:
                     pending.get("field_position"),
                     pending["metadata"],
                 )
+            id_assignment_s = perf_counter() - assignment_start
 
+            ball_fallback_start = perf_counter()
             # Si el tracker no activó el balón, usar detecciones crudas (sin tracking)
-            if not has_tracked_ball and detections.boxes is not None and len(detections.boxes) > 0:
+            if (
+                not has_tracked_ball
+                and detections.boxes is not None
+                and len(detections.boxes) > 0
+            ):
                 boxes = detections.boxes
                 xyxy = boxes.xyxy.cpu().numpy()
                 conf = boxes.conf.cpu().numpy()
@@ -890,5 +986,201 @@ class Tracker:
                         "field_position_m": None,
                         "ground_point_image": None,
                     }
-        
+            ball_fallback_s = perf_counter() - ball_fallback_start
+
+            if self.timing_enabled:
+                track_total_s = tracker_update_s + id_assignment_s + ball_fallback_s
+                frame_timing = {
+                    "frame_index": int(n_frame),
+                    "detection_fetch_s": float(detection_fetch_s),
+                    "detection_inference_s": float(detection_fetch_s),
+                    "detections_to_sv_s": float(detections_to_sv_s),
+                    "team_detection_s": float(team_detection_s),
+                    "team_kmeans_s": float(team_timing.get("team_kmeans_s", 0.0)),
+                    "team_clustering_s": float(
+                        team_timing.get("team_clustering_s", 0.0)
+                    ),
+                    "team_kmeans_fit_s": float(
+                        team_timing.get("team_kmeans_fit_s", 0.0)
+                    ),
+                    "team_color_update_s": float(
+                        team_timing.get("team_color_update_s", 0.0)
+                    ),
+                    "team_assign_s": float(team_timing.get("team_assign_s", 0.0)),
+                    "team_crop_player_s": float(
+                        team_timing.get("team_crop_player_s", 0.0)
+                    ),
+                    "team_crop_shirt_s": float(
+                        team_timing.get("team_crop_shirt_s", 0.0)
+                    ),
+                    "team_objects_count": float(
+                        team_timing.get("team_objects_count", 0.0)
+                    ),
+                    "team_objects_valid_crop_count": float(
+                        team_timing.get("team_objects_valid_crop_count", 0.0)
+                    ),
+                    "field_projection_s": float(field_projection_s),
+                    "field_homography_estimation_s": float(
+                        field_timing.get("field_homography_estimation_s", 0.0)
+                    ),
+                    "field_pnl_total_s": float(field_timing.get("pnl_total_s", 0.0)),
+                    "field_pnl_streaming_total_s": float(
+                        field_timing.get("pnl_streaming_total_s", 0.0)
+                    ),
+                    "field_pnl_preprocess_color_convert_s": float(
+                        field_timing.get("pnl_preprocess_color_convert_s", 0.0)
+                    ),
+                    "field_pnl_preprocess_tensor_build_s": float(
+                        field_timing.get("pnl_preprocess_tensor_build_s", 0.0)
+                    ),
+                    "field_pnl_preprocess_resize_s": float(
+                        field_timing.get("pnl_preprocess_resize_s", 0.0)
+                    ),
+                    "field_pnl_preprocess_to_device_s": float(
+                        field_timing.get("pnl_preprocess_to_device_s", 0.0)
+                    ),
+                    "field_pnl_model_kp_inference_s": float(
+                        field_timing.get("pnl_model_kp_inference_s", 0.0)
+                    ),
+                    "field_pnl_model_line_inference_s": float(
+                        field_timing.get("pnl_model_line_inference_s", 0.0)
+                    ),
+                    "field_pnl_decode_keypoints_s": float(
+                        field_timing.get("pnl_decode_keypoints_s", 0.0)
+                    ),
+                    "field_pnl_decode_lines_s": float(
+                        field_timing.get("pnl_decode_lines_s", 0.0)
+                    ),
+                    "field_pnl_complete_keypoints_s": float(
+                        field_timing.get("pnl_complete_keypoints_s", 0.0)
+                    ),
+                    "field_pnl_calibrator_init_s": float(
+                        field_timing.get("pnl_calibrator_init_s", 0.0)
+                    ),
+                    "field_pnl_calibrator_update_s": float(
+                        field_timing.get("pnl_calibrator_update_s", 0.0)
+                    ),
+                    "field_pnl_ground_voting_s": float(
+                        field_timing.get("pnl_ground_voting_s", 0.0)
+                    ),
+                    "field_pnl_camera_voting_s": float(
+                        field_timing.get("pnl_camera_voting_s", 0.0)
+                    ),
+                    "field_pnl_homography_select_s": float(
+                        field_timing.get("pnl_homography_select_s", 0.0)
+                    ),
+                    "field_pnl_centered_to_field_s": float(
+                        field_timing.get("pnl_centered_to_field_s", 0.0)
+                    ),
+                    "field_pnl_template_homography_s": float(
+                        field_timing.get("pnl_template_homography_s", 0.0)
+                    ),
+                    "field_pnl_projection_matrix_s": float(
+                        field_timing.get("pnl_projection_matrix_s", 0.0)
+                    ),
+                    "field_pnl_temporal_smoothing_s": float(
+                        field_timing.get("pnl_temporal_smoothing_s", 0.0)
+                    ),
+                    "field_pnl_previous_fallback_s": float(
+                        field_timing.get("pnl_previous_fallback_s", 0.0)
+                    ),
+                    "field_resize_s": float(field_timing.get("field_resize_s", 0.0)),
+                    "field_project_points_s": float(
+                        field_timing.get("field_project_points_s", 0.0)
+                    ),
+                    "field_ground_points_s": float(
+                        field_timing.get("field_ground_points_s", 0.0)
+                    ),
+                    "field_scale_points_s": float(
+                        field_timing.get("field_scale_points_s", 0.0)
+                    ),
+                    "field_class_filter_s": float(
+                        field_timing.get("field_class_filter_s", 0.0)
+                    ),
+                    "field_has_homography": float(
+                        field_timing.get("field_has_homography", 0.0)
+                    ),
+                    "field_pnl_visible_keypoints_count": float(
+                        field_timing.get("pnl_visible_keypoints_count", 0.0)
+                    ),
+                    "field_pnl_visible_lines_count": float(
+                        field_timing.get("pnl_visible_lines_count", 0.0)
+                    ),
+                    "field_pnl_used_ground_solution": float(
+                        field_timing.get("pnl_used_ground_solution", 0.0)
+                    ),
+                    "field_pnl_used_camera_fallback": float(
+                        field_timing.get("pnl_used_camera_fallback", 0.0)
+                    ),
+                    "field_pnl_temporal_smoothed": float(
+                        field_timing.get("pnl_temporal_smoothed", 0.0)
+                    ),
+                    "field_pnl_previous_fallback_applied": float(
+                        field_timing.get("pnl_previous_fallback_applied", 0.0)
+                    ),
+                    "metadata_pack_s": float(metadata_pack_s),
+                    "tracker_update_s": float(tracker_update_s),
+                    "track_total_s": float(track_total_s),
+                    "bytetrack_total_s": float(
+                        bytetrack_timing.get("bytetrack_total_s", 0.0)
+                    ),
+                    "bytetrack_preprocess_s": float(
+                        bytetrack_timing.get("bytetrack_preprocess_s", 0.0)
+                    ),
+                    "bytetrack_update_tensors_s": float(
+                        bytetrack_timing.get("bytetrack_update_tensors_s", 0.0)
+                    ),
+                    "bytetrack_output_match_s": float(
+                        bytetrack_timing.get("bytetrack_output_match_s", 0.0)
+                    ),
+                    "bytetrack_tracks_output_count": float(
+                        bytetrack_timing.get("bytetrack_tracks_output_count", 0.0)
+                    ),
+                    "id_assignment_s": float(id_assignment_s),
+                    "ball_fallback_s": float(ball_fallback_s),
+                    "frame_total_s": float(perf_counter() - frame_start),
+                }
+                timing_frames.append(frame_timing)
+                if (n_frame + 1) % self.timing_log_every_n_frames == 0:
+                    window = timing_frames[-self.timing_log_every_n_frames :]
+                    mean_total = float(
+                        np.mean([entry["frame_total_s"] for entry in window])
+                    )
+                    mean_detection = float(
+                        np.mean([entry["detection_fetch_s"] for entry in window])
+                    )
+                    mean_team = float(
+                        np.mean([entry["team_detection_s"] for entry in window])
+                    )
+                    mean_projection = float(
+                        np.mean([entry["field_projection_s"] for entry in window])
+                    )
+                    mean_tracker = float(
+                        np.mean([entry["tracker_update_s"] for entry in window])
+                    )
+                    logger.info(
+                        (
+                            "Timing tracking frames %d-%d | frame=%.4fs | detect=%.4fs "
+                            "| team=%.4fs | field=%.4fs | bytetrack=%.4fs"
+                        ),
+                        n_frame + 1 - len(window),
+                        n_frame,
+                        mean_total,
+                        mean_detection,
+                        mean_team,
+                        mean_projection,
+                        mean_tracker,
+                    )
+
+            n_frame += 1
+
+        if self.timing_enabled:
+            self.last_timing_summary = self._summarize_timing_frames(timing_frames)
+            self.last_timing_frames = (
+                timing_frames if self.timing_save_per_frame else []
+            )
+        else:
+            self.last_timing_summary = {}
+            self.last_timing_frames = []
+
         return tracks

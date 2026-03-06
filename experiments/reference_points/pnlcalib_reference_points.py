@@ -5,8 +5,9 @@ import json
 import subprocess
 import sys
 import urllib.request
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 import cv2
@@ -242,6 +243,7 @@ class PnLCalibEstimate:
     projection_matrix: Optional[np.ndarray]
     reprojection_error: Optional[float]
     estimation_mode: str
+    timing_detail: Dict[str, float] = field(default_factory=dict)
 
     @property
     def visible_keypoints_count(self) -> int:
@@ -499,29 +501,54 @@ def estimate_pnlcalib_frame(
     pnl_refine: bool = True,
     pixels_per_meter: int = 8,
 ) -> PnLCalibEstimate:
+    total_start = perf_counter()
     if geometry is None:
         geometry = PitchGeometry()
 
+    preprocess_color_start = perf_counter()
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    preprocess_color_s = perf_counter() - preprocess_color_start
+
+    preprocess_tensor_start = perf_counter()
     frame_tensor = TF.to_tensor(Image.fromarray(frame_rgb)).float().unsqueeze(0)
+    preprocess_tensor_s = perf_counter() - preprocess_tensor_start
+
     _, _, original_height, original_width = frame_tensor.size()
+    preprocess_resize_s = 0.0
     if frame_tensor.size()[-1] != 960:
+        preprocess_resize_start = perf_counter()
         frame_tensor = runtime.resize_transform(frame_tensor)
+        preprocess_resize_s = perf_counter() - preprocess_resize_start
+
+    preprocess_to_device_start = perf_counter()
     frame_tensor = frame_tensor.to(runtime.device)
+    preprocess_to_device_s = perf_counter() - preprocess_to_device_start
     _, _, resized_height, resized_width = frame_tensor.size()
 
     with torch.no_grad():
+        model_kp_start = perf_counter()
         heatmaps_kp = runtime.model_kp(frame_tensor)
-        heatmaps_line = runtime.model_line(frame_tensor)
+        model_kp_inference_s = perf_counter() - model_kp_start
 
+        model_line_start = perf_counter()
+        heatmaps_line = runtime.model_line(frame_tensor)
+        model_line_inference_s = perf_counter() - model_line_start
+
+    decode_keypoints_start = perf_counter()
     keypoint_coords = runtime.get_keypoints_from_heatmap_batch_maxpool(
         heatmaps_kp[:, :-1, :, :]
     )
+    keypoints_batch = runtime.coords_to_dict(keypoint_coords, threshold=keypoint_threshold)
+    decode_keypoints_s = perf_counter() - decode_keypoints_start
+
+    decode_lines_start = perf_counter()
     line_coords = runtime.get_keypoints_from_heatmap_batch_maxpool_l(
         heatmaps_line[:, :-1, :, :]
     )
-    keypoints_batch = runtime.coords_to_dict(keypoint_coords, threshold=keypoint_threshold)
     lines_batch = runtime.coords_to_dict(line_coords, threshold=line_threshold)
+    decode_lines_s = perf_counter() - decode_lines_start
+
+    complete_keypoints_start = perf_counter()
     keypoints_dict, lines_dict = runtime.complete_keypoints(
         keypoints_batch[0],
         lines_batch[0],
@@ -529,45 +556,96 @@ def estimate_pnlcalib_frame(
         h=resized_height,
         normalize=True,
     )
+    complete_keypoints_s = perf_counter() - complete_keypoints_start
 
+    calibrator_init_start = perf_counter()
     calibrator = runtime.framebyframe_calib_cls(
         iwidth=original_width,
         iheight=original_height,
         denormalize=True,
     )
-    calibrator.update(keypoints_dict, lines_dict)
+    calibrator_init_s = perf_counter() - calibrator_init_start
 
+    calibrator_update_start = perf_counter()
+    calibrator.update(keypoints_dict, lines_dict)
+    calibrator_update_s = perf_counter() - calibrator_update_start
+
+    ground_voting_start = perf_counter()
     ground_result = calibrator.heuristic_voting_ground(refine_lines=pnl_refine)
+    ground_voting_s = perf_counter() - ground_voting_start
+
+    camera_voting_start = perf_counter()
     camera_result = calibrator.heuristic_voting(refine_lines=pnl_refine)
+    camera_voting_s = perf_counter() - camera_voting_start
 
     homography_image_to_centered = None
     estimation_mode = "no_solution"
     reprojection_error: Optional[float] = None
+    used_ground_solution = 0.0
+    used_camera_fallback = 0.0
 
+    homography_select_start = perf_counter()
     if ground_result is not None:
         homography_image_to_centered = np.asarray(ground_result["homography"], dtype=np.float64)
         reprojection_error = float(ground_result["rep_err"])
         estimation_mode = "ground_plane"
+        used_ground_solution = 1.0
     else:
         homography_image_to_centered = _homography_from_camera_result(camera_result)
         if camera_result is not None:
             reprojection_error = float(camera_result["rep_err"])
             estimation_mode = "camera_fallback"
+            used_camera_fallback = 1.0
+    homography_select_s = perf_counter() - homography_select_start
 
+    centered_to_field_start = perf_counter()
     homography_image_to_field = _centered_to_field_homography(
         homography_image_to_centered,
         geometry,
     )
+    centered_to_field_s = perf_counter() - centered_to_field_start
+
     homography_image_to_template = None
+    template_homography_s = 0.0
     if homography_image_to_field is not None:
+        template_homography_start = perf_counter()
         homography_image_to_template = _to_template_homography(
             homography_image_to_field,
             pixels_per_meter=pixels_per_meter,
         )
+        template_homography_s = perf_counter() - template_homography_start
 
     projection_matrix = None
+    projection_matrix_s = 0.0
     if camera_result is not None:
+        projection_matrix_start = perf_counter()
         projection_matrix = _projection_from_cam_params(camera_result["cam_params"])
+        projection_matrix_s = perf_counter() - projection_matrix_start
+
+    timing_detail = {
+        "pnl_total_s": float(perf_counter() - total_start),
+        "pnl_preprocess_color_convert_s": float(preprocess_color_s),
+        "pnl_preprocess_tensor_build_s": float(preprocess_tensor_s),
+        "pnl_preprocess_resize_s": float(preprocess_resize_s),
+        "pnl_preprocess_to_device_s": float(preprocess_to_device_s),
+        "pnl_model_kp_inference_s": float(model_kp_inference_s),
+        "pnl_model_line_inference_s": float(model_line_inference_s),
+        "pnl_decode_keypoints_s": float(decode_keypoints_s),
+        "pnl_decode_lines_s": float(decode_lines_s),
+        "pnl_complete_keypoints_s": float(complete_keypoints_s),
+        "pnl_calibrator_init_s": float(calibrator_init_s),
+        "pnl_calibrator_update_s": float(calibrator_update_s),
+        "pnl_ground_voting_s": float(ground_voting_s),
+        "pnl_camera_voting_s": float(camera_voting_s),
+        "pnl_homography_select_s": float(homography_select_s),
+        "pnl_centered_to_field_s": float(centered_to_field_s),
+        "pnl_template_homography_s": float(template_homography_s),
+        "pnl_projection_matrix_s": float(projection_matrix_s),
+        "pnl_visible_keypoints_count": float(len(keypoints_dict)),
+        "pnl_visible_lines_count": float(len(lines_dict)),
+        "pnl_used_ground_solution": float(used_ground_solution),
+        "pnl_used_camera_fallback": float(used_camera_fallback),
+    }
 
     return PnLCalibEstimate(
         keypoints_dict=keypoints_dict,
@@ -579,6 +657,7 @@ def estimate_pnlcalib_frame(
         projection_matrix=projection_matrix,
         reprojection_error=reprojection_error,
         estimation_mode=estimation_mode,
+        timing_detail=timing_detail,
     )
 
 
@@ -601,8 +680,10 @@ class StreamingPnLCalibEstimator:
         self.pixels_per_meter = pixels_per_meter
         self.temporal_blend = temporal_blend
         self.previous_homography_image_to_field: Optional[np.ndarray] = None
+        self.last_timing_detail: Dict[str, float] = {}
 
     def estimate(self, frame_bgr: np.ndarray) -> PnLCalibEstimate:
+        streaming_start = perf_counter()
         estimate = estimate_pnlcalib_frame(
             frame_bgr,
             runtime=self.runtime,
@@ -613,19 +694,41 @@ class StreamingPnLCalibEstimator:
             pixels_per_meter=self.pixels_per_meter,
         )
 
+        base_timing = dict(estimate.timing_detail or {})
         current_homography = estimate.homography_image_to_field
+        temporal_smoothing_s = 0.0
+        previous_fallback_s = 0.0
+        temporal_smoothed = 0.0
+        previous_fallback_applied = 0.0
+
         if current_homography is None and self.previous_homography_image_to_field is not None:
+            previous_fallback_start = perf_counter()
+            fallback_homography = self.previous_homography_image_to_field.copy()
+            fallback_template = _to_template_homography(
+                fallback_homography.copy(),
+                pixels_per_meter=self.pixels_per_meter,
+            )
+            previous_fallback_s = perf_counter() - previous_fallback_start
+            previous_fallback_applied = 1.0
+            timing_detail = {
+                **base_timing,
+                "pnl_previous_fallback_s": float(previous_fallback_s),
+                "pnl_temporal_smoothing_s": float(temporal_smoothing_s),
+                "pnl_previous_fallback_applied": float(previous_fallback_applied),
+                "pnl_temporal_smoothed": float(temporal_smoothed),
+                "pnl_streaming_total_s": float(perf_counter() - streaming_start),
+            }
+            self.last_timing_detail = timing_detail
             return replace(
                 estimate,
-                homography_image_to_field=self.previous_homography_image_to_field.copy(),
-                homography_image_to_template=_to_template_homography(
-                    self.previous_homography_image_to_field.copy(),
-                    pixels_per_meter=self.pixels_per_meter,
-                ),
+                homography_image_to_field=fallback_homography,
+                homography_image_to_template=fallback_template,
                 estimation_mode=f"{estimate.estimation_mode}+previous_fallback",
+                timing_detail=timing_detail,
             )
 
         if current_homography is not None and self.previous_homography_image_to_field is not None:
+            temporal_smoothing_start = perf_counter()
             previous_h = self.previous_homography_image_to_field.copy()
             current_h = current_homography.copy()
             previous_h /= previous_h[2, 2]
@@ -633,19 +736,41 @@ class StreamingPnLCalibEstimator:
             blended = self.temporal_blend * previous_h + (1.0 - self.temporal_blend) * current_h
             blended /= blended[2, 2]
             self.previous_homography_image_to_field = blended
+            temporal_template = _to_template_homography(
+                blended,
+                pixels_per_meter=self.pixels_per_meter,
+            )
+            temporal_smoothing_s = perf_counter() - temporal_smoothing_start
+            temporal_smoothed = 1.0
+            timing_detail = {
+                **base_timing,
+                "pnl_previous_fallback_s": float(previous_fallback_s),
+                "pnl_temporal_smoothing_s": float(temporal_smoothing_s),
+                "pnl_previous_fallback_applied": float(previous_fallback_applied),
+                "pnl_temporal_smoothed": float(temporal_smoothed),
+                "pnl_streaming_total_s": float(perf_counter() - streaming_start),
+            }
+            self.last_timing_detail = timing_detail
             return replace(
                 estimate,
                 homography_image_to_field=blended,
-                homography_image_to_template=_to_template_homography(
-                    blended,
-                    pixels_per_meter=self.pixels_per_meter,
-                ),
+                homography_image_to_template=temporal_template,
                 estimation_mode=f"{estimate.estimation_mode}+smoothed",
+                timing_detail=timing_detail,
             )
 
         if current_homography is not None:
             self.previous_homography_image_to_field = current_homography.copy()
-        return estimate
+        timing_detail = {
+            **base_timing,
+            "pnl_previous_fallback_s": float(previous_fallback_s),
+            "pnl_temporal_smoothing_s": float(temporal_smoothing_s),
+            "pnl_previous_fallback_applied": float(previous_fallback_applied),
+            "pnl_temporal_smoothed": float(temporal_smoothed),
+            "pnl_streaming_total_s": float(perf_counter() - streaming_start),
+        }
+        self.last_timing_detail = timing_detail
+        return replace(estimate, timing_detail=timing_detail)
 
 
 def overlay_pnlcalib_detections(
