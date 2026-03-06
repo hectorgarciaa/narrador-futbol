@@ -74,7 +74,9 @@ narrador-futbol/
 │
 ├── data/                   # Datos de entrada (no versionados, ver data/README.md)
 │   ├── detection/          # Datasets de detección (formato YOLOv11)
-│   └── partidoPrueba/      # Vídeos de partido para desarrollo
+│   ├── partidoPrueba/      # Vídeos de partido para desarrollo general
+│   ├── partidosPosiciones/ # Vídeos para dataset de roles posicionales
+│   └── metadata/           # Archivos de equipos/colores (teams.json)
 │
 ├── models/                 # Pesos de modelos (no versionados, ver models/README.md)
 │   ├── yolo/               # Modelos base YOLOv8 y YOLOv11
@@ -219,6 +221,7 @@ El JSON de tracks se guarda como `output/tracks_json/tracker/<nombre_video>_trac
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Para reducir coste de identificación de equipo, se reutiliza la etiqueta del frame anterior para jugadores trackeados (`team_inference_cache_enabled=true`) y solo se recalcula KMeans en altas nuevas o recuperaciones.
 Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`) y forzar visualización con `TRACK_SHOW_OUTPUT=0|1`.
+Para los clips de `data/partidosPosiciones/` ya están predefinidas las claves `video_posiciones_test_*` en `config.yaml` (por ejemplo `video_posiciones_test_1`).
 Además, si `tracking.timing_enabled=true`, se guardan tiempos por fase para detectar cuellos de botella en `output/timing_reports/`:
 - `<run_id>_timing_summary.json` con tiempos globales del script y agregados del tracker.
 - `<run_id>_tracking_frame_times.csv` con tiempos por frame (si `timing_save_per_frame=true`).

@@ -41,7 +41,6 @@ yolo11m-seg.pt
 # Output files
 !output/.gitkeep
 *.avi
-*.mp4
 pruebaTracker
 runs/
 
