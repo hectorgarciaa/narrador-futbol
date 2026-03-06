@@ -19,6 +19,11 @@ class TeamDetector:
         self.shirt_detector = ShirtDetector()
         self.last_timing_detail = {}
 
+    @staticmethod
+    def _bbox_area_from_xyxy(bbox_xyxy):
+        x1, y1, x2, y2 = map(float, bbox_xyxy[0])
+        return float(max(0.0, x2 - x1) * max(0.0, y2 - y1))
+
     def update_team_colors(self, shirt_color):
         """Updates confirmed team colors based on accumulated samples."""
         if len(self.confirmed_teams) == len(self.team_colors):
@@ -119,12 +124,23 @@ class TeamDetector:
             return None, None, None, bbox_area, timing
         return None, None, None, bbox_area
     
-    def detect_teams(self, frame_detections, show_plot=False):
+    def detect_teams(
+        self,
+        frame_detections,
+        show_plot=False,
+        cached_assignments=None,
+        compute_for_classes=None,
+    ):
         """Detects the team for each detected object in the frame."""
         total_start = perf_counter()
         loop_start = perf_counter()
         shirts = []
         teams_of_detected_objects = []
+        cached_assignments = cached_assignments or {}
+        compute_for_classes = (
+            None if compute_for_classes is None else set(compute_for_classes)
+        )
+
         total_crop_player_s = 0.0
         total_crop_shirt_s = 0.0
         total_kmeans_s = 0.0
@@ -135,30 +151,67 @@ class TeamDetector:
         total_team_color_update_s = 0.0
         total_team_assign_s = 0.0
         objects_with_valid_crop = 0
+        team_reused_count = 0
+        team_kmeans_computed_count = 0
+        team_kmeans_skipped_count = 0
 
-        for object_detected in frame_detections:
+        for detection_index, object_detected in enumerate(frame_detections):
             bbox = object_detected.boxes.xyxy
             class_name = object_detected.names[object_detected.boxes.cls.item()]
-            team, distances, shirt_color, bbox_size, timing = self.get_team_of_players(
-                frame_detections.orig_img, shirts, bbox, return_timing=True
-            )
-            total_crop_player_s += float(timing["crop_player_s"])
-            total_crop_shirt_s += float(timing["crop_shirt_s"])
-            total_kmeans_s += float(timing["kmeans_total_s"])
-            total_kmeans_fit_s += float(timing["kmeans_fit_s"])
-            total_kmeans_preprocess_color_convert_s += float(
-                timing["kmeans_preprocess_color_convert_s"]
-            )
-            total_kmeans_preprocess_reshape_s += float(
-                timing["kmeans_preprocess_reshape_s"]
-            )
-            total_kmeans_cluster_selection_s += float(
-                timing["kmeans_cluster_selection_s"]
-            )
-            total_team_color_update_s += float(timing["team_color_update_s"])
-            total_team_assign_s += float(timing["team_assign_s"])
-            if shirt_color is not None:
-                objects_with_valid_crop += 1
+
+            cached = cached_assignments.get(detection_index)
+            if cached is not None:
+                team = cached.get("team")
+                distances = cached.get("distances")
+                shirt_color = cached.get("shirt_color")
+                bbox_size = cached.get("bbox_size")
+                if bbox_size is None:
+                    bbox_size = self._bbox_area_from_xyxy(bbox)
+                team_reused_count += 1
+                if shirt_color is not None:
+                    objects_with_valid_crop += 1
+            else:
+                should_compute = (
+                    compute_for_classes is None or class_name in compute_for_classes
+                )
+                if should_compute:
+                    (
+                        team,
+                        distances,
+                        shirt_color,
+                        bbox_size,
+                        timing,
+                    ) = self.get_team_of_players(
+                        frame_detections.orig_img,
+                        shirts,
+                        bbox,
+                        return_timing=True,
+                    )
+                    total_crop_player_s += float(timing["crop_player_s"])
+                    total_crop_shirt_s += float(timing["crop_shirt_s"])
+                    total_kmeans_s += float(timing["kmeans_total_s"])
+                    total_kmeans_fit_s += float(timing["kmeans_fit_s"])
+                    total_kmeans_preprocess_color_convert_s += float(
+                        timing["kmeans_preprocess_color_convert_s"]
+                    )
+                    total_kmeans_preprocess_reshape_s += float(
+                        timing["kmeans_preprocess_reshape_s"]
+                    )
+                    total_kmeans_cluster_selection_s += float(
+                        timing["kmeans_cluster_selection_s"]
+                    )
+                    total_team_color_update_s += float(timing["team_color_update_s"])
+                    total_team_assign_s += float(timing["team_assign_s"])
+                    team_kmeans_computed_count += 1
+                    if shirt_color is not None:
+                        objects_with_valid_crop += 1
+                else:
+                    team = None
+                    distances = None
+                    shirt_color = None
+                    bbox_size = self._bbox_area_from_xyxy(bbox)
+                    team_kmeans_skipped_count += 1
+
             teams_of_detected_objects.append({
                 "class": class_name,
                 "team": team,
@@ -197,6 +250,9 @@ class TeamDetector:
             "team_assign_s": float(total_team_assign_s),
             "team_objects_count": float(len(teams_of_detected_objects)),
             "team_objects_valid_crop_count": float(objects_with_valid_crop),
+            "team_reused_count": float(team_reused_count),
+            "team_kmeans_computed_count": float(team_kmeans_computed_count),
+            "team_kmeans_skipped_count": float(team_kmeans_skipped_count),
         }
 
         return teams_of_detected_objects

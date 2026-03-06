@@ -100,6 +100,10 @@ tracking:
   field_position_match_distance_gate_m: 8.0
   field_position_match_distance_weight: 0.25
   reassign_min_field_distance_m: 4.0
+  # Reutiliza equipo del frame previo para evitar KMeans por jugador en cada frame
+  team_inference_cache_enabled: true
+  team_inference_cache_iou_threshold: 0.35
+  team_inference_classes: ["player", "goalkeeper"]
   # Logs de rendimiento por fase y por frame
   timing_enabled: true
   timing_log_every_n_frames: 25

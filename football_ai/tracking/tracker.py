@@ -32,6 +32,15 @@ class Tracker:
         # Compatibilidad: nueva convención snake_case y alias legacy camelCase.
         self.team_detector = TeamDetector(team_colors)
         self.teamDetector = self.team_detector
+        self.team_inference_cache_enabled = bool(
+            tracker_conf.get("team_inference_cache_enabled", True)
+        )
+        self.team_inference_cache_iou_threshold = float(
+            tracker_conf.get("team_inference_cache_iou_threshold", 0.35)
+        )
+        self.team_inference_classes = frozenset(
+            tracker_conf.get("team_inference_classes", ["player", "goalkeeper"])
+        )
         self.max_tracks_per_class = max_tracks_per_class
         self.max_total_tracks = int(
             tracker_conf.get("max_total_tracks", sum(max_tracks_per_class.values()))
@@ -134,6 +143,137 @@ class Tracker:
     def _bbox_center(bbox):
         x1, y1, x2, y2 = bbox
         return (0.5 * (x1 + x2), 0.5 * (y1 + y2))
+
+    @staticmethod
+    def _bbox_iou(bbox_a, bbox_b):
+        ax1, ay1, ax2, ay2 = [float(v) for v in bbox_a]
+        bx1, by1, bx2, by2 = [float(v) for v in bbox_b]
+
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+        inter_w = max(0.0, inter_x2 - inter_x1)
+        inter_h = max(0.0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+
+        area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+        area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+        union_area = area_a + area_b - inter_area
+        if union_area <= 0.0:
+            return 0.0
+        return inter_area / union_area
+
+    def _build_cached_team_assignments(
+        self,
+        detections_xyxy,
+        class_labels,
+        canonical_state,
+        current_frame,
+        previous_frame_candidates=None,
+    ):
+        if not self.team_inference_cache_enabled:
+            return {}
+
+        detections_array = np.asarray(detections_xyxy, dtype=np.float32).reshape(-1, 4)
+        if len(detections_array) == 0:
+            return {}
+
+        assignments = {}
+        used_previous_candidate_indices = set()
+        if previous_frame_candidates:
+            for detection_index, detection_bbox in enumerate(detections_array):
+                if detection_index >= len(class_labels):
+                    continue
+                class_name = class_labels[detection_index]
+                if class_name not in self.team_inference_classes:
+                    continue
+
+                best_candidate_index = None
+                best_iou = 0.0
+                for candidate_index, candidate in enumerate(previous_frame_candidates):
+                    if candidate_index in used_previous_candidate_indices:
+                        continue
+                    if candidate.get("class_name") != class_name:
+                        continue
+                    if candidate.get("team") is None:
+                        continue
+                    candidate_bbox = candidate.get("bbox")
+                    if candidate_bbox is None:
+                        continue
+                    iou = self._bbox_iou(detection_bbox, candidate_bbox)
+                    if iou < self.team_inference_cache_iou_threshold:
+                        continue
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_candidate_index = candidate_index
+
+                if best_candidate_index is None:
+                    continue
+
+                candidate = previous_frame_candidates[best_candidate_index]
+                used_previous_candidate_indices.add(best_candidate_index)
+                x1, y1, x2, y2 = [float(v) for v in detection_bbox]
+                assignments[detection_index] = {
+                    "team": candidate.get("team"),
+                    "distances": None,
+                    "shirt_color": candidate.get("shirt_color"),
+                    "bbox_size": float(max(0.0, x2 - x1) * max(0.0, y2 - y1)),
+                }
+
+        previous_state_candidates = []
+        for canonical_id, state in canonical_state.items():
+            if state.get("team") is None:
+                continue
+            if state.get("bbox") is None:
+                continue
+            class_name = state.get("class_name")
+            if class_name not in self.team_inference_classes:
+                continue
+            if int(state.get("last_frame", -999999)) != int(current_frame) - 1:
+                continue
+            previous_state_candidates.append((canonical_id, state))
+
+        if not previous_state_candidates:
+            return assignments
+
+        used_state_candidate_ids = set()
+        for detection_index, detection_bbox in enumerate(detections_array):
+            if detection_index in assignments:
+                continue
+            if detection_index >= len(class_labels):
+                continue
+            class_name = class_labels[detection_index]
+            if class_name not in self.team_inference_classes:
+                continue
+
+            best_candidate = None
+            best_iou = 0.0
+            for canonical_id, state in previous_state_candidates:
+                if canonical_id in used_state_candidate_ids:
+                    continue
+                if state.get("class_name") != class_name:
+                    continue
+                iou = self._bbox_iou(detection_bbox, state.get("bbox"))
+                if iou < self.team_inference_cache_iou_threshold:
+                    continue
+                if iou > best_iou:
+                    best_iou = iou
+                    best_candidate = (canonical_id, state)
+
+            if best_candidate is None:
+                continue
+
+            canonical_id, state = best_candidate
+            used_state_candidate_ids.add(canonical_id)
+            x1, y1, x2, y2 = [float(v) for v in detection_bbox]
+            assignments[detection_index] = {
+                "team": state.get("team"),
+                "distances": None,
+                "shirt_color": state.get("shirt_color"),
+                "bbox_size": float(max(0.0, x2 - x1) * max(0.0, y2 - y1)),
+            }
+        return assignments
 
     @staticmethod
     def _field_position_to_tuple(field_position):
@@ -663,6 +803,7 @@ class Tracker:
         raw_to_canonical_id = {}
         canonical_to_raw_id = {}
         canonical_state = {}
+        previous_frame_team_candidates = []
         timing_frames = []
         n_frame = 0
 
@@ -678,14 +819,61 @@ class Tracker:
             detections_sv = sv.Detections.from_ultralytics(detections)
             detections_to_sv_s = perf_counter() - sv_start
 
+            class_ids = (
+                np.asarray(detections_sv.class_id, dtype=np.int32).reshape(-1)
+                if detections_sv.class_id is not None
+                else np.zeros((len(detections_sv),), dtype=np.int32)
+            )
+            class_labels = [
+                detections.names[int(class_id)]
+                for class_id in class_ids
+            ]
+            cached_team_assignments = self._build_cached_team_assignments(
+                detections_xyxy=detections_sv.xyxy,
+                class_labels=class_labels,
+                canonical_state=canonical_state,
+                current_frame=n_frame,
+                previous_frame_candidates=previous_frame_team_candidates,
+            )
+
             team_detection_start = perf_counter()
             teams_of_detected_objects = self.team_detector.detect_teams(
-                detections, show_kmeans
+                detections,
+                show_kmeans,
+                cached_assignments=cached_team_assignments,
+                compute_for_classes=self.team_inference_classes,
             )
             team_timing = getattr(self.team_detector, "last_timing_detail", {}) or {}
             teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
-            class_labels = [dicc["class"] for dicc in teams_of_detected_objects]
             team_detection_s = perf_counter() - team_detection_start
+
+            previous_frame_team_candidates = []
+            detections_xyxy_array = np.asarray(
+                detections_sv.xyxy,
+                dtype=np.float32,
+            ).reshape(-1, 4)
+            for detection_index, detection_bbox in enumerate(detections_xyxy_array):
+                if detection_index >= len(class_labels):
+                    continue
+                if detection_index >= len(teams_of_detected_objects):
+                    continue
+                class_name = class_labels[detection_index]
+                if class_name not in self.team_inference_classes:
+                    continue
+                team_info = teams_of_detected_objects[detection_index]
+                team_name = team_info.get("team")
+                if team_name is None:
+                    continue
+                x1, y1, x2, y2 = [float(value) for value in detection_bbox]
+                previous_frame_team_candidates.append(
+                    {
+                        "class_name": class_name,
+                        "bbox": [x1, y1, x2, y2],
+                        "team": team_name,
+                        "shirt_color": team_info.get("shirt_color"),
+                        "bbox_size": float(max(0.0, x2 - x1) * max(0.0, y2 - y1)),
+                    }
+                )
 
             field_projection_start = perf_counter()
             field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
@@ -721,7 +909,18 @@ class Tracker:
                 [dicc["distances"] for dicc in teams_of_detected_objects], dtype=object
             )
             detections_sv.data["shirt_color"] = np.array(
-                [dicc["shirt_color"] for dicc in teams_of_detected_objects], dtype=object
+                [
+                    (
+                        tuple(
+                            float(channel)
+                            for channel in np.asarray(dicc["shirt_color"]).reshape(-1)[:3]
+                        )
+                        if dicc["shirt_color"] is not None
+                        else None
+                    )
+                    for dicc in teams_of_detected_objects
+                ],
+                dtype=object,
             )
             detections_sv.data["bbox_size"] = np.array(
                 [dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float
@@ -801,6 +1000,11 @@ class Tracker:
                     if detected_team is not None
                     else previous_state.get("team")
                 )
+                resolved_shirt_color = (
+                    metadata.get("shirt_color")
+                    if metadata.get("shirt_color") is not None
+                    else previous_state.get("shirt_color")
+                )
                 resolved_field_position = (
                     self._field_position_to_tuple(field_position)
                     or previous_state.get("field_position")
@@ -810,6 +1014,7 @@ class Tracker:
                     "class_name": output_class_name,
                     "last_frame": n_frame,
                     "team": resolved_team,
+                    "shirt_color": resolved_shirt_color,
                     "field_position": resolved_field_position,
                     "movement_samples": movement_samples,
                     "mean_step_distance": mean_step_distance,
@@ -821,7 +1026,7 @@ class Tracker:
                     "confidence": confidence,
                     "team": metadata.get("team"),
                     "distances": metadata.get("distances"),
-                    "shirt_color": metadata.get("shirt_color"),
+                    "shirt_color": resolved_shirt_color,
                     "bbox_size": metadata.get("bbox_size"),
                     "field_position_m": (
                         list(self._field_position_to_tuple(field_position))
@@ -1018,6 +1223,15 @@ class Tracker:
                     ),
                     "team_objects_valid_crop_count": float(
                         team_timing.get("team_objects_valid_crop_count", 0.0)
+                    ),
+                    "team_reused_count": float(
+                        team_timing.get("team_reused_count", 0.0)
+                    ),
+                    "team_kmeans_computed_count": float(
+                        team_timing.get("team_kmeans_computed_count", 0.0)
+                    ),
+                    "team_kmeans_skipped_count": float(
+                        team_timing.get("team_kmeans_skipped_count", 0.0)
                     ),
                     "field_projection_s": float(field_projection_s),
                     "field_homography_estimation_s": float(

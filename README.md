@@ -216,6 +216,7 @@ python scripts/track.py
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Si existe `paths.data.video_prueba_ajustado` en `config.yaml`, ese vídeo se usa por defecto.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
+Para reducir coste de identificación de equipo, se reutiliza la etiqueta del frame anterior para jugadores trackeados (`team_inference_cache_enabled=true`) y solo se recalcula KMeans en altas nuevas o recuperaciones.
 Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`) y forzar visualización con `TRACK_SHOW_OUTPUT=0|1`.
 Además, si `tracking.timing_enabled=true`, se guardan tiempos por fase para detectar cuellos de botella en `output/timing_reports/`:
 - `<run_id>_timing_summary.json` con tiempos globales del script y agregados del tracker.
@@ -321,6 +322,9 @@ tracking:
     player: 22
     ball: 1
     referee: 3
+  team_inference_cache_enabled: true
+  team_inference_cache_iou_threshold: 0.35
+  team_inference_classes: ["player", "goalkeeper"]
   timing_enabled: true
   timing_log_every_n_frames: 25
   timing_save_per_frame: true

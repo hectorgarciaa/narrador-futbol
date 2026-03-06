@@ -162,6 +162,15 @@ if __name__ == "__main__":
             "referee_recovery_max_distance": tracking_cfg.get(
                 "referee_recovery_max_distance", 45.0
             ),
+            "team_inference_cache_enabled": tracking_cfg.get(
+                "team_inference_cache_enabled", True
+            ),
+            "team_inference_cache_iou_threshold": tracking_cfg.get(
+                "team_inference_cache_iou_threshold", 0.35
+            ),
+            "team_inference_classes": tracking_cfg.get(
+                "team_inference_classes", ["player", "goalkeeper"]
+            ),
             "timing_enabled": timing_enabled,
             "timing_log_every_n_frames": timing_log_every_n_frames,
             "timing_save_per_frame": timing_save_per_frame,
