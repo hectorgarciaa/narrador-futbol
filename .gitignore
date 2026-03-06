@@ -39,7 +39,6 @@ models/yolo/**/*.pt
 yolo11m-seg.pt
 
 # Output files
-output/**
 !output/.gitkeep
 *.avi
 *.mp4

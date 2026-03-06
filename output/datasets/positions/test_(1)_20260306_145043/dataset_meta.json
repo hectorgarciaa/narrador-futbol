@@ -1,0 +1,30 @@
+{
+  "created_at": "2026-03-06T14:50:43.321725",
+  "match_id": "test_(1)",
+  "video_path": "/Users/carloscole/narrador-futbol/data/partidosPosiciones/test (1).mp4",
+  "tracks_path": "/Users/carloscole/narrador-futbol/output/tracks_json/tracker/tracks.json",
+  "field_length_m": 106.0,
+  "field_width_m": 68.0,
+  "max_teammates": 10,
+  "role_labels": [
+    "POR",
+    "LI",
+    "DFC_IZQ",
+    "DFC_DER",
+    "LD",
+    "MC",
+    "MI",
+    "MD",
+    "EI",
+    "ED",
+    "DC"
+  ],
+  "objective_feature_names": [],
+  "teammate_feature_names": [],
+  "attack_direction_by_team": {
+    "Real Madrid": 1,
+    "Wolfsburgo": -1
+  },
+  "num_base_rows": 92,
+  "num_samples": 0
+}
