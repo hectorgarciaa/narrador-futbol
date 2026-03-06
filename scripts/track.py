@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,22 @@ def parse_bool_env(name):
     if value is None:
         return None
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def sanitize_filename_stem(raw_stem):
+    """Converts a video stem into a filesystem-friendly stem."""
+    stem = str(raw_stem).strip()
+    if not stem:
+        return "video"
+    stem = re.sub(r"\s+", "_", stem)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem)
+    stem = re.sub(r"_+", "_", stem).strip("._-")
+    return stem or "video"
+
+
+def build_tracks_output_path(video_path, tracks_output_root):
+    video_stem = sanitize_filename_stem(Path(video_path).stem)
+    return Path(tracks_output_root) / "tracker" / f"{video_stem}_tracks.json"
 
 
 def save_result(tracks, output_path, logger):
@@ -108,7 +125,13 @@ if __name__ == "__main__":
             )
         VIDEO_PATH = str(config.get_path('paths', 'data', video_config_key))
         OUTPUT = str(config.get_path('paths', 'output', 'prueba_tracker', create_if_missing=True) / "nueva_prueba.mp4")
-        OUTPUT_PATH = str(config.get_path('paths', 'output', 'tracks_json', create_if_missing=True) / "tracker" / "tracks.json")
+        tracks_output_root = config.get_path(
+            'paths',
+            'output',
+            'tracks_json',
+            create_if_missing=True,
+        )
+        OUTPUT_PATH = str(build_tracks_output_path(VIDEO_PATH, tracks_output_root))
         
         # Configuration parameters
         CONF = config.get('detection', 'conf_threshold')

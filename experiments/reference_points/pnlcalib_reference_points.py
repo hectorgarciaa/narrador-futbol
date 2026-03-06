@@ -934,6 +934,7 @@ def render_projected_tracks_birdeye(
     geometry: Optional[PitchGeometry] = None,
     pixels_per_meter: int = 8,
     background_rgb: Optional[np.ndarray] = None,
+    team_colors_rgb: Optional[Dict[str, tuple[int, int, int]]] = None,
 ) -> np.ndarray:
     if geometry is None:
         geometry = PitchGeometry()
@@ -946,14 +947,29 @@ def render_projected_tracks_birdeye(
     else:
         template_rgb = np.asarray(background_rgb, dtype=np.uint8).copy()
 
-    team_colors = {
-        "Real Madrid": (230, 230, 230),
-        "Wolfsburgo": (60, 240, 120),
-        None: (240, 180, 50),
-    }
     points_array = np.asarray(field_points_m, dtype=np.float32)
     if teams is None:
         teams = [None] * len(points_array)
+
+    if team_colors_rgb is None:
+        dynamic_palette = [
+            (230, 230, 230),
+            (60, 240, 120),
+            (70, 150, 255),
+            (255, 190, 80),
+            (255, 110, 200),
+            (150, 220, 255),
+        ]
+        team_colors = {None: (240, 180, 50)}
+        unique_teams = [
+            team_name
+            for team_name in dict.fromkeys(teams)
+            if team_name is not None
+        ]
+        for idx, team_name in enumerate(unique_teams):
+            team_colors[team_name] = dynamic_palette[idx % len(dynamic_palette)]
+    else:
+        team_colors = {None: (240, 180, 50), **team_colors_rgb}
 
     for (x_coord, y_coord), team_name in zip(points_array, teams):
         px = int(round(x_coord * pixels_per_meter))

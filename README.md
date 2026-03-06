@@ -215,6 +215,7 @@ python scripts/track.py
 ```
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Si existe `paths.data.video_prueba_ajustado` en `config.yaml`, ese vídeo se usa por defecto.
+El JSON de tracks se guarda como `output/tracks_json/tracker/<nombre_video>_tracks.json` para que cada ejecución quede identificada por vídeo (siendo `<nombre_video>` el `stem` sanitizado del archivo de entrada).
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Para reducir coste de identificación de equipo, se reutiliza la etiqueta del frame anterior para jugadores trackeados (`team_inference_cache_enabled=true`) y solo se recalcula KMeans en altas nuevas o recuperaciones.
 Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`) y forzar visualización con `TRACK_SHOW_OUTPUT=0|1`.
@@ -330,11 +331,23 @@ tracking:
   timing_save_per_frame: true
 
 teams:
-  Real Madrid:
-    color_rgb: [255, 127, 127]
-  Wolfsburgo:
-    color_rgb: [224, 77, 196]
+  source_file: "data/metadata/teams.json"
+  default_color_space: "lab"
 ```
+
+Ejemplo de `data/metadata/teams.json`:
+
+```json
+{
+  "default_color_space": "lab",
+  "teams": [
+    {"name": "Real Madrid", "color": [255, 127, 127]},
+    {"name": "Wolfsburgo", "color": [224, 77, 196]}
+  ]
+}
+```
+
+También puedes usar `color_space: "rgb" | "bgr" | "hex"` por equipo y el sistema lo convierte al formato interno (LAB) automáticamente.
 
 ---
 

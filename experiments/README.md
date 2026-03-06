@@ -8,6 +8,10 @@ Notebooks de Jupyter para exploración, análisis y visualización interactiva d
 experiments/
 ├── detection/
 │   └── finetuning.ipynb              # Análisis del entrenamiento YOLO
+├── positions/
+│   ├── __init__.py
+│   ├── position_dataset.py            # Utilidades para construir dataset de roles
+│   └── position_role_dataset.ipynb    # Etiquetado por ID y export de dataset posicional
 ├── reference_points/
 │   ├── classical_reference_points.py  # Utilidades para homografía clásica
 │   ├── pnlcalib_reference_points.py   # Wrapper para inferencia con PnLCalib
@@ -42,6 +46,22 @@ Puntos de análisis:
 - Distribución de confianzas de detección del balón.
 - Visualización frame a frame de los tracks generados.
 - Ajuste del parámetro `ball_min_conf` para el fallback.
+
+---
+
+## `positions/position_role_dataset.ipynb`
+
+**Objetivo:** Construir un dataset supervisado para clasificación de rol nominal (`POR`, `LI`, `DFC_IZQ`, etc.) a partir de tracks proyectados al campo 2D.
+
+Flujo del cuaderno:
+- Carga `output/tracks_json/tracker/<nombre_video>_tracks.json` (con fallback legacy a `tracks.json`) y genera tabla base con `match_id`, `frame_id`, `team_id`, `player_id`, `x`, `y`, `visible`.
+- Muestra un frame de inicio con IDs dibujados para etiquetar manualmente `player_id -> role_label`.
+- Extiende la etiqueta a todos los frames por ID.
+- Infere (u opcionalmente fija) dirección de ataque por equipo y reorienta cada muestra para que el equipo objetivo ataque hacia `+x`.
+- Construye features del jugador objetivo y de compañeros, incluyendo tensor con `padding` y `mask`.
+- Exporta dataset a `output/datasets/positions/<match_id>_<run_id>/`.
+
+`position_dataset.py` contiene las utilidades reutilizables del notebook (parseo de tracks, validación de etiquetas, inferencia de orientación y construcción de muestras).
 
 ---
 

@@ -34,9 +34,11 @@ tracking_cfg = config.tracking       # → dict completo de tracking
 teams_cfg    = config.teams          # → dict de equipos con colores
 
 # Helpers de alto nivel
-team_colors  = config.get_team_colors()          # → {"Real Madrid": np.array([255,127,127]), ...}
+team_colors  = config.get_team_colors()          # → {"Real Madrid": np.array([L,A,B]), ...}
 bgr_colors   = config.get_visualization_colors() # → {"player": (0,255,0), ...} en BGR para OpenCV
 ```
+
+`get_team_colors()` resuelve equipos desde `teams.source_file` (JSON/YAML) y/o desde entradas inline de `config.yaml`. Acepta colores por equipo en `lab`, `rgb`, `bgr` o `hex` y los normaliza al espacio LAB interno usado por el detector de camisetas.
 
 **Propiedades disponibles:** `paths`, `detection`, `tracking`, `teams`, `visualization`, `finetuning`, `logging_config`.
 

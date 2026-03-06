@@ -115,12 +115,12 @@ tracking:
 
 # Configuración de equipos
 teams:
-  Real Madrid:
-    color_rgb: [255, 127, 127]  # Color de referencia en RGB
-    name: "Real Madrid"
-  Wolfsburgo:
-    color_rgb: [224, 77, 196]  # Color de referencia en RGB
-    name: "Wolfsburgo"
+  # Archivo externo con los equipos del partido (nombre + color de camiseta)
+  # Formatos soportados: .json, .yaml, .yml
+  source_file: "data/metadata/teams.json"
+  # Si una entrada no especifica color_space, se asume este.
+  # Para el detector actual conviene LAB.
+  default_color_space: "lab"
 
 # Configuración de clustering de colores
 color_clustering:

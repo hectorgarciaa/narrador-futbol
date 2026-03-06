@@ -54,7 +54,7 @@ python scripts/<nombre>.py
 **Flujo:**
 1. Carga toda la configuración de `config.yaml` (modelo, video, output, confianza, tracker, equipos).
 2. Instancia `Tracker` y llama a `get_tracks()`.
-3. Guarda los tracks en `output/tracks_json/tracker/tracks.json` con `json.dump` + `convert_to_serializable`.
+3. Guarda los tracks en `output/tracks_json/tracker/<nombre_video>_tracks.json` con `json.dump` + `convert_to_serializable`.
 4. Genera el video anotado con `Drawer.draw_tracks()`.
 5. Llama a `Evaluator` para imprimir métricas en consola.
 

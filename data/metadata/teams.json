@@ -1,0 +1,13 @@
+{
+  "default_color_space": "lab",
+  "teams": [
+    {
+      "name": "Real Madrid",
+      "color": [255, 127, 127]
+    },
+    {
+      "name": "Wolfsburgo",
+      "color": [224, 77, 196]
+    }
+  ]
+}
