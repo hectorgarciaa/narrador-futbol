@@ -97,6 +97,18 @@ class Tracker:
         self.reassign_max_lost_frames = int(
             tracker_conf.get("reassign_max_lost_frames", 12)
         )
+        self.canonical_cleanup_lost_frames = int(
+            tracker_conf.get(
+                "canonical_cleanup_lost_frames",
+                tracker_conf.get("track_buffer", 90),
+            )
+        )
+        self.class_limit_lost_frames = int(
+            tracker_conf.get(
+                "class_limit_lost_frames",
+                self.reassign_max_lost_frames,
+            )
+        )
         self.raw_id_grace_lost_frames = int(
             tracker_conf.get("raw_id_grace_lost_frames", 2)
         )
@@ -330,6 +342,54 @@ class Tracker:
             if canonical_id not in canonical_state:
                 return canonical_id
         return None
+
+    def _reclaim_stale_canonical_id(
+        self,
+        canonical_state,
+        raw_to_canonical_id,
+        canonical_to_raw_id,
+        current_frame,
+        protected_ids=None,
+        preferred_class=None,
+    ):
+        if protected_ids is None:
+            protected_ids = set()
+        stale_window = max(1, int(self.class_limit_lost_frames))
+
+        def pick_candidate(match_preferred_class):
+            best_candidate = None
+            for canonical_id, state in canonical_state.items():
+                if canonical_id in protected_ids:
+                    continue
+                state_class = state.get("class_name")
+                if (
+                    match_preferred_class
+                    and preferred_class is not None
+                    and state_class != preferred_class
+                ):
+                    continue
+                last_frame = int(state.get("last_frame", -999999))
+                lost_frames = max(0, current_frame - last_frame)
+                if lost_frames <= stale_window:
+                    continue
+                priority = (lost_frames, -last_frame, canonical_id)
+                if best_candidate is None or priority > best_candidate[0]:
+                    best_candidate = (priority, canonical_id)
+            if best_candidate is None:
+                return None
+            return best_candidate[1]
+
+        reclaimed_id = pick_candidate(match_preferred_class=True)
+        if reclaimed_id is None:
+            reclaimed_id = pick_candidate(match_preferred_class=False)
+        if reclaimed_id is None:
+            return None
+
+        raw_id = canonical_to_raw_id.pop(reclaimed_id, None)
+        if raw_id is not None and raw_to_canonical_id.get(raw_id) == reclaimed_id:
+            raw_to_canonical_id.pop(raw_id, None)
+        canonical_state.pop(reclaimed_id, None)
+        return reclaimed_id
 
     @staticmethod
     def _is_compatible_class(previous_class, new_class):
@@ -702,6 +762,45 @@ class Tracker:
             if state.get("class_name") == class_name
         )
 
+    def _count_recent_ids_for_class(
+        self,
+        canonical_state,
+        class_name,
+        current_frame,
+        max_lost_frames,
+    ):
+        if max_lost_frames is None or max_lost_frames <= 0:
+            return self._count_ids_for_class(canonical_state, class_name)
+        return sum(
+            1
+            for state in canonical_state.values()
+            if state.get("class_name") == class_name
+            and (
+                current_frame - int(state.get("last_frame", -999999))
+            ) <= max_lost_frames
+        )
+
+    def _cleanup_stale_canonical_state(
+        self,
+        canonical_state,
+        raw_to_canonical_id,
+        canonical_to_raw_id,
+        current_frame,
+    ):
+        if self.canonical_cleanup_lost_frames <= 0:
+            return 0
+        removed = 0
+        for canonical_id, state in list(canonical_state.items()):
+            last_frame = int(state.get("last_frame", -999999))
+            if (current_frame - last_frame) <= self.canonical_cleanup_lost_frames:
+                continue
+            raw_id = canonical_to_raw_id.pop(canonical_id, None)
+            if raw_id is not None and raw_to_canonical_id.get(raw_id) == canonical_id:
+                raw_to_canonical_id.pop(raw_id, None)
+            canonical_state.pop(canonical_id, None)
+            removed += 1
+        return removed
+
     def _nearest_id_same_class(
         self,
         bbox,
@@ -869,7 +968,7 @@ class Tracker:
             "metrics": metrics_summary,
         }
     
-    def get_tracks(self, video, show_kmeans=False):
+    def get_tracks(self, video, show_kmeans=False, max_frames=None):
         model_detections_iter = iter(self.model.detect(video))
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": []}
         raw_to_canonical_id = {}
@@ -880,6 +979,8 @@ class Tracker:
         n_frame = 0
 
         while True:
+            if max_frames is not None and n_frame >= int(max_frames):
+                break
             frame_start = perf_counter()
             try:
                 detections = next(model_detections_iter)
@@ -900,6 +1001,14 @@ class Tracker:
                 detections.names[int(class_id)]
                 for class_id in class_ids
             ]
+            canonical_cleanup_start = perf_counter()
+            canonical_removed_count = self._cleanup_stale_canonical_state(
+                canonical_state,
+                raw_to_canonical_id,
+                canonical_to_raw_id,
+                n_frame,
+            )
+            canonical_cleanup_s = perf_counter() - canonical_cleanup_start
             cached_team_assignments = self._build_cached_team_assignments(
                 detections_xyxy=detections_sv.xyxy,
                 class_labels=class_labels,
@@ -1033,6 +1142,8 @@ class Tracker:
                 1 for raw_id in raw_tracker_ids_in_frame if raw_id == 0
             )
             pending_detections = []
+            raw_mapping_grace_used_count = 0
+            raw_mapping_rejected_count = 0
 
             def commit_assignment(
                 raw_tracker_id,
@@ -1168,12 +1279,16 @@ class Tracker:
                             field_position,
                             n_frame,
                         ) is None:
-                            if not self._can_keep_raw_id_mapping(
+                            keep_raw_mapping = self._can_keep_raw_id_mapping(
                                 previous_state,
                                 output_class_name,
                                 detected_team,
                                 n_frame,
-                            ):
+                            )
+                            if keep_raw_mapping:
+                                raw_mapping_grace_used_count += 1
+                            else:
+                                raw_mapping_rejected_count += 1
                                 canonical_id = None
 
                 if canonical_id is None:
@@ -1206,31 +1321,55 @@ class Tracker:
                 for candidate_id in canonical_state.keys()
                 if candidate_id not in used_canonical_ids_in_frame
             ]
+            pending_total_count = len(pending_detections)
             pending_assignments = self._assign_pending_by_lost_order(
                 pending_detections,
                 available_ids,
                 canonical_state,
                 n_frame,
             )
+            pending_reassigned_existing_count = 0
+            pending_new_id_count = 0
+            pending_reclaimed_id_count = 0
+            pending_dropped_class_limit_count = 0
+            pending_dropped_no_free_id_count = 0
 
             for pending_idx, pending in enumerate(pending_detections):
                 assignment = pending_assignments.get(pending_idx)
                 if assignment is not None:
                     canonical_id, output_class_name = assignment
+                    pending_reassigned_existing_count += 1
                 else:
                     output_class_name = pending["preferred_class_name"]
                     class_limit = self.max_tracks_per_class.get(output_class_name)
                     if class_limit is not None:
-                        class_count = self._count_ids_for_class(
+                        class_count = self._count_recent_ids_for_class(
                             canonical_state,
                             output_class_name,
+                            n_frame,
+                            self.class_limit_lost_frames,
                         )
                         if class_count >= int(class_limit):
+                            pending_dropped_class_limit_count += 1
                             continue
                     next_free_id = self._next_free_canonical_id(canonical_state)
                     if next_free_id is None:
-                        continue
-                    canonical_id = next_free_id
+                        reclaimed_id = self._reclaim_stale_canonical_id(
+                            canonical_state,
+                            raw_to_canonical_id,
+                            canonical_to_raw_id,
+                            n_frame,
+                            protected_ids=used_canonical_ids_in_frame,
+                            preferred_class=output_class_name,
+                        )
+                        if reclaimed_id is None:
+                            pending_dropped_no_free_id_count += 1
+                            continue
+                        canonical_id = reclaimed_id
+                        pending_reclaimed_id_count += 1
+                    else:
+                        canonical_id = next_free_id
+                    pending_new_id_count += 1
 
                 commit_assignment(
                     pending["raw_tracker_id"],
@@ -1277,6 +1416,26 @@ class Tracker:
                         "ground_point_image": None,
                     }
             ball_fallback_s = perf_counter() - ball_fallback_start
+
+            canonical_active_count = len(canonical_state)
+            canonical_recent_player_count = self._count_recent_ids_for_class(
+                canonical_state,
+                "player",
+                n_frame,
+                self.class_limit_lost_frames,
+            )
+            canonical_recent_goalkeeper_count = self._count_recent_ids_for_class(
+                canonical_state,
+                "goalkeeper",
+                n_frame,
+                self.class_limit_lost_frames,
+            )
+            canonical_recent_referee_count = self._count_recent_ids_for_class(
+                canonical_state,
+                "referee",
+                n_frame,
+                self.class_limit_lost_frames,
+            )
 
             if self.timing_enabled:
                 track_total_s = tracker_update_s + id_assignment_s + ball_fallback_s
@@ -1418,6 +1577,38 @@ class Tracker:
                         field_timing.get("pnl_previous_fallback_applied", 0.0)
                     ),
                     "metadata_pack_s": float(metadata_pack_s),
+                    "canonical_cleanup_s": float(canonical_cleanup_s),
+                    "canonical_removed_count": float(canonical_removed_count),
+                    "canonical_active_count": float(canonical_active_count),
+                    "canonical_recent_player_count": float(
+                        canonical_recent_player_count
+                    ),
+                    "canonical_recent_goalkeeper_count": float(
+                        canonical_recent_goalkeeper_count
+                    ),
+                    "canonical_recent_referee_count": float(
+                        canonical_recent_referee_count
+                    ),
+                    "pending_total_count": float(pending_total_count),
+                    "pending_reassigned_existing_count": float(
+                        pending_reassigned_existing_count
+                    ),
+                    "pending_new_id_count": float(pending_new_id_count),
+                    "pending_reclaimed_id_count": float(
+                        pending_reclaimed_id_count
+                    ),
+                    "pending_dropped_class_limit_count": float(
+                        pending_dropped_class_limit_count
+                    ),
+                    "pending_dropped_no_free_id_count": float(
+                        pending_dropped_no_free_id_count
+                    ),
+                    "raw_mapping_grace_used_count": float(
+                        raw_mapping_grace_used_count
+                    ),
+                    "raw_mapping_rejected_count": float(
+                        raw_mapping_rejected_count
+                    ),
                     "tracker_update_s": float(tracker_update_s),
                     "track_total_s": float(track_total_s),
                     "bytetrack_total_s": float(

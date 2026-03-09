@@ -25,6 +25,19 @@ def parse_bool_env(name):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def parse_int_env(name):
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
 def sanitize_filename_stem(raw_stem):
     """Converts a video stem into a filesystem-friendly stem."""
     stem = str(raw_stem).strip()
@@ -141,6 +154,9 @@ if __name__ == "__main__":
         show_output_override = parse_bool_env("TRACK_SHOW_OUTPUT")
         if show_output_override is not None:
             SHOW_OUTPUT = show_output_override
+        track_max_frames = parse_int_env("TRACK_MAX_FRAMES")
+        if track_max_frames is not None and track_max_frames <= 0:
+            track_max_frames = None
         
         # Tracking configuration
         tracking_cfg = config.tracking
@@ -184,6 +200,17 @@ if __name__ == "__main__":
             "reassign_min_samples": tracking_cfg.get("reassign_min_samples", 3),
             "reassign_max_lost_frames": tracking_cfg.get(
                 "reassign_max_lost_frames", 12
+            ),
+            "canonical_cleanup_lost_frames": tracking_cfg.get(
+                "canonical_cleanup_lost_frames",
+                tracking_cfg.get("track_buffer", 90),
+            ),
+            "class_limit_lost_frames": tracking_cfg.get(
+                "class_limit_lost_frames",
+                tracking_cfg.get(
+                    "reassign_max_lost_frames",
+                    12,
+                ),
             ),
             "raw_id_grace_lost_frames": tracking_cfg.get(
                 "raw_id_grace_lost_frames", 2
@@ -256,6 +283,8 @@ if __name__ == "__main__":
         logger.info(f"Video key: {video_config_key}")
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
+        if track_max_frames is not None:
+            logger.info("TRACK_MAX_FRAMES activo: %d", track_max_frames)
         logger.info(
             (
                 "Timing configuration: enabled=%s, log_every_n_frames=%d, "
@@ -283,7 +312,11 @@ if __name__ == "__main__":
 
         logger.info("Extracting tracks from video...")
         tracking_start = perf_counter()
-        tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
+        tracks = tracker.get_tracks(
+            VIDEO_PATH,
+            SHOWKMEANS,
+            max_frames=track_max_frames,
+        )
         phase_times["tracking_s"] = float(perf_counter() - tracking_start)
         
         # Draw tracks

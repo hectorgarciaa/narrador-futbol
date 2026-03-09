@@ -1,0 +1,55 @@
+{
+  "before_file": "output/timing_reports/20260309_151440_adjusted_60f_diag.json",
+  "after_file": "output/timing_reports/20260309_153133_adjusted_60f_diag_recheck.json",
+  "mean_people_first20_before": 20.0,
+  "mean_people_last20_before": 19.9,
+  "mean_people_first20_after": 20.0,
+  "mean_people_last20_after": 19.9,
+  "diagnostics": {
+    "pending_total_count": {
+      "before": 42.0,
+      "after": 32.0,
+      "delta": -10.0
+    },
+    "pending_reassigned_existing_count": {
+      "before": 10.0,
+      "after": 1.0,
+      "delta": -9.0
+    },
+    "pending_new_id_count": {
+      "before": 25.0,
+      "after": 28.0,
+      "delta": 3.0
+    },
+    "pending_reclaimed_id_count": {
+      "before": 0.0,
+      "after": 3.0,
+      "delta": 3.0
+    },
+    "pending_dropped_class_limit_count": {
+      "before": 0.0,
+      "after": 3.0,
+      "delta": 3.0
+    },
+    "pending_dropped_no_free_id_count": {
+      "before": 7.0,
+      "after": 0.0,
+      "delta": -7.0
+    },
+    "canonical_removed_count": {
+      "before": 0.0,
+      "after": 0.0,
+      "delta": 0.0
+    },
+    "raw_mapping_rejected_count": {
+      "before": 4.0,
+      "after": 7.0,
+      "delta": 3.0
+    },
+    "raw_mapping_grace_used_count": {
+      "before": 4.0,
+      "after": 4.0,
+      "delta": 0.0
+    }
+  }
+}

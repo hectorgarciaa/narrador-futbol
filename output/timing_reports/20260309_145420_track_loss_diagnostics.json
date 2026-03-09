@@ -1,0 +1,40 @@
+{
+  "run_id": "20260309_145420",
+  "frames": 12,
+  "diagnostic_totals": {
+    "pending_total_count": 22.0,
+    "pending_reassigned_existing_count": 0.0,
+    "pending_new_id_count": 22.0,
+    "pending_dropped_class_limit_count": 0.0,
+    "pending_dropped_no_free_id_count": 0.0,
+    "canonical_removed_count": 0.0,
+    "canonical_active_count": 264.0,
+    "canonical_recent_player_count": 240.0,
+    "canonical_recent_goalkeeper_count": 0.0,
+    "canonical_recent_referee_count": 24.0,
+    "raw_mapping_grace_used_count": 0.0,
+    "raw_mapping_rejected_count": 0.0
+  },
+  "diagnostic_means": {
+    "pending_total_count": 1.8333333333333333,
+    "pending_reassigned_existing_count": 0.0,
+    "pending_new_id_count": 1.8333333333333333,
+    "pending_dropped_class_limit_count": 0.0,
+    "pending_dropped_no_free_id_count": 0.0,
+    "canonical_removed_count": 0.0,
+    "canonical_active_count": 22.0,
+    "canonical_recent_player_count": 20.0,
+    "canonical_recent_goalkeeper_count": 0.0,
+    "canonical_recent_referee_count": 2.0,
+    "raw_mapping_grace_used_count": 0.0,
+    "raw_mapping_rejected_count": 0.0
+  },
+  "low_track_frames": [],
+  "notes": [
+    "Si pending_dropped_class_limit_count crece, el l\u00edmite por clase est\u00e1 bloqueando altas.",
+    "Si pending_dropped_no_free_id_count crece, se agot\u00f3 max_total_tracks sin reciclar IDs.",
+    "Si canonical_removed_count es 0 durante runs largos, revisar canonical_cleanup_lost_frames."
+  ],
+  "timing_summary_path": "output/timing_reports/20260309_145420_timing_summary.json",
+  "frame_csv_path": "output/timing_reports/20260309_145420_tracking_frame_times.csv"
+}

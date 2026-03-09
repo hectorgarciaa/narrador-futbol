@@ -1,0 +1,494 @@
+{
+  "run_type": "adjusted_60frames_tracking_only_recheck",
+  "frames": 60,
+  "mean_people_first20": 20.0,
+  "mean_people_last20": 19.9,
+  "min_people": 19,
+  "max_people": 21,
+  "diagnostics_totals": {
+    "pending_total_count": 32.0,
+    "pending_reassigned_existing_count": 1.0,
+    "pending_new_id_count": 28.0,
+    "pending_reclaimed_id_count": 3.0,
+    "pending_dropped_class_limit_count": 3.0,
+    "pending_dropped_no_free_id_count": 0.0,
+    "canonical_removed_count": 0.0,
+    "raw_mapping_rejected_count": 7.0,
+    "raw_mapping_grace_used_count": 4.0
+  },
+  "timing_summary": {
+    "frames": 60,
+    "phases": {
+      "detection_fetch_s": {
+        "total_s": 41.95259798799985,
+        "mean_s": 0.6992099664666642,
+        "max_s": 0.8212537019999786,
+        "p95_s": 0.792402580799991
+      },
+      "detection_inference_s": {
+        "total_s": 41.95259798799985,
+        "mean_s": 0.6992099664666642,
+        "max_s": 0.8212537019999786,
+        "p95_s": 0.792402580799991
+      },
+      "detections_to_sv_s": {
+        "total_s": 0.016514162999447635,
+        "mean_s": 0.0002752360499907939,
+        "max_s": 0.0005142239999713638,
+        "p95_s": 0.00045158729998568954
+      },
+      "team_detection_s": {
+        "total_s": 34.71805326800023,
+        "mean_s": 0.5786342211333372,
+        "max_s": 0.7205221969999229,
+        "p95_s": 0.6814803389999924
+      },
+      "team_kmeans_s": {
+        "total_s": 34.20941373999953,
+        "mean_s": 0.5701568956666588,
+        "max_s": 0.6895698459996993,
+        "p95_s": 0.6681964722002363
+      },
+      "team_clustering_s": {
+        "total_s": 34.20941373999953,
+        "mean_s": 0.5701568956666588,
+        "max_s": 0.6895698459996993,
+        "p95_s": 0.6681964722002363
+      },
+      "team_kmeans_fit_s": {
+        "total_s": 32.99111220000218,
+        "mean_s": 0.5498518700000363,
+        "max_s": 0.6641166800004612,
+        "p95_s": 0.6480385960499255
+      },
+      "team_color_update_s": {
+        "total_s": 0.006966634997636945,
+        "mean_s": 0.00011611058329394908,
+        "max_s": 0.00038499599999930467,
+        "p95_s": 0.00013262684998949226
+      },
+      "team_assign_s": {
+        "total_s": 0.06215340900022426,
+        "mean_s": 0.0010358901500037375,
+        "max_s": 0.002155777000211856,
+        "p95_s": 0.0012286204500441041
+      },
+      "team_crop_player_s": {
+        "total_s": 0.004119545999172303,
+        "mean_s": 6.865909998620505e-05,
+        "max_s": 0.00011528899972290674,
+        "p95_s": 8.71885501624092e-05
+      },
+      "team_crop_shirt_s": {
+        "total_s": 0.004123465000546389,
+        "mean_s": 6.872441667577315e-05,
+        "max_s": 9.64639999949668e-05,
+        "p95_s": 8.093095001981963e-05
+      },
+      "field_projection_s": {
+        "total_s": 818.8794574749998,
+        "mean_s": 13.647990957916663,
+        "max_s": 15.698237943999999,
+        "p95_s": 15.442116136700003
+      },
+      "field_homography_estimation_s": {
+        "total_s": 817.4793775399999,
+        "mean_s": 13.62465629233333,
+        "max_s": 15.674877320000007,
+        "p95_s": 15.420142179549996
+      },
+      "field_pnl_total_s": {
+        "total_s": 815.8011943300004,
+        "mean_s": 13.596686572166673,
+        "max_s": 15.64537146699999,
+        "p95_s": 15.389132731650005
+      },
+      "field_pnl_streaming_total_s": {
+        "total_s": 817.4757337050003,
+        "mean_s": 13.624595561750004,
+        "max_s": 15.674833887999995,
+        "p95_s": 15.420091941749998
+      },
+      "field_pnl_preprocess_color_convert_s": {
+        "total_s": 0.14595615400022943,
+        "mean_s": 0.0024326025666704903,
+        "max_s": 0.00349870299999111,
+        "p95_s": 0.002982098649985687
+      },
+      "field_pnl_preprocess_tensor_build_s": {
+        "total_s": 1.8451079139997884,
+        "mean_s": 0.03075179856666314,
+        "max_s": 0.03667196200001399,
+        "p95_s": 0.03458156200001809
+      },
+      "field_pnl_preprocess_resize_s": {
+        "total_s": 0.7688289399999491,
+        "mean_s": 0.012813815666665817,
+        "max_s": 0.017794214000019792,
+        "p95_s": 0.01693029130000809
+      },
+      "field_pnl_preprocess_to_device_s": {
+        "total_s": 0.0012034319998441845,
+        "mean_s": 2.0057199997403073e-05,
+        "max_s": 3.816000003098452e-05,
+        "p95_s": 2.4986499983015165e-05
+      },
+      "field_pnl_model_kp_inference_s": {
+        "total_s": 384.7553157739999,
+        "mean_s": 6.4125885962333316,
+        "max_s": 8.128433966999978,
+        "p95_s": 7.294275850349996
+      },
+      "field_pnl_model_line_inference_s": {
+        "total_s": 377.9496427329997,
+        "mean_s": 6.299160712216661,
+        "max_s": 8.820225677999929,
+        "p95_s": 7.2919475081500105
+      },
+      "field_pnl_decode_keypoints_s": {
+        "total_s": 12.758524474999554,
+        "mean_s": 0.2126420745833259,
+        "max_s": 0.30088464900006784,
+        "p95_s": 0.24136872505002313
+      },
+      "field_pnl_decode_lines_s": {
+        "total_s": 5.491340049999934,
+        "mean_s": 0.09152233416666557,
+        "max_s": 0.11366634399999498,
+        "p95_s": 0.10474335870001139
+      },
+      "field_pnl_complete_keypoints_s": {
+        "total_s": 0.030864185999696758,
+        "mean_s": 0.000514403099994946,
+        "max_s": 0.0010430989999576923,
+        "p95_s": 0.0007156281500105159
+      },
+      "field_pnl_calibrator_init_s": {
+        "total_s": 0.0025312029998545427,
+        "mean_s": 4.218671666424238e-05,
+        "max_s": 0.0003062890000009588,
+        "p95_s": 5.568745000061823e-05
+      },
+      "field_pnl_calibrator_update_s": {
+        "total_s": 0.007534174999754839,
+        "mean_s": 0.0001255695833292473,
+        "max_s": 0.0003135890000294239,
+        "p95_s": 0.00019237154997213648
+      },
+      "field_pnl_ground_voting_s": {
+        "total_s": 11.987754488999837,
+        "mean_s": 0.1997959081499973,
+        "max_s": 0.23597572399999933,
+        "p95_s": 0.2303182277499957
+      },
+      "field_pnl_camera_voting_s": {
+        "total_s": 20.043409367000283,
+        "mean_s": 0.33405682278333804,
+        "max_s": 0.8138230400000452,
+        "p95_s": 0.5126919902500218
+      },
+      "field_pnl_homography_select_s": {
+        "total_s": 0.0003190669999959539,
+        "mean_s": 5.317783333265899e-06,
+        "max_s": 8.497000010265765e-06,
+        "p95_s": 7.596199998260998e-06
+      },
+      "field_pnl_centered_to_field_s": {
+        "total_s": 0.0017295659998062263,
+        "mean_s": 2.8826099996770438e-05,
+        "max_s": 9.929699990607332e-05,
+        "p95_s": 4.9041100020552604e-05
+      },
+      "field_pnl_template_homography_s": {
+        "total_s": 0.0006617809994615698,
+        "mean_s": 1.1029683324359496e-05,
+        "max_s": 1.9633999954749015e-05,
+        "p95_s": 1.6298349990506722e-05
+      },
+      "field_pnl_projection_matrix_s": {
+        "total_s": 0.002489992000430874,
+        "mean_s": 4.14998666738479e-05,
+        "max_s": 6.884200001877616e-05,
+        "p95_s": 5.904434998740269e-05
+      },
+      "field_pnl_temporal_smoothing_s": {
+        "total_s": 0.005973079000021642,
+        "mean_s": 9.955131666702735e-05,
+        "max_s": 0.00013851400001385628,
+        "p95_s": 0.00012112905000094541
+      },
+      "field_pnl_previous_fallback_s": {
+        "total_s": 0.0,
+        "mean_s": 0.0,
+        "max_s": 0.0,
+        "p95_s": 0.0
+      },
+      "field_resize_s": {
+        "total_s": 1.2323338430005908,
+        "mean_s": 0.02053889738334318,
+        "max_s": 0.027860746999976982,
+        "p95_s": 0.025408592649989712
+      },
+      "field_project_points_s": {
+        "total_s": 0.0017143150001857066,
+        "mean_s": 2.8571916669761776e-05,
+        "max_s": 7.850400000108948e-05,
+        "p95_s": 5.376765000484336e-05
+      },
+      "field_ground_points_s": {
+        "total_s": 0.004709711000554506,
+        "mean_s": 7.84951833425751e-05,
+        "max_s": 0.00014154300000157605,
+        "p95_s": 0.00010081024997816705
+      },
+      "field_scale_points_s": {
+        "total_s": 0.00136621500008971,
+        "mean_s": 2.2770250001495167e-05,
+        "max_s": 6.748600003447791e-05,
+        "p95_s": 4.388895001170567e-05
+      },
+      "field_class_filter_s": {
+        "total_s": 0.0009455190004103997,
+        "mean_s": 1.5758650006839996e-05,
+        "max_s": 2.678399999922476e-05,
+        "p95_s": 2.085559997340169e-05
+      },
+      "metadata_pack_s": {
+        "total_s": 0.011587993999821578,
+        "mean_s": 0.00019313323333035963,
+        "max_s": 0.00033640099991316674,
+        "p95_s": 0.00032050899999358506
+      },
+      "canonical_cleanup_s": {
+        "total_s": 0.0020946470001206308,
+        "mean_s": 3.4910783335343845e-05,
+        "max_s": 8.349300003374083e-05,
+        "p95_s": 6.243505000043113e-05
+      },
+      "tracker_update_s": {
+        "total_s": 1.967344412000152,
+        "mean_s": 0.032789073533335863,
+        "max_s": 0.07458855099997663,
+        "p95_s": 0.03996716075005508
+      },
+      "track_total_s": {
+        "total_s": 2.2353054190006603,
+        "mean_s": 0.03725509031667767,
+        "max_s": 0.08373876799998925,
+        "p95_s": 0.04431484750013225
+      },
+      "bytetrack_total_s": {
+        "total_s": 1.9464137369997516,
+        "mean_s": 0.03244022894999586,
+        "max_s": 0.07408815000002278,
+        "p95_s": 0.03966057660003059
+      },
+      "bytetrack_preprocess_s": {
+        "total_s": 0.0021855779996755587,
+        "mean_s": 3.6426299994592644e-05,
+        "max_s": 9.503599999760581e-05,
+        "p95_s": 5.764370000846948e-05
+      },
+      "bytetrack_update_tensors_s": {
+        "total_s": 1.1134064900001874,
+        "mean_s": 0.018556774833336457,
+        "max_s": 0.03368072299997493,
+        "p95_s": 0.02246594699999491
+      },
+      "bytetrack_output_match_s": {
+        "total_s": 0.8306989720002207,
+        "mean_s": 0.013844982866670345,
+        "max_s": 0.04035878900003809,
+        "p95_s": 0.01771250924999208
+      },
+      "id_assignment_s": {
+        "total_s": 0.25610934400032903,
+        "mean_s": 0.004268489066672151,
+        "max_s": 0.00889245100000835,
+        "p95_s": 0.005681724449989644
+      },
+      "ball_fallback_s": {
+        "total_s": 0.011851663000179258,
+        "mean_s": 0.0001975277166696543,
+        "max_s": 0.0005993190000026516,
+        "p95_s": 0.00026084945000377487
+      },
+      "frame_total_s": {
+        "total_s": 897.8368656940004,
+        "mean_s": 14.963947761566674,
+        "max_s": 17.082655821999992,
+        "p95_s": 16.806134089100006
+      }
+    },
+    "metrics": {
+      "team_objects_count": {
+        "mean": 27.183333333333334,
+        "min": 23.0,
+        "max": 32.0,
+        "p95": 30.049999999999997
+      },
+      "team_objects_valid_crop_count": {
+        "mean": 22.95,
+        "min": 20.0,
+        "max": 26.0,
+        "p95": 26.0
+      },
+      "team_reused_count": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p95": 0.0
+      },
+      "team_kmeans_computed_count": {
+        "mean": 22.95,
+        "min": 20.0,
+        "max": 26.0,
+        "p95": 26.0
+      },
+      "team_kmeans_skipped_count": {
+        "mean": 4.233333333333333,
+        "min": 1.0,
+        "max": 8.0,
+        "p95": 6.049999999999997
+      },
+      "field_has_homography": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "p95": 1.0
+      },
+      "field_pnl_visible_keypoints_count": {
+        "mean": 22.45,
+        "min": 21.0,
+        "max": 24.0,
+        "p95": 24.0
+      },
+      "field_pnl_visible_lines_count": {
+        "mean": 0.7666666666666667,
+        "min": 0.0,
+        "max": 2.0,
+        "p95": 2.0
+      },
+      "field_pnl_used_ground_solution": {
+        "mean": 1.0,
+        "min": 1.0,
+        "max": 1.0,
+        "p95": 1.0
+      },
+      "field_pnl_used_camera_fallback": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p95": 0.0
+      },
+      "field_pnl_temporal_smoothed": {
+        "mean": 0.9833333333333333,
+        "min": 0.0,
+        "max": 1.0,
+        "p95": 1.0
+      },
+      "field_pnl_previous_fallback_applied": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p95": 0.0
+      },
+      "canonical_removed_count": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p95": 0.0
+      },
+      "canonical_active_count": {
+        "mean": 23.85,
+        "min": 22.0,
+        "max": 25.0,
+        "p95": 25.0
+      },
+      "canonical_recent_player_count": {
+        "mean": 20.516666666666666,
+        "min": 20.0,
+        "max": 21.0,
+        "p95": 21.0
+      },
+      "canonical_recent_goalkeeper_count": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p95": 0.0
+      },
+      "canonical_recent_referee_count": {
+        "mean": 2.5,
+        "min": 2.0,
+        "max": 3.0,
+        "p95": 3.0
+      },
+      "pending_total_count": {
+        "mean": 0.5333333333333333,
+        "min": 0.0,
+        "max": 22.0,
+        "p95": 1.0
+      },
+      "pending_reassigned_existing_count": {
+        "mean": 0.016666666666666666,
+        "min": 0.0,
+        "max": 1.0,
+        "p95": 0.0
+      },
+      "pending_new_id_count": {
+        "mean": 0.4666666666666667,
+        "min": 0.0,
+        "max": 22.0,
+        "p95": 1.0
+      },
+      "pending_reclaimed_id_count": {
+        "mean": 0.05,
+        "min": 0.0,
+        "max": 1.0,
+        "p95": 0.04999999999999716
+      },
+      "pending_dropped_class_limit_count": {
+        "mean": 0.05,
+        "min": 0.0,
+        "max": 1.0,
+        "p95": 0.04999999999999716
+      },
+      "pending_dropped_no_free_id_count": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p95": 0.0
+      },
+      "raw_mapping_grace_used_count": {
+        "mean": 0.06666666666666667,
+        "min": 0.0,
+        "max": 2.0,
+        "p95": 0.04999999999999716
+      },
+      "raw_mapping_rejected_count": {
+        "mean": 0.11666666666666667,
+        "min": 0.0,
+        "max": 1.0,
+        "p95": 1.0
+      },
+      "bytetrack_tracks_output_count": {
+        "mean": 22.25,
+        "min": 21.0,
+        "max": 25.0,
+        "p95": 23.049999999999997
+      },
+      "raw_tracker_unique_count": {
+        "mean": 22.25,
+        "min": 21.0,
+        "max": 25.0,
+        "p95": 23.049999999999997
+      },
+      "raw_tracker_id_zero_count": {
+        "mean": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p95": 0.0
+      }
+    }
+  }
+}

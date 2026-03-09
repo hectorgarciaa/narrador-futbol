@@ -222,12 +222,13 @@ Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib`
 En el vídeo anotado, `player` y `goalkeeper` muestran además `Campo: (x, y) m` debajo de cada bbox cuando existe proyección 2D válida.
 Si `tracking.field_position_strict_matching=true`, para `player`/`goalkeeper` no se usa fallback a píxeles: la asociación se hace solo con coordenadas de campo.
 Por estabilidad de IDs entre equipos, por defecto se recalcula el equipo en cada frame (`team_inference_cache_enabled=false`). Si quieres priorizar velocidad, puedes activar cache temporal y solo recalcular KMeans en altas nuevas o recuperaciones.
-Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`) y forzar visualización con `TRACK_SHOW_OUTPUT=0|1`.
+Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`), forzar visualización con `TRACK_SHOW_OUTPUT=0|1` y limitar el run a N frames con `TRACK_MAX_FRAMES` (ejemplo: `TRACK_MAX_FRAMES=200`).
 Para los clips de `data/partidosPosiciones/` ya están predefinidas las claves `video_posiciones_test_*` en `config.yaml` (por ejemplo `video_posiciones_test_1`).
 Además, si `tracking.timing_enabled=true`, se guardan tiempos por fase para detectar cuellos de botella en `output/timing_reports/`:
 - `<run_id>_timing_summary.json` con tiempos globales del script y agregados del tracker.
 - `<run_id>_tracking_frame_times.csv` con tiempos por frame (si `timing_save_per_frame=true`).
 El reporte por frame incluye desglose detallado de detección, identificación de equipos (`team_kmeans_s`/`team_clustering_s`), tracking (`bytetrack_*`, reasignación canónica) y transformación imagen→campo 2D (`field_homography_estimation_s`, `field_project_points_s`, y detalle interno `field_pnl_*` para inferencia kp/líneas, votación geométrica y suavizado temporal).
+También incluye contadores de reasignación y descarte (`pending_*`, `canonical_*`, `raw_mapping_*`) para depurar por qué se pierden tracks en secuencias largas.
 Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `models/reference_points/pnlcalib_repo/` y descarga sus pesos automáticamente. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
 
 ### Detección básica (sin fine-tuning)
@@ -333,6 +334,8 @@ tracking:
   reassign_hard_max_distance: 70.0
   reassign_min_samples: 3
   reassign_max_lost_frames: 8
+  canonical_cleanup_lost_frames: 90
+  class_limit_lost_frames: 8
   raw_id_grace_lost_frames: 2
   field_position_strict_matching: true
   reassign_min_field_distance_m: 4.0
@@ -376,7 +379,9 @@ Para reducir creación de IDs nuevos y mantener estabilidad en el tracking, el s
 Puntos importantes:
 
 - La validación de límites se hace sobre `Tracker.get_tracks(...)`, no sobre el conteo crudo de detecciones YOLO por frame.
+- `class_limit_lost_frames` controla cuántos frames cuenta un ID perdido para el límite por clase (recomendado: mismo valor que `reassign_max_lost_frames`).
 - Cuando se alcanza el máximo global de IDs visibles (`max_total_tracks`), se prioriza reasignar IDs previos compatibles antes de crear IDs nuevos.
+- Si no hay IDs libres, el tracker recicla IDs canónicos obsoletos (fuera de la ventana de recencia) antes de descartar detecciones.
 - La reasignación mantiene coherencia por clase/equipo y aplica filtros de movimiento/cercanía para evitar saltos de identidad.
 
 Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/tracking/byte_tracker.py`):
@@ -391,6 +396,8 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `reassign_hard_max_distance`
 - `reassign_min_samples`
 - `reassign_max_lost_frames`
+- `canonical_cleanup_lost_frames`
+- `class_limit_lost_frames`
 - `raw_id_grace_lost_frames`
 - `field_position_strict_matching`
 - `reassign_min_field_distance_m`

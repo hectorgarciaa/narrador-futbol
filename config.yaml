@@ -99,6 +99,11 @@ tracking:
   reassign_min_samples: 3
   # Máximo de frames perdidos para volver a enganchar un ID existente
   reassign_max_lost_frames: 8
+  # Limpieza de IDs canónicos inactivos para evitar acumulación histórica
+  canonical_cleanup_lost_frames: 90
+  # Ventana de "recencia" para aplicar límites por clase (player/ball/referee)
+  # Debe ir alineada con reassign_max_lost_frames para no bloquear altas nuevas.
+  class_limit_lost_frames: 8
   # Si ByteTrack conserva el mismo raw_id, mantener el ID canónico este número de frames
   # aunque falle puntualmente el gate de movimiento.
   raw_id_grace_lost_frames: 2
