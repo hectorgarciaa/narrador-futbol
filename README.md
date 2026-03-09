@@ -324,7 +324,7 @@ tracking:
   match_thresh: 0.945         # IoU mínimo para asociar detección a track
   frame_rate: 25
   minimum_consecutive_frames: 1
-  max_total_tracks: 25
+  max_total_tracks: 26
   max_tracks_per_class:
     player: 22
     ball: 1
@@ -334,7 +334,7 @@ tracking:
   reassign_hard_max_distance: 70.0
   reassign_min_samples: 3
   reassign_max_lost_frames: 8
-  canonical_cleanup_lost_frames: 90
+  canonical_cleanup_lost_frames: 0
   class_limit_lost_frames: 8
   raw_id_grace_lost_frames: 2
   field_position_strict_matching: true
@@ -380,11 +380,12 @@ Puntos importantes:
 
 - La validación de límites se hace sobre `Tracker.get_tracks(...)`, no sobre el conteo crudo de detecciones YOLO por frame.
 - `class_limit_lost_frames` controla cuántos frames cuenta un ID perdido para el límite por clase (recomendado: mismo valor que `reassign_max_lost_frames`).
-- Cuando se alcanza el máximo global de IDs visibles (`max_total_tracks`), se prioriza reasignar IDs previos compatibles antes de crear IDs nuevos.
-- Si no hay IDs libres, el tracker recicla IDs canónicos obsoletos (fuera de la ventana de recencia) antes de descartar detecciones.
+- `canonical_cleanup_lost_frames=0` mantiene el pool fijo de IDs durante todo el vídeo (sin reciclar/borrar IDs antiguos).
+- La creación de IDs nuevos se frena por límite histórico de clase (`player=22`, `ball=1`, `referee=3`).
+- Si no quedan IDs libres en el rango canónico, no se crea un ID nuevo y la detección pendiente se descarta.
 - La reasignación mantiene coherencia por clase/equipo y aplica filtros de movimiento/cercanía para evitar saltos de identidad.
 - La continuidad por `raw_id` no puede saltarse el gate cinemático: solo se mantiene si el desplazamiento es consistente con el histórico del ID.
-- Cuando hay detecciones pendientes, la reasignación se resuelve por mínima distancia válida (no por orden), para reducir swaps en cruces.
+- Cuando hay detecciones pendientes, los IDs perdidos se procesan por menor tiempo perdido y cada uno toma la detección no asignada más cercana de misma clase/equipo.
 
 Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/tracking/byte_tracker.py`):
 

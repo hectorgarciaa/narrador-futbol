@@ -177,13 +177,18 @@ if __name__ == "__main__":
             "max_tracks_per_class",
             {"player": 22, "ball": 1, "referee": 3},
         )
+        default_max_total_tracks = int(
+            sum(int(value) for value in MAX_TRACKS_PER_CLASS.values())
+        )
         TRACKER_CONF = {
             "track_thresh": tracking_cfg['track_thresh'],
             "track_buffer": tracking_cfg['track_buffer'],
             "match_thresh": tracking_cfg['match_thresh'],
             "frame_rate": tracking_cfg['frame_rate'],
             "minimum_consecutive_frames": tracking_cfg['minimum_consecutive_frames'],
-            "max_total_tracks": tracking_cfg.get("max_total_tracks", 25),
+            "max_total_tracks": tracking_cfg.get(
+                "max_total_tracks", default_max_total_tracks
+            ),
             "enforce_internal_class_limits": tracking_cfg.get(
                 "enforce_internal_class_limits", False
             ),

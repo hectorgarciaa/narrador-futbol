@@ -77,7 +77,7 @@ tracking:
   # Frames consecutivos mínimos para confirmar un track
   minimum_consecutive_frames: 1
   # Límite global de IDs canónicos visibles
-  max_total_tracks: 25
+  max_total_tracks: 26
   # Si es false, el límite por clase se aplica en reasignación final, no dentro de ByteTrack
   enforce_internal_class_limits: false
   # Límite de tracks por clase en la salida final del tracker
@@ -99,8 +99,8 @@ tracking:
   reassign_min_samples: 3
   # Máximo de frames perdidos para volver a enganchar un ID existente
   reassign_max_lost_frames: 8
-  # Limpieza de IDs canónicos inactivos para evitar acumulación histórica
-  canonical_cleanup_lost_frames: 90
+  # Limpieza de IDs canónicos inactivos. Con 0 se desactiva (pool fijo de IDs).
+  canonical_cleanup_lost_frames: 0
   # Ventana de "recencia" para aplicar límites por clase (player/ball/referee)
   # Debe ir alineada con reassign_max_lost_frames para no bloquear altas nuevas.
   class_limit_lost_frames: 8
