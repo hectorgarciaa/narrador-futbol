@@ -29,6 +29,9 @@ class Tracker:
             field_tracking_conf = {}
 
         self.model = Detector(model_path, conf)
+        strict_field_position_matching = bool(
+            field_tracking_conf.get("strict_field_position_matching", False)
+        )
         # Compatibilidad: nueva convención snake_case y alias legacy camelCase.
         self.team_detector = TeamDetector(team_colors)
         self.teamDetector = self.team_detector
@@ -71,6 +74,7 @@ class Tracker:
             field_distance_weight=field_tracking_conf.get(
                 "match_distance_weight", 0.25
             ),
+            strict_field_position_matching=strict_field_position_matching,
         )
         self.ball_min_conf = ball_min_conf
         self.reassign_motion_factor = float(
@@ -100,6 +104,7 @@ class Tracker:
             tracker_conf.get("referee_recovery_max_distance", 45.0)
         )
         self.use_field_positions = bool(field_tracking_conf.get("enabled", False))
+        self.strict_field_position_matching = strict_field_position_matching
         self.field_position_classes = frozenset(
             field_tracking_conf.get("classes", ["player", "goalkeeper"])
         )
@@ -310,6 +315,13 @@ class Tracker:
             return False
         return self._field_position_to_tuple(field_position) is not None
 
+    def _requires_field_position_for_class(self, class_name):
+        if not self.strict_field_position_matching:
+            return False
+        if not self.use_field_positions:
+            return False
+        return class_name in self.field_position_classes
+
     def _next_free_canonical_id(self, canonical_state):
         for canonical_id in range(1, self.max_total_tracks + 1):
             if canonical_id not in canonical_state:
@@ -347,6 +359,8 @@ class Tracker:
             px, py = self._field_position_to_tuple(previous_field_position)
             nx, ny = self._field_position_to_tuple(new_field_position)
             return float(((nx - px) ** 2 + (ny - py) ** 2) ** 0.5)
+        if self._requires_field_position_for_class(class_name):
+            return None
         if previous_bbox is None or new_bbox is None:
             return None
         px, py = self._bbox_center(previous_bbox)
@@ -372,7 +386,7 @@ class Tracker:
             new_field_position=new_field_position,
         )
         if step_distance is None:
-            return True
+            return not self._requires_field_position_for_class(effective_class)
 
         lost_frames = max(
             1,
@@ -420,6 +434,8 @@ class Tracker:
             ax, ay = self._field_position_to_tuple(field_position_a)
             bx, by = self._field_position_to_tuple(field_position_b)
             return (ax - bx) ** 2 + (ay - by) ** 2
+        if self._requires_field_position_for_class(class_name):
+            return None
         if bbox_a is None or bbox_b is None:
             return None
         ax, ay = self._bbox_center(bbox_a)

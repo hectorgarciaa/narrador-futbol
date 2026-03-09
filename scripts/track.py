@@ -228,6 +228,9 @@ if __name__ == "__main__":
                 "field_position_pixels_per_meter", 8
             ),
             "device": tracking_cfg.get("field_position_device"),
+            "strict_field_position_matching": tracking_cfg.get(
+                "field_position_strict_matching", True
+            ),
             "match_distance_gate_m": tracking_cfg.get(
                 "field_position_match_distance_gate_m", 8.0
             ),

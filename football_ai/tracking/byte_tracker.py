@@ -56,6 +56,7 @@ class ByteTrack:
         field_position_classes: Optional[list[str]] = None,
         field_distance_gate_m: float = 8.0,
         field_distance_weight: float = 0.25,
+        strict_field_position_matching: bool = False,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
@@ -69,6 +70,7 @@ class ByteTrack:
         )
         self.field_distance_gate_m = float(field_distance_gate_m)
         self.field_distance_weight = float(field_distance_weight)
+        self.strict_field_position_matching = bool(strict_field_position_matching)
         self.assigned_track_ids_by_class = {
             class_name: set() for class_name in self.max_tracks_per_class
         }
@@ -121,6 +123,11 @@ class ByteTrack:
             return False
         return class_name in self.field_position_classes
 
+    def _uses_strict_field_matching_for_class(self, class_name: Optional[str]) -> bool:
+        return self.strict_field_position_matching and self._uses_field_positions_for_class(
+            class_name
+        )
+
     def _track_distance_gate(self, track: STrack) -> float:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
         return self.field_distance_gate_m * lost_frames
@@ -144,7 +151,18 @@ class ByteTrack:
             track_position = self._field_position_to_array(
                 getattr(track, "field_position", None)
             )
-            if track_position is None or not self._uses_field_positions_for_class(track_class):
+            use_field_for_class = self._uses_field_positions_for_class(track_class)
+            strict_field_for_class = self._uses_strict_field_matching_for_class(
+                track_class
+            )
+            if not use_field_for_class:
+                continue
+            if track_position is None and strict_field_for_class:
+                for j, det in enumerate(detections):
+                    if getattr(det, "class_name", None) == track_class:
+                        dists[i, j] += 1000.0
+                continue
+            if track_position is None:
                 continue
 
             max_distance = max(self._track_distance_gate(track), 1e-6)
@@ -156,13 +174,19 @@ class ByteTrack:
                     getattr(det, "field_position", None)
                 )
                 if det_position is None:
+                    if strict_field_for_class:
+                        dists[i, j] += 1000.0
                     continue
                 field_distance = float(np.linalg.norm(track_position - det_position))
                 if field_distance > max_distance:
                     dists[i, j] += 1000.0
                     continue
                 normalized_distance = min(field_distance / max_distance, 1.0)
-                dists[i, j] += self.field_distance_weight * normalized_distance
+                if strict_field_for_class:
+                    if dists[i, j] < 1000.0:
+                        dists[i, j] = normalized_distance
+                else:
+                    dists[i, j] += self.field_distance_weight * normalized_distance
 
         return dists
 
@@ -261,10 +285,17 @@ class ByteTrack:
                 for i_detection, det_class in enumerate(class_labels or []):
                     if det_class not in self.field_position_classes:
                         continue
+                    strict_field_for_class = self._uses_strict_field_matching_for_class(
+                        det_class
+                    )
                     det_position = self._field_position_to_array(
                         detection_field_positions[i_detection]
                     )
                     if det_position is None:
+                        if strict_field_for_class:
+                            for i_track, track in enumerate(tracks):
+                                if getattr(track, "class_name", None) == det_class:
+                                    iou_costs[i_detection, i_track] += 1000.0
                         continue
                     for i_track, track in enumerate(tracks):
                         track_class = getattr(track, "class_name", None)
@@ -280,10 +311,14 @@ class ByteTrack:
                         if field_distance > max_distance:
                             iou_costs[i_detection, i_track] += 1000.0
                         else:
-                            iou_costs[i_detection, i_track] += (
-                                self.field_distance_weight
-                                * min(field_distance / max_distance, 1.0)
-                            )
+                            normalized_distance = min(field_distance / max_distance, 1.0)
+                            if strict_field_for_class:
+                                if iou_costs[i_detection, i_track] < 1000.0:
+                                    iou_costs[i_detection, i_track] = normalized_distance
+                            else:
+                                iou_costs[i_detection, i_track] += (
+                                    self.field_distance_weight * normalized_distance
+                                )
 
             matches, _, _ = matching.linear_assignment(iou_costs, 0.5)
             detections.tracker_id = np.full(len(detections), -1, dtype=int)

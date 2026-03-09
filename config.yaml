@@ -116,11 +116,13 @@ tracking:
   field_position_temporal_blend: 0.20
   field_position_pixels_per_meter: 8
   field_position_device: null
+  # Si es true, player/goalkeeper se asocian solo con coordenadas de campo (sin fallback a píxeles)
+  field_position_strict_matching: true
   field_position_match_distance_gate_m: 8.0
   field_position_match_distance_weight: 0.25
   reassign_min_field_distance_m: 4.0
   # Umbral duro en metros: nunca reasignar si el salto en campo supera este valor
-  reassign_hard_max_field_distance_m: 2.75
+  reassign_hard_max_field_distance_m: 10.0
   # Reutiliza equipo del frame previo para evitar KMeans por jugador en cada frame
   team_inference_cache_enabled: false
   team_inference_cache_iou_threshold: 0.35
