@@ -94,7 +94,11 @@ tracking:
   # Parámetros de reasignación y control de movimiento
   reassign_motion_factor: 1.0
   reassign_min_distance: 25.0
+  # Umbral duro en píxeles: nunca reasignar si el salto supera este valor
+  reassign_hard_max_distance: 70.0
   reassign_min_samples: 3
+  # Máximo de frames perdidos para volver a enganchar un ID existente
+  reassign_max_lost_frames: 8
   # Recuperación específica de árbitros
   referee_recovery_max_lost_frames: 3
   referee_recovery_max_distance: 45.0
@@ -115,6 +119,8 @@ tracking:
   field_position_match_distance_gate_m: 8.0
   field_position_match_distance_weight: 0.25
   reassign_min_field_distance_m: 4.0
+  # Umbral duro en metros: nunca reasignar si el salto en campo supera este valor
+  reassign_hard_max_field_distance_m: 2.75
   # Reutiliza equipo del frame previo para evitar KMeans por jugador en cada frame
   team_inference_cache_enabled: false
   team_inference_cache_iou_threshold: 0.35

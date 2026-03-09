@@ -79,8 +79,19 @@ class Tracker:
         self.reassign_min_distance = float(
             tracker_conf.get("reassign_min_distance", 25.0)
         )
+        reassign_hard_max_distance = tracker_conf.get(
+            "reassign_hard_max_distance", None
+        )
+        self.reassign_hard_max_distance = (
+            None
+            if reassign_hard_max_distance is None
+            else float(reassign_hard_max_distance)
+        )
         self.reassign_min_samples = int(
             tracker_conf.get("reassign_min_samples", 3)
+        )
+        self.reassign_max_lost_frames = int(
+            tracker_conf.get("reassign_max_lost_frames", 12)
         )
         self.referee_recovery_max_lost_frames = int(
             tracker_conf.get("referee_recovery_max_lost_frames", 3)
@@ -94,6 +105,14 @@ class Tracker:
         )
         self.reassign_min_field_distance_m = float(
             field_tracking_conf.get("reassign_min_field_distance_m", 4.0)
+        )
+        reassign_hard_max_field_distance_m = field_tracking_conf.get(
+            "reassign_hard_max_field_distance_m", None
+        )
+        self.reassign_hard_max_field_distance_m = (
+            None
+            if reassign_hard_max_field_distance_m is None
+            else float(reassign_hard_max_field_distance_m)
         )
         self.field_projector = None
         if self.use_field_positions:
@@ -359,19 +378,30 @@ class Tracker:
             1,
             current_frame - int(previous_state.get("last_frame", current_frame)),
         )
+        max_lost_frames = (
+            self.referee_recovery_max_lost_frames
+            if effective_class == "referee"
+            else self.reassign_max_lost_frames
+        )
+        if max_lost_frames > 0 and lost_frames > max_lost_frames:
+            return False
         samples = int(previous_state.get("movement_samples", 0))
         mean_step_distance = float(previous_state.get("mean_step_distance", 0.0))
 
         if self._use_field_position_for_class(effective_class, previous_field_position):
             max_allowed_jump = self.reassign_min_field_distance_m
+            hard_max_jump = self.reassign_hard_max_field_distance_m
         else:
             max_allowed_jump = self.reassign_min_distance
+            hard_max_jump = self.reassign_hard_max_distance
         if samples >= self.reassign_min_samples:
             expected_jump = mean_step_distance * lost_frames
             max_allowed_jump = max(
                 max_allowed_jump,
                 expected_jump * self.reassign_motion_factor,
             )
+        if hard_max_jump is not None and hard_max_jump > 0.0:
+            max_allowed_jump = min(max_allowed_jump, hard_max_jump)
 
         return step_distance <= max_allowed_jump
 

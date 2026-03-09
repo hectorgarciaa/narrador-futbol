@@ -1,4 +1,5 @@
 import os
+import math
 import cv2
 
 class Drawer:
@@ -79,6 +80,38 @@ class Drawer:
 
         cv2.putText(frame, label, (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+        # Mostrar posición real en campo (metros) bajo el bbox para jugadores.
+        if class_name in {"player", "goalkeeper"}:
+            field_position = data.get("field_position_m")
+            if (
+                isinstance(field_position, (list, tuple))
+                and len(field_position) >= 2
+            ):
+                try:
+                    field_x = float(field_position[0])
+                    field_y = float(field_position[1])
+                except (TypeError, ValueError):
+                    field_x = None
+                    field_y = None
+                if (
+                    field_x is not None
+                    and field_y is not None
+                    and math.isfinite(field_x)
+                    and math.isfinite(field_y)
+                ):
+                    field_label = f"Campo: ({field_x:.1f}, {field_y:.1f}) m"
+                    text_y = min(frame.shape[0] - 6, y2 + 16)
+                    cv2.putText(
+                        frame,
+                        field_label,
+                        (x1, text_y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.45,
+                        color,
+                        1,
+                        cv2.LINE_AA,
+                    )
 
     def draw_all_detections_in_frame(self, frame, class_name, class_tracks, frame_id):
         """Draws all detections of a class in a frame."""

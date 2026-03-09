@@ -219,6 +219,7 @@ Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo ano
 Si existe `paths.data.video_prueba_ajustado` en `config.yaml`, ese vídeo se usa por defecto.
 El JSON de tracks se guarda como `output/tracks_json/tracker/<nombre_video>_tracks.json` para que cada ejecución quede identificada por vídeo (siendo `<nombre_video>` el `stem` sanitizado del archivo de entrada).
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
+En el vídeo anotado, `player` y `goalkeeper` muestran además `Campo: (x, y) m` debajo de cada bbox cuando existe proyección 2D válida.
 Por estabilidad de IDs entre equipos, por defecto se recalcula el equipo en cada frame (`team_inference_cache_enabled=false`). Si quieres priorizar velocidad, puedes activar cache temporal y solo recalcular KMeans en altas nuevas o recuperaciones.
 Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`) y forzar visualización con `TRACK_SHOW_OUTPUT=0|1`.
 Para los clips de `data/partidosPosiciones/` ya están predefinidas las claves `video_posiciones_test_*` en `config.yaml` (por ejemplo `video_posiciones_test_1`).
@@ -326,6 +327,13 @@ tracking:
     player: 22
     ball: 1
     referee: 3
+  reassign_motion_factor: 1.0
+  reassign_min_distance: 25.0
+  reassign_hard_max_distance: 70.0
+  reassign_min_samples: 3
+  reassign_max_lost_frames: 8
+  reassign_min_field_distance_m: 4.0
+  reassign_hard_max_field_distance_m: 2.75
   team_inference_cache_enabled: false
   team_inference_cache_iou_threshold: 0.35
   team_inference_classes: ["player", "goalkeeper"]
@@ -377,7 +385,11 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `unconfirmed_match_threshold`
 - `reassign_motion_factor`
 - `reassign_min_distance`
+- `reassign_hard_max_distance`
 - `reassign_min_samples`
+- `reassign_max_lost_frames`
+- `reassign_min_field_distance_m`
+- `reassign_hard_max_field_distance_m`
 - `referee_recovery_max_lost_frames`
 - `referee_recovery_max_distance`
 

@@ -178,7 +178,13 @@ if __name__ == "__main__":
             ),
             "reassign_motion_factor": tracking_cfg.get("reassign_motion_factor", 1.0),
             "reassign_min_distance": tracking_cfg.get("reassign_min_distance", 25.0),
+            "reassign_hard_max_distance": tracking_cfg.get(
+                "reassign_hard_max_distance", None
+            ),
             "reassign_min_samples": tracking_cfg.get("reassign_min_samples", 3),
+            "reassign_max_lost_frames": tracking_cfg.get(
+                "reassign_max_lost_frames", 12
+            ),
             "referee_recovery_max_lost_frames": tracking_cfg.get(
                 "referee_recovery_max_lost_frames", 3
             ),
@@ -230,6 +236,9 @@ if __name__ == "__main__":
             ),
             "reassign_min_field_distance_m": tracking_cfg.get(
                 "reassign_min_field_distance_m", 4.0
+            ),
+            "reassign_hard_max_field_distance_m": tracking_cfg.get(
+                "reassign_hard_max_field_distance_m", None
             ),
         }
         
