@@ -383,6 +383,8 @@ Puntos importantes:
 - Cuando se alcanza el máximo global de IDs visibles (`max_total_tracks`), se prioriza reasignar IDs previos compatibles antes de crear IDs nuevos.
 - Si no hay IDs libres, el tracker recicla IDs canónicos obsoletos (fuera de la ventana de recencia) antes de descartar detecciones.
 - La reasignación mantiene coherencia por clase/equipo y aplica filtros de movimiento/cercanía para evitar saltos de identidad.
+- La continuidad por `raw_id` no puede saltarse el gate cinemático: solo se mantiene si el desplazamiento es consistente con el histórico del ID.
+- Cuando hay detecciones pendientes, la reasignación se resuelve por mínima distancia válida (no por orden), para reducir swaps en cruces.
 
 Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/tracking/byte_tracker.py`):
 

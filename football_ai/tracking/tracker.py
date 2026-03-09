@@ -584,10 +584,12 @@ class Tracker:
         detection_class,
         detection_team,
         current_frame,
+        detection_bbox,
+        detection_field_position=None,
     ):
         # Si ByteTrack mantiene el mismo raw_id en frames consecutivos,
-        # permitimos conservar el canonical_id incluso si el gate cinemático
-        # estricto falla puntualmente (ruido de homografía / jitter).
+        # permitimos conservar el canonical_id solo si el salto sigue siendo
+        # coherente con la cinemática histórica (con una tolerancia acotada).
         if previous_state is None:
             return False
         previous_class = previous_state.get("class_name")
@@ -599,7 +601,43 @@ class Tracker:
         lost_frames = max(0, current_frame - last_frame)
         if self.raw_id_grace_lost_frames <= 0:
             return False
-        return lost_frames <= self.raw_id_grace_lost_frames
+        if lost_frames > self.raw_id_grace_lost_frames:
+            return False
+
+        previous_bbox = previous_state.get("bbox")
+        previous_field_position = previous_state.get("field_position")
+        step_distance = self._step_distance(
+            previous_bbox,
+            detection_bbox,
+            class_name=previous_class,
+            previous_field_position=previous_field_position,
+            new_field_position=detection_field_position,
+        )
+        if step_distance is None:
+            return False
+
+        samples = int(previous_state.get("movement_samples", 0))
+        mean_step_distance = float(previous_state.get("mean_step_distance", 0.0))
+        if self._use_field_position_for_class(previous_class, previous_field_position):
+            max_allowed_jump = self.reassign_min_field_distance_m
+            hard_max_jump = self.reassign_hard_max_field_distance_m
+        else:
+            max_allowed_jump = self.reassign_min_distance
+            hard_max_jump = self.reassign_hard_max_distance
+
+        if samples >= self.reassign_min_samples:
+            expected_jump = mean_step_distance * max(1, lost_frames)
+            max_allowed_jump = max(
+                max_allowed_jump,
+                expected_jump * self.reassign_motion_factor,
+            )
+
+        # Pequeña tolerancia adicional para continuidad de raw_id, sin romper el hard gate.
+        max_allowed_jump *= 1.20
+        if hard_max_jump is not None and hard_max_jump > 0.0:
+            max_allowed_jump = min(max_allowed_jump, hard_max_jump)
+
+        return step_distance <= max_allowed_jump
 
     def _assign_pending_by_lost_order(
         self,
@@ -609,29 +647,18 @@ class Tracker:
         current_frame,
     ):
         assignments = {}
-        assigned_pending_indexes = set()
-        sorted_candidate_ids = sorted(
-            available_ids,
-            key=lambda canonical_id: (
-                max(
-                    0,
-                    current_frame
-                    - int(canonical_state[canonical_id].get("last_frame", current_frame)),
-                ),
-                canonical_id,
-            ),
-        )
+        if not pending_detections or not available_ids:
+            return assignments
 
-        for canonical_id in sorted_candidate_ids:
+        candidates = []
+        for canonical_id in available_ids:
             candidate_state = canonical_state[canonical_id]
-            best_pending_idx = None
-            best_distance_sq = None
-            best_output_class = None
-
+            lost_frames = max(
+                0,
+                current_frame
+                - int(candidate_state.get("last_frame", current_frame)),
+            )
             for pending_idx, pending in enumerate(pending_detections):
-                if pending_idx in assigned_pending_indexes:
-                    continue
-
                 output_class_name = self._resolve_candidate_class_for_detection(
                     candidate_state,
                     pending["preferred_class_name"],
@@ -642,7 +669,6 @@ class Tracker:
                 )
                 if output_class_name is None:
                     continue
-
                 distance_sq = self._bbox_distance_sq(
                     candidate_state.get("bbox"),
                     pending["bbox"],
@@ -652,14 +678,28 @@ class Tracker:
                 )
                 if distance_sq is None:
                     continue
-                if best_distance_sq is None or distance_sq < best_distance_sq:
-                    best_distance_sq = distance_sq
-                    best_pending_idx = pending_idx
-                    best_output_class = output_class_name
+                candidates.append(
+                    (
+                        float(distance_sq),
+                        int(lost_frames),
+                        int(canonical_id),
+                        int(pending_idx),
+                        output_class_name,
+                    )
+                )
 
-            if best_pending_idx is not None:
-                assignments[best_pending_idx] = (canonical_id, best_output_class)
-                assigned_pending_indexes.add(best_pending_idx)
+        candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+        used_canonical_ids = set()
+        used_pending_indexes = set()
+
+        for _, _, canonical_id, pending_idx, output_class_name in candidates:
+            if canonical_id in used_canonical_ids:
+                continue
+            if pending_idx in used_pending_indexes:
+                continue
+            assignments[pending_idx] = (canonical_id, output_class_name)
+            used_canonical_ids.add(canonical_id)
+            used_pending_indexes.add(pending_idx)
 
         return assignments
 
@@ -1284,6 +1324,8 @@ class Tracker:
                                 output_class_name,
                                 detected_team,
                                 n_frame,
+                                detection_bbox=bbox,
+                                detection_field_position=field_position,
                             )
                             if keep_raw_mapping:
                                 raw_mapping_grace_used_count += 1
