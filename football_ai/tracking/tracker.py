@@ -33,7 +33,7 @@ class Tracker:
         self.team_detector = TeamDetector(team_colors)
         self.teamDetector = self.team_detector
         self.team_inference_cache_enabled = bool(
-            tracker_conf.get("team_inference_cache_enabled", True)
+            tracker_conf.get("team_inference_cache_enabled", False)
         )
         self.team_inference_cache_iou_threshold = float(
             tracker_conf.get("team_inference_cache_iou_threshold", 0.35)

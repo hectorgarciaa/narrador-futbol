@@ -186,7 +186,7 @@ if __name__ == "__main__":
                 "referee_recovery_max_distance", 45.0
             ),
             "team_inference_cache_enabled": tracking_cfg.get(
-                "team_inference_cache_enabled", True
+                "team_inference_cache_enabled", False
             ),
             "team_inference_cache_iou_threshold": tracking_cfg.get(
                 "team_inference_cache_iou_threshold", 0.35

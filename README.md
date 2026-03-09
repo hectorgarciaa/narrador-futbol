@@ -219,7 +219,7 @@ Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo ano
 Si existe `paths.data.video_prueba_ajustado` en `config.yaml`, ese vídeo se usa por defecto.
 El JSON de tracks se guarda como `output/tracks_json/tracker/<nombre_video>_tracks.json` para que cada ejecución quede identificada por vídeo (siendo `<nombre_video>` el `stem` sanitizado del archivo de entrada).
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
-Para reducir coste de identificación de equipo, se reutiliza la etiqueta del frame anterior para jugadores trackeados (`team_inference_cache_enabled=true`) y solo se recalcula KMeans en altas nuevas o recuperaciones.
+Por estabilidad de IDs entre equipos, por defecto se recalcula el equipo en cada frame (`team_inference_cache_enabled=false`). Si quieres priorizar velocidad, puedes activar cache temporal y solo recalcular KMeans en altas nuevas o recuperaciones.
 Puedes forzar un vídeo específico sin editar config con `TRACK_VIDEO_KEY` (ejemplo: `TRACK_VIDEO_KEY=video_prueba_corto`) y forzar visualización con `TRACK_SHOW_OUTPUT=0|1`.
 Para los clips de `data/partidosPosiciones/` ya están predefinidas las claves `video_posiciones_test_*` en `config.yaml` (por ejemplo `video_posiciones_test_1`).
 Además, si `tracking.timing_enabled=true`, se guardan tiempos por fase para detectar cuellos de botella en `output/timing_reports/`:
@@ -326,7 +326,7 @@ tracking:
     player: 22
     ball: 1
     referee: 3
-  team_inference_cache_enabled: true
+  team_inference_cache_enabled: false
   team_inference_cache_iou_threshold: 0.35
   team_inference_classes: ["player", "goalkeeper"]
   timing_enabled: true
