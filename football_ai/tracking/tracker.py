@@ -97,6 +97,9 @@ class Tracker:
         self.reassign_max_lost_frames = int(
             tracker_conf.get("reassign_max_lost_frames", 12)
         )
+        self.raw_id_grace_lost_frames = int(
+            tracker_conf.get("raw_id_grace_lost_frames", 2)
+        )
         self.referee_recovery_max_lost_frames = int(
             tracker_conf.get("referee_recovery_max_lost_frames", 3)
         )
@@ -514,6 +517,29 @@ class Tracker:
             return "referee"
 
         return None
+
+    def _can_keep_raw_id_mapping(
+        self,
+        previous_state,
+        detection_class,
+        detection_team,
+        current_frame,
+    ):
+        # Si ByteTrack mantiene el mismo raw_id en frames consecutivos,
+        # permitimos conservar el canonical_id incluso si el gate cinemático
+        # estricto falla puntualmente (ruido de homografía / jitter).
+        if previous_state is None:
+            return False
+        previous_class = previous_state.get("class_name")
+        if not self._is_compatible_class(previous_class, detection_class):
+            return False
+        if not self._is_team_compatible(previous_state.get("team"), detection_team, previous_class):
+            return False
+        last_frame = int(previous_state.get("last_frame", -999999))
+        lost_frames = max(0, current_frame - last_frame)
+        if self.raw_id_grace_lost_frames <= 0:
+            return False
+        return lost_frames <= self.raw_id_grace_lost_frames
 
     def _assign_pending_by_lost_order(
         self,
@@ -999,6 +1025,13 @@ class Tracker:
                 key=lambda item: float(item[2]),
                 reverse=True,
             )
+            raw_tracker_ids_in_frame = [
+                int(item[4]) for item in sorted_tracked_detections
+            ]
+            raw_tracker_unique_count = len(set(raw_tracker_ids_in_frame))
+            raw_tracker_id_zero_count = sum(
+                1 for raw_id in raw_tracker_ids_in_frame if raw_id == 0
+            )
             pending_detections = []
 
             def commit_assignment(
@@ -1135,7 +1168,13 @@ class Tracker:
                             field_position,
                             n_frame,
                         ) is None:
-                            canonical_id = None
+                            if not self._can_keep_raw_id_mapping(
+                                previous_state,
+                                output_class_name,
+                                detected_team,
+                                n_frame,
+                            ):
+                                canonical_id = None
 
                 if canonical_id is None:
                     pending_detections.append(
@@ -1396,6 +1435,8 @@ class Tracker:
                     "bytetrack_tracks_output_count": float(
                         bytetrack_timing.get("bytetrack_tracks_output_count", 0.0)
                     ),
+                    "raw_tracker_unique_count": float(raw_tracker_unique_count),
+                    "raw_tracker_id_zero_count": float(raw_tracker_id_zero_count),
                     "id_assignment_s": float(id_assignment_s),
                     "ball_fallback_s": float(ball_fallback_s),
                     "frame_total_s": float(perf_counter() - frame_start),

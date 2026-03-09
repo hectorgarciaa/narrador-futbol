@@ -110,6 +110,27 @@ class ByteTrack:
         )
 
     @staticmethod
+    def _track_output_id(track: STrack) -> Optional[int]:
+        external_track_id = getattr(track, "external_track_id", None)
+        if external_track_id is not None:
+            try:
+                external_track_id = int(external_track_id)
+            except (TypeError, ValueError):
+                external_track_id = None
+            if external_track_id is not None and external_track_id >= 0:
+                return external_track_id
+
+        internal_track_id = getattr(track, "internal_track_id", None)
+        if internal_track_id is not None:
+            try:
+                internal_track_id = int(internal_track_id)
+            except (TypeError, ValueError):
+                return None
+            if internal_track_id >= 0:
+                return internal_track_id
+        return None
+
+    @staticmethod
     def _field_position_to_array(field_position) -> Optional[np.ndarray]:
         if field_position is None:
             return None
@@ -127,6 +148,13 @@ class ByteTrack:
         return self.strict_field_position_matching and self._uses_field_positions_for_class(
             class_name
         )
+
+    def _association_threshold(self, default_threshold: float) -> float:
+        # En matching estricto por campo, los costes válidos están normalizados en [0, 1]
+        # y deben pasar si están dentro de la compuerta métrica.
+        if self.strict_field_position_matching:
+            return 1.0
+        return float(default_threshold)
 
     def _track_distance_gate(self, track: STrack) -> float:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
@@ -203,6 +231,71 @@ class ByteTrack:
         )
         if det_field_position is not None:
             track.field_position = det_field_position.copy()
+
+    @staticmethod
+    def _tracks_to_detections(tracks: list[STrack]) -> Detections:
+        valid_tracks = []
+        for track in tracks:
+            output_track_id = ByteTrack._track_output_id(track)
+            if output_track_id is None:
+                continue
+            valid_tracks.append((track, output_track_id))
+
+        if len(valid_tracks) == 0:
+            detections = Detections.empty()
+            detections.tracker_id = np.array([], dtype=int)
+            return detections
+
+        xyxy = np.asarray(
+            [track.tlbr for track, _ in valid_tracks],
+            dtype=np.float32,
+        ).reshape(-1, 4)
+        confidence = np.asarray(
+            [float(getattr(track, "score", 0.0)) for track, _ in valid_tracks],
+            dtype=np.float32,
+        )
+        class_id = np.full((len(valid_tracks),), -1, dtype=np.int32)
+        tracker_id = np.asarray(
+            [external_track_id for _, external_track_id in valid_tracks],
+            dtype=np.int32,
+        )
+        field_positions = np.full((len(valid_tracks), 2), np.nan, dtype=np.float32)
+        data_class_name = []
+        data_team = []
+        data_distances = []
+        data_shirt_color = []
+        data_bbox_size = []
+        data_ground_point_image = []
+        for idx, (track, _) in enumerate(valid_tracks):
+            data_class_name.append(getattr(track, "class_name", None))
+            data_team.append(getattr(track, "equipo", None))
+            data_distances.append(None)
+            data_shirt_color.append(None)
+            x1, y1, x2, y2 = [float(v) for v in xyxy[idx]]
+            data_bbox_size.append(float(max(0.0, x2 - x1) * max(0.0, y2 - y1)))
+            data_ground_point_image.append(None)
+            field_position = ByteTrack._field_position_to_array(
+                getattr(track, "field_position", None)
+            )
+            if field_position is not None:
+                field_positions[idx] = field_position
+
+        detections = Detections(
+            xyxy=xyxy,
+            confidence=confidence,
+            class_id=class_id,
+            tracker_id=tracker_id,
+            data={
+                "class_name": np.asarray(data_class_name, dtype=object),
+                "team": np.asarray(data_team, dtype=object),
+                "distances": np.asarray(data_distances, dtype=object),
+                "shirt_color": np.asarray(data_shirt_color, dtype=object),
+                "bbox_size": np.asarray(data_bbox_size, dtype=np.float32),
+                "field_position": np.asarray(field_positions, dtype=np.float32),
+                "ground_point_image": np.asarray(data_ground_point_image, dtype=object),
+            },
+        )
+        return detections
 
     def update_with_detections(
         self, detections: Detections, team_labels, class_labels=None, field_positions=None
@@ -320,12 +413,30 @@ class ByteTrack:
                                     self.field_distance_weight * normalized_distance
                                 )
 
-            matches, _, _ = matching.linear_assignment(iou_costs, 0.5)
+            output_match_threshold = self._association_threshold(0.5)
+            matches, _, _ = matching.linear_assignment(
+                iou_costs,
+                output_match_threshold,
+            )
+            if len(matches) == 0 and len(tracks) > 0:
+                # Fallback robusto: evita frames vacíos cuando la reasociación
+                # detección->track falla puntualmente (por ejemplo, arranque o jitter).
+                fallback_detections = self._tracks_to_detections(tracks)
+                output_match_s = perf_counter() - output_match_start
+                self.last_timing_detail = {
+                    "bytetrack_total_s": float(perf_counter() - total_start),
+                    "bytetrack_preprocess_s": float(preprocess_s),
+                    "bytetrack_update_tensors_s": float(update_tensors_s),
+                    "bytetrack_output_match_s": float(output_match_s),
+                    "bytetrack_tracks_output_count": float(len(tracks)),
+                }
+                return fallback_detections
             detections.tracker_id = np.full(len(detections), -1, dtype=int)
             for i_detection, i_track in matches:
-                detections.tracker_id[i_detection] = int(
-                    tracks[i_track].external_track_id
-                )
+                output_track_id = self._track_output_id(tracks[i_track])
+                if output_track_id is None:
+                    continue
+                detections.tracker_id[i_detection] = output_track_id
 
             output_match_s = perf_counter() - output_match_start
             self.last_timing_detail = {
@@ -470,7 +581,7 @@ class ByteTrack:
         dists = self._apply_field_position_costs(dists, strack_pool, detections)
         dists = matching.fuse_score(dists, detections)
         matches, u_track, u_detection = matching.linear_assignment(
-            dists, thresh=self.minimum_matching_threshold
+            dists, thresh=self._association_threshold(self.minimum_matching_threshold)
         )
         # Handle team switches in tracks
         for itracked, idet in matches:
@@ -562,7 +673,7 @@ class ByteTrack:
             detections_second,
         )
         matches, u_track, u_detection_second = matching.linear_assignment(
-            dists, thresh=self.second_match_threshold
+            dists, thresh=self._association_threshold(self.second_match_threshold)
         )
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
@@ -589,7 +700,7 @@ class ByteTrack:
         dists = self._apply_field_position_costs(dists, unconfirmed, detections)
         dists = matching.fuse_score(dists, detections)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(
-            dists, thresh=self.unconfirmed_match_threshold
+            dists, thresh=self._association_threshold(self.unconfirmed_match_threshold)
         )
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)

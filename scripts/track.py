@@ -185,6 +185,9 @@ if __name__ == "__main__":
             "reassign_max_lost_frames": tracking_cfg.get(
                 "reassign_max_lost_frames", 12
             ),
+            "raw_id_grace_lost_frames": tracking_cfg.get(
+                "raw_id_grace_lost_frames", 2
+            ),
             "referee_recovery_max_lost_frames": tracking_cfg.get(
                 "referee_recovery_max_lost_frames", 3
             ),

@@ -322,7 +322,7 @@ tracking:
   track_buffer: 90            # Frames que sobrevive un track sin ser visto
   match_thresh: 0.945         # IoU mínimo para asociar detección a track
   frame_rate: 25
-  minimum_consecutive_frames: 5
+  minimum_consecutive_frames: 1
   max_total_tracks: 25
   max_tracks_per_class:
     player: 22
@@ -333,6 +333,7 @@ tracking:
   reassign_hard_max_distance: 70.0
   reassign_min_samples: 3
   reassign_max_lost_frames: 8
+  raw_id_grace_lost_frames: 2
   field_position_strict_matching: true
   reassign_min_field_distance_m: 4.0
   reassign_hard_max_field_distance_m: 10.0
@@ -390,6 +391,7 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `reassign_hard_max_distance`
 - `reassign_min_samples`
 - `reassign_max_lost_frames`
+- `raw_id_grace_lost_frames`
 - `field_position_strict_matching`
 - `reassign_min_field_distance_m`
 - `reassign_hard_max_field_distance_m`

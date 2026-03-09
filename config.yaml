@@ -75,7 +75,7 @@ tracking:
   # Frame rate del video
   frame_rate: 25
   # Frames consecutivos mínimos para confirmar un track
-  minimum_consecutive_frames: 5
+  minimum_consecutive_frames: 1
   # Límite global de IDs canónicos visibles
   max_total_tracks: 25
   # Si es false, el límite por clase se aplica en reasignación final, no dentro de ByteTrack
@@ -99,6 +99,9 @@ tracking:
   reassign_min_samples: 3
   # Máximo de frames perdidos para volver a enganchar un ID existente
   reassign_max_lost_frames: 8
+  # Si ByteTrack conserva el mismo raw_id, mantener el ID canónico este número de frames
+  # aunque falle puntualmente el gate de movimiento.
+  raw_id_grace_lost_frames: 2
   # Recuperación específica de árbitros
   referee_recovery_max_lost_frames: 3
   referee_recovery_max_distance: 45.0
