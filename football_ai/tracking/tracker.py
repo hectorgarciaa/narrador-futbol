@@ -1024,7 +1024,7 @@ class Tracker:
                 tracks[output_class_name][n_frame][canonical_id] = {
                     "bbox": bbox,
                     "confidence": confidence,
-                    "team": metadata.get("team"),
+                    "team": resolved_team,
                     "distances": metadata.get("distances"),
                     "shirt_color": resolved_shirt_color,
                     "bbox_size": metadata.get("bbox_size"),

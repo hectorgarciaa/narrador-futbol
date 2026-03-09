@@ -44,7 +44,8 @@ drawer.draw_tracks(
 3. Para cada clase y frame, llama a `draw_all_detections_in_frame`, que itera sobre todos los tracks del frame.
 4. `draw_detection` pinta el bounding box con `cv2.rectangle` y la etiqueta con `cv2.putText`. La etiqueta incluye:
    - Clase y track_id (`"player #7"`)
-   - Si hay información de equipo: el equipo asignado y las distancias a cada equipo dinámicamente (`"Real Madrid: [12.3, 45.6]"`)
+   - Si hay información de equipo: el equipo asignado (`"player #7 [Real Madrid]"`)
+   - Si además hay distancias de clustering disponibles: añade las distancias a cada equipo (`"(Real Madrid: 12.3, Wolfsburgo: 45.6)"`)
 5. Escribe el frame anotado con `out.write(frame)`.
 6. En el bloque `finally`, libera `cap` y `out` siempre, incluso si hubo error.
 

@@ -67,9 +67,15 @@ class Drawer:
         label = f"{class_name} #{track_id}"
         distances = data.get("distances")
         team = data.get("team")
-        if distances is not None and team is not None:
+
+        # Mostrar siempre el equipo cuando exista, incluso si no hay distancias
+        # (por ejemplo, cuando viene de caché temporal y no se recalcula KMeans).
+        if team is not None:
+            label += f" [{team}]"
+
+        if distances is not None:
             d_str = ", ".join(f"{t}: {d:.1f}" for t, d in distances.items())
-            label += f" [{team}] ({d_str})"
+            label += f" ({d_str})"
 
         cv2.putText(frame, label, (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
