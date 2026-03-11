@@ -7,6 +7,18 @@ from football_ai.reference_points import PnLCalibFieldProjector
 from football_ai.tracking.byte_tracker import ByteTrack
 
 class Tracker:
+    @staticmethod
+    def _normalize_optional_positive_int(value):
+        if value is None:
+            return None
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            return None
+        if normalized <= 0:
+            return None
+        return normalized
+
     def __init__(
         self,
         model_path,
@@ -99,6 +111,23 @@ class Tracker:
         self.reassign_min_field_distance_m = float(
             field_tracking_conf.get("reassign_min_field_distance_m", 4.0)
         )
+        self.strict_person_class_separation = bool(
+            tracker_conf.get("strict_person_class_separation", True)
+        )
+        self.require_field_position_for_reassign = bool(
+            tracker_conf.get("require_field_position_for_reassign", True)
+        )
+        self.max_reassign_lost_frames = self._normalize_optional_positive_int(
+            tracker_conf.get("max_reassign_lost_frames")
+        )
+        raw_max_reassign_lost_frames_by_class = (
+            tracker_conf.get("max_reassign_lost_frames_by_class", {}) or {}
+        )
+        self.max_reassign_lost_frames_by_class = {}
+        for class_name, class_limit in raw_max_reassign_lost_frames_by_class.items():
+            self.max_reassign_lost_frames_by_class[str(class_name)] = (
+                self._normalize_optional_positive_int(class_limit)
+            )
         self.field_projector = None
         if self.use_field_positions:
             method = field_tracking_conf.get("method", "pnlcalib")
@@ -174,16 +203,30 @@ class Tracker:
             return False
         return self._field_position_to_tuple(field_position) is not None
 
+    def _must_use_field_position_for_class(self, class_name):
+        if not self.require_field_position_for_reassign:
+            return False
+        return bool(self.use_field_positions and class_name in self.field_position_classes)
+
+    def _max_lost_frames_for_class(self, class_name):
+        if class_name in self.max_reassign_lost_frames_by_class:
+            class_limit = self.max_reassign_lost_frames_by_class.get(class_name)
+            return class_limit
+        return self.max_reassign_lost_frames
+
     def _next_free_canonical_id(self, canonical_state):
         for canonical_id in range(1, self.max_total_tracks + 1):
             if canonical_id not in canonical_state:
                 return canonical_id
         return None
 
-    @staticmethod
-    def _is_compatible_class(previous_class, new_class):
+    def _is_compatible_class(self, previous_class, new_class):
+        if previous_class is None or new_class is None:
+            return previous_class == new_class
         person_classes = {"player", "goalkeeper"}
         if previous_class in person_classes and new_class in person_classes:
+            if self.strict_person_class_separation:
+                return previous_class == new_class
             return True
         return previous_class == new_class
 
@@ -204,6 +247,14 @@ class Tracker:
         previous_field_position=None,
         new_field_position=None,
     ):
+        if self._must_use_field_position_for_class(class_name):
+            previous_field_position = self._field_position_to_tuple(previous_field_position)
+            new_field_position = self._field_position_to_tuple(new_field_position)
+            if previous_field_position is None or new_field_position is None:
+                return None
+            px, py = previous_field_position
+            nx, ny = new_field_position
+            return float(((nx - px) ** 2 + (ny - py) ** 2) ** 0.5)
         if self._use_field_position_for_class(
             class_name,
             previous_field_position,
@@ -228,6 +279,14 @@ class Tracker:
         effective_class = class_name or previous_state.get("class_name")
         previous_bbox = previous_state.get("bbox")
         previous_field_position = previous_state.get("field_position")
+        if self._must_use_field_position_for_class(effective_class):
+            previous_field_position_tuple = self._field_position_to_tuple(previous_field_position)
+            new_field_position_tuple = self._field_position_to_tuple(new_field_position)
+            if (
+                previous_field_position_tuple is None
+                or new_field_position_tuple is None
+            ):
+                return False
         step_distance = self._step_distance(
             previous_bbox,
             new_bbox,
@@ -242,6 +301,9 @@ class Tracker:
             1,
             current_frame - int(previous_state.get("last_frame", current_frame)),
         )
+        max_lost_frames = self._max_lost_frames_for_class(effective_class)
+        if max_lost_frames is not None and lost_frames > max_lost_frames:
+            return False
         samples = int(previous_state.get("movement_samples", 0))
         mean_step_distance = float(previous_state.get("mean_step_distance", 0.0))
 
@@ -249,7 +311,6 @@ class Tracker:
             max_allowed_jump = self.reassign_min_field_distance_m
         else:
             max_allowed_jump = self.reassign_min_distance
-        min_base_jump = max_allowed_jump
         if samples >= self.reassign_min_samples:
             expected_jump = mean_step_distance * lost_frames
             max_allowed_jump = max(
@@ -308,6 +369,14 @@ class Tracker:
         field_position_a=None,
         field_position_b=None,
     ):
+        if self._must_use_field_position_for_class(class_name):
+            field_position_a = self._field_position_to_tuple(field_position_a)
+            field_position_b = self._field_position_to_tuple(field_position_b)
+            if field_position_a is None or field_position_b is None:
+                return None
+            ax, ay = field_position_a
+            bx, by = field_position_b
+            return (ax - bx) ** 2 + (ay - by) ** 2
         if self._use_field_position_for_class(
             class_name,
             field_position_a,
@@ -910,7 +979,7 @@ class Tracker:
                             canonical_id = None
                         elif self._resolve_candidate_class_for_detection(
                             previous_state,
-                            output_class_name,
+                            class_name,
                             detected_team,
                             bbox,
                             field_position,
@@ -919,6 +988,7 @@ class Tracker:
                             canonical_id = None
 
                 if canonical_id is None:
+                    output_class_name = class_name
                     pending_detections.append(
                         {
                             "raw_tracker_id": raw_tracker_id,

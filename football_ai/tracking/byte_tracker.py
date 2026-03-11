@@ -527,6 +527,11 @@ class ByteTrack:
         """Deal with unconfirmed tracks, usually tracks with only one beginning frame"""
         detections = [detections[i] for i in u_detection]
         dists = matching.iou_distance(unconfirmed, detections)
+        for i, track in enumerate(unconfirmed):
+            for j, det in enumerate(detections):
+                if hasattr(track, "class_name") and hasattr(det, "class_name"):
+                    if track.class_name != det.class_name:
+                        dists[i, j] += 1000
 
         dists = self._apply_field_position_costs(dists, unconfirmed, detections)
         dists = matching.fuse_score(dists, detections)

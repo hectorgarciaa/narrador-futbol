@@ -91,13 +91,22 @@ tracking:
   # Umbral para tracks no confirmados
   unconfirmed_match_threshold: 0.8
   # Parámetros de reasignación y control de movimiento
-  reassign_motion_factor: 1.0
-  reassign_min_distance: 15.0
+  reassign_motion_factor: 0.75
+  reassign_min_distance: 10.0
   reassign_min_samples: 3
+  # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
+  strict_person_class_separation: true
+  # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
+  # Si falta field_position, la reasignación se rechaza.
+  require_field_position_for_reassign: true
+  # Límite opcional de frames perdidos para reasignar un ID.
+  # null/0/desactivado => un track puede reaparecer tras muchos frames.
+  max_reassign_lost_frames: null
+  max_reassign_lost_frames_by_class: {}
   # Gate estadístico anti-saltos de ID (distancia por frame)
   # límite = media_historica + motion_std_factor * desviacion_tipica
   motion_std_gate_enabled: true
-  motion_std_factor: 6.0
+  motion_std_factor: 4.0
   motion_std_min_samples: 5
   motion_std_floor: 0.5
   # Recuperación específica de árbitros
@@ -117,9 +126,9 @@ tracking:
   field_position_temporal_blend: 0.20
   field_position_pixels_per_meter: 8
   field_position_device: null
-  field_position_match_distance_gate_m: 8.0
+  field_position_match_distance_gate_m: 2.0
   field_position_match_distance_weight: 0.25
-  reassign_min_field_distance_m: 2.0
+  reassign_min_field_distance_m: 1.2
   # Penalización de distancia cuando el equipo detectado difiere del track
   team_penalty: 1000
   # Frames consecutivos con equipo distinto para confirmar cambio real
@@ -128,10 +137,10 @@ tracking:
 # Configuración de equipos
 teams:
   Real Madrid:
-    color_rgb: [255, 127, 127]  # Color de referencia en RGB
+    color_lab_opencv: [255, 127, 127]  # Color de referencia en lab_opencv
     name: "Real Madrid"
   Wolfsburgo:
-    color_rgb: [224, 77, 196]  # Color de referencia en RGB
+    color_lab_opencv: [224, 77, 196]  # Color de referencia en lab_opencv
     name: "Wolfsburgo"
 
 # Configuración de clustering de colores

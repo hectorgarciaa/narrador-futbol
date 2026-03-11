@@ -348,17 +348,20 @@ tracking:
     player: 22
     ball: 1
     referee: 3
-  # Anti-ID-switch por movimiento anómalo (distancia por frame)
+  # Anti-ID-switch por clase y movimiento
+  strict_person_class_separation: true
+  require_field_position_for_reassign: true
+  max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
   motion_std_gate_enabled: true
-  motion_std_factor: 6.0
+  motion_std_factor: 4.0
   motion_std_min_samples: 5
   motion_std_floor: 0.5
 
 teams:
   Real Madrid:
-    color_rgb: [255, 127, 127]
+    color_lab_opencv: [255, 127, 127]
   Wolfsburgo:
-    color_rgb: [224, 77, 196]
+    color_lab_opencv: [224, 77, 196]
 ```
 
 ---
@@ -387,6 +390,10 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `reassign_motion_factor`
 - `reassign_min_distance`
 - `reassign_min_samples`
+- `strict_person_class_separation`
+- `require_field_position_for_reassign`
+- `max_reassign_lost_frames`
+- `max_reassign_lost_frames_by_class`
 - `motion_std_gate_enabled`
 - `motion_std_factor`
 - `motion_std_min_samples`
@@ -395,9 +402,12 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `referee_recovery_max_distance`
 
 Si sigues viendo cambios de ID en clips largos, ajusta en este orden:
-1. Baja `motion_std_factor` (por ejemplo: `6 -> 5 -> 4`).
-2. Baja `reassign_min_distance` (píxeles) y `reassign_min_field_distance_m` (metros).
-3. Baja `motion_std_min_samples` para que el gate estadístico actúe antes.
+1. Activa `strict_person_class_separation`.
+2. Activa `require_field_position_for_reassign` para `player/goalkeeper`.
+3. Baja `motion_std_factor` (por ejemplo: `6 -> 5 -> 4`).
+4. Baja `reassign_min_distance` (píxeles, para clases sin campo) y `reassign_min_field_distance_m` (metros).
+5. Baja `motion_std_min_samples` para que el gate estadístico actúe antes.
+6. Solo si quieres cortar reapariciones tardías, fija `max_reassign_lost_frames` (>0).
 
 ---
 

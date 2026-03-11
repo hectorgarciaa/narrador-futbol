@@ -170,6 +170,18 @@ if __name__ == "__main__":
             "reassign_motion_factor": tracking_cfg.get("reassign_motion_factor", 1.0),
             "reassign_min_distance": tracking_cfg.get("reassign_min_distance", 25.0),
             "reassign_min_samples": tracking_cfg.get("reassign_min_samples", 3),
+            "strict_person_class_separation": tracking_cfg.get(
+                "strict_person_class_separation", True
+            ),
+            "require_field_position_for_reassign": tracking_cfg.get(
+                "require_field_position_for_reassign", True
+            ),
+            "max_reassign_lost_frames": tracking_cfg.get(
+                "max_reassign_lost_frames", None
+            ),
+            "max_reassign_lost_frames_by_class": tracking_cfg.get(
+                "max_reassign_lost_frames_by_class", {}
+            ),
             "motion_std_gate_enabled": tracking_cfg.get(
                 "motion_std_gate_enabled", True
             ),

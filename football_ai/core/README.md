@@ -34,7 +34,7 @@ tracking_cfg = config.tracking       # → dict completo de tracking
 teams_cfg    = config.teams          # → dict de equipos con colores
 
 # Helpers de alto nivel
-team_colors  = config.get_team_colors()          # → {"Real Madrid": np.array([255,127,127]), ...}
+team_colors  = config.get_team_colors()          # → usa `color_lab_opencv` (o `color_rgb` legacy)
 bgr_colors   = config.get_visualization_colors() # → {"player": (0,255,0), ...} en BGR para OpenCV
 ```
 

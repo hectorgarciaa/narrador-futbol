@@ -202,14 +202,19 @@ class Config:
         Get team colors as numpy arrays.
         
         Returns:
-            Dictionary with team name as key and RGB color as numpy array
+            Dictionary with team name as key and color reference as numpy array.
+            Supports both `color_lab_opencv` (preferred) and legacy `color_rgb`.
         """
         teams = self.teams
         team_colors = {}
         
         for team_name, team_info in teams.items():
-            if 'color_rgb' in team_info:
-                team_colors[team_name] = np.array(team_info['color_rgb'])
+            if 'color_lab_opencv' in team_info:
+                team_colors[team_name] = np.array(
+                    team_info['color_lab_opencv'], dtype=np.float32
+                )
+            elif 'color_rgb' in team_info:
+                team_colors[team_name] = np.array(team_info['color_rgb'], dtype=np.float32)
         
         return team_colors
     

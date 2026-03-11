@@ -122,9 +122,12 @@ Parámetros en `config.yaml`:
 - `motion_std_factor`
 - `motion_std_min_samples`
 - `motion_std_floor`
+- `strict_person_class_separation` (si `true`, no mezcla `player` y `goalkeeper`)
+- `require_field_position_for_reassign` (si `true`, `player/goalkeeper` no hacen fallback a píxeles)
+- `max_reassign_lost_frames` / `max_reassign_lost_frames_by_class` (opcionales; `null` o `<=0` desactiva el corte temporal y permite reapariciones tardías)
 
 Para reducir ID switches en clips largos, conviene combinar este gate con límites de reasignación más estrictos:
-- `reassign_min_distance` (imagen, píxeles)
+- `reassign_min_distance` (imagen, píxeles; útil en clases sin campo)
 - `reassign_min_field_distance_m` (campo 2D, metros)
 
 Además, se implementa un mecanismo de **tolerancia a cambios temporales de equipo**:
