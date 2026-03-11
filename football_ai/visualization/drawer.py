@@ -90,6 +90,28 @@ class Drawer:
         cv2.putText(frame, label, (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
+        # Show field coordinates (meters) under player bbox when available.
+        if class_name == "player":
+            field_position = data.get("field_position_m")
+            if (
+                isinstance(field_position, (list, tuple))
+                and len(field_position) >= 2
+                and field_position[0] is not None
+                and field_position[1] is not None
+            ):
+                pos_label = f"pos(m): {field_position[0]:.1f}, {field_position[1]:.1f}"
+                baseline_y = min(y2 + 15, frame.shape[0] - 5)
+                cv2.putText(
+                    frame,
+                    pos_label,
+                    (x1, baseline_y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
+
     def draw_all_detections_in_frame(self, frame, class_name, class_tracks, frame_id):
         """Draws all detections of a class in a frame."""
         frame_data = class_tracks[frame_id]

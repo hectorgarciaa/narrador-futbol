@@ -51,12 +51,19 @@ python scripts/<nombre>.py
 
 **Objetivo:** Ejecutar el pipeline de tracking completo sobre un vídeo, guardar los tracks en JSON y generar el video anotado.
 
+**CLI:** admite un argumento posicional opcional para elegir vídeo:
+```bash
+python scripts/track.py video_prueba_ajustado
+```
+El valor puede ser una clave de `paths.data` en `config.yaml` o una ruta de vídeo directa.
+
 **Flujo:**
 1. Carga toda la configuración de `config.yaml` (modelo, video, output, confianza, tracker, equipos).
 2. Instancia `Tracker` y llama a `get_tracks()`.
 3. Guarda los tracks en `output/tracks_json/tracker/tracks.json` con `json.dump` + `convert_to_serializable`.
-4. Genera el video anotado con `Drawer.draw_tracks()`.
-5. Llama a `Evaluator` para imprimir métricas en consola.
+4. Genera el video anotado con `Drawer.draw_tracks()` e incluye `field_position_m` bajo los `player` cuando está disponible.
+5. El nombre del MP4 de salida se construye con el nombre del vídeo de entrada + `_tracking.mp4`.
+6. Llama a `Evaluator` para imprimir métricas en consola.
 
 **Nota Linux/headless:** si `visualization.show_output=true` pero no hay entorno gráfico (`DISPLAY`/`WAYLAND_DISPLAY`), la ventana en tiempo real se desactiva automáticamente y el script sigue generando el MP4 de salida.
 

@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -11,6 +12,67 @@ from football_ai.tracking import Tracker
 from football_ai.evaluation import Evaluator
 from football_ai.visualization import Drawer
 from football_ai.core import get_config, get_logger, Logger, convert_to_serializable
+
+
+def parse_args():
+    """Parse CLI arguments for the tracking script."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run full tracking pipeline. Optionally pass a video shortcut from "
+            "config.yaml paths.data (e.g. video_prueba_ajustado)."
+        )
+    )
+    parser.add_argument(
+        "video_shortcut",
+        nargs="?",
+        default=None,
+        help=(
+            "Optional key inside paths.data (config.yaml), e.g. video_prueba_ajustado. "
+            "You can also pass a direct video path."
+        ),
+    )
+    return parser.parse_args()
+
+
+def resolve_video_path(config, video_shortcut):
+    """
+    Resolve video path either from a config shortcut (paths.data.<key>)
+    or from a direct filesystem path.
+    """
+    data_paths = config.paths.get("data", {})
+    if video_shortcut:
+        if video_shortcut in data_paths:
+            return str(config.get_path("paths", "data", video_shortcut)), video_shortcut
+
+        candidate = Path(video_shortcut).expanduser()
+        if not candidate.is_absolute():
+            candidate = (config.project_root / candidate).resolve()
+        if candidate.exists():
+            return str(candidate), str(candidate)
+
+        available_keys = ", ".join(sorted(data_paths.keys()))
+        raise FileNotFoundError(
+            f"No se encontró el shortcut/ruta de video '{video_shortcut}'. "
+            f"Shortcuts disponibles en paths.data: {available_keys}"
+        )
+
+    default_key = (
+        "video_prueba_corto"
+        if data_paths.get("video_prueba_corto") is not None
+        else "video_prueba"
+    )
+    return str(config.get_path("paths", "data", default_key)), default_key
+
+
+def build_output_video_path(config, video_path):
+    """Build output path using the input video filename."""
+    output_dir = config.get_path(
+        "paths", "output", "prueba_tracker", create_if_missing=True
+    )
+    input_stem = Path(video_path).stem or "video"
+    output_name = f"{input_stem}_tracking.mp4"
+    return str(output_dir / output_name)
+
 
 def save_result(tracks, output_path, logger):
     """Saves tracks in JSON format with error handling."""
@@ -28,6 +90,8 @@ def save_result(tracks, output_path, logger):
 
 
 if __name__ == "__main__":
+    args = parse_args()
+
     # Load configuration
     config = get_config()
     
@@ -40,13 +104,8 @@ if __name__ == "__main__":
     try:
         # Get paths and parameters from config
         MODEL_PATH = str(config.get_path('paths', 'models', 'finetuned_player'))
-        video_config_key = (
-            "video_prueba_corto"
-            if config.get('paths', 'data', 'video_prueba_corto') is not None
-            else "video_prueba"
-        )
-        VIDEO_PATH = str(config.get_path('paths', 'data', video_config_key))
-        OUTPUT = str(config.get_path('paths', 'output', 'prueba_tracker', create_if_missing=True) / "nueva_prueba.mp4")
+        VIDEO_PATH, video_source = resolve_video_path(config, args.video_shortcut)
+        OUTPUT = build_output_video_path(config, VIDEO_PATH)
         OUTPUT_PATH = str(config.get_path('paths', 'output', 'tracks_json', create_if_missing=True) / "tracker" / "tracks.json")
         
         # Configuration parameters
@@ -126,6 +185,7 @@ if __name__ == "__main__":
         
         logger.info(f"Model: {MODEL_PATH}")
         logger.info(f"Video: {VIDEO_PATH}")
+        logger.info(f"Video source: {video_source}")
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
         

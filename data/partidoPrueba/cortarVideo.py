@@ -1,7 +1,7 @@
 import cv2
 
 input_video = "./partido.mp4"
-output_video = "./partido_medio.mp4"
+output_video = "./partido_ajustado.mp4"
 
 cap = cv2.VideoCapture(input_video)
 fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -13,7 +13,7 @@ fourcc = cv2.VideoWriter_fourcc(*"mp4v")
 out = cv2.VideoWriter(output_video, fourcc, fps, (width, height))
 
 # Leer y guardar los primeros 10 frames
-for i in range(200):
+for i in range(60,765):
     ret, frame = cap.read()
     if not ret:
         break
