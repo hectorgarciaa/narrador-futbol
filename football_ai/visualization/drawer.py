@@ -1,10 +1,26 @@
 import os
+import sys
+import logging
 import cv2
+
+logger = logging.getLogger(__name__)
 
 class Drawer:
     def __init__(self, colors, default_color=(255, 255, 255)):
         self.colors = colors
         self.DEFAULT_COLOR = default_color
+
+    @staticmethod
+    def _can_show_gui():
+        """
+        Checks whether a graphical display is available for OpenCV windows.
+
+        Returns:
+            True if UI windows can be shown safely, False otherwise.
+        """
+        if sys.platform != "linux":
+            return True
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
     def create_writer(self, video, output_path):
         """
@@ -97,6 +113,13 @@ class Drawer:
         """
         cap = None
         out = None
+        show_window = show
+        if show and not self._can_show_gui():
+            logger.warning(
+                "show=True pero no hay entorno gráfico (DISPLAY/WAYLAND). "
+                "Se desactiva la visualización en tiempo real y solo se guardará el video de salida."
+            )
+            show_window = False
         
         try:
             cap, out = self.create_writer(video, output_path)
@@ -113,7 +136,7 @@ class Drawer:
                         self.draw_all_detections_in_frame(frame, class_name, class_tracks, frame_id)
                 
                 out.write(frame)
-                if show:
+                if show_window:
                     cv2.imshow(window_name, frame)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
@@ -128,5 +151,5 @@ class Drawer:
                 cap.release()
             if out is not None:
                 out.release()
-            if show:
+            if show_window:
                 cv2.destroyAllWindows()

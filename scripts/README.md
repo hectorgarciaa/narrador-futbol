@@ -58,6 +58,8 @@ python scripts/<nombre>.py
 4. Genera el video anotado con `Drawer.draw_tracks()`.
 5. Llama a `Evaluator` para imprimir métricas en consola.
 
+**Nota Linux/headless:** si `visualization.show_output=true` pero no hay entorno gráfico (`DISPLAY`/`WAYLAND_DISPLAY`), la ventana en tiempo real se desactiva automáticamente y el script sigue generando el MP4 de salida.
+
 Es el script principal del proyecto y sirve como referencia de cómo usar el paquete `football_ai` completo.
 
 ---

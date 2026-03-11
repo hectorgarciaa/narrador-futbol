@@ -38,6 +38,8 @@ drawer.draw_tracks(
 )
 ```
 
+En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=True` se desactiva automáticamente la visualización en ventana para evitar errores de Qt/xcb; el video de salida se sigue escribiendo.
+
 **Flujo interno:**
 1. `create_writer(video, output_path)`: abre el video con `cv2.VideoCapture`, extrae FPS, ancho y alto, y crea un `cv2.VideoWriter` con codec `mp4v`. Crea el directorio de salida si no existe.
 2. Itera frame a frame con `cap.read()`.
