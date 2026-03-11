@@ -348,6 +348,11 @@ tracking:
     player: 22
     ball: 1
     referee: 3
+  # Anti-ID-switch por movimiento anómalo (distancia por frame)
+  motion_std_gate_enabled: true
+  motion_std_factor: 10.0
+  motion_std_min_samples: 8
+  motion_std_floor: 0.5
 
 teams:
   Real Madrid:
@@ -382,6 +387,10 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `reassign_motion_factor`
 - `reassign_min_distance`
 - `reassign_min_samples`
+- `motion_std_gate_enabled`
+- `motion_std_factor`
+- `motion_std_min_samples`
+- `motion_std_floor`
 - `referee_recovery_max_lost_frames`
 - `referee_recovery_max_distance`
 

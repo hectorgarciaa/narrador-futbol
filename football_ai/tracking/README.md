@@ -110,6 +110,19 @@ Para `player` y `goalkeeper`, si existe homografía válida en el frame:
 
 Esto reduce cambios de ID provocados solo por movimiento de cámara o paneos fuertes.
 
+### Extensión: gate estadístico anti-ID-switch
+
+En `Tracker` se aplica además un filtro de movimiento por track canónico:
+- mantiene media y desviación típica de la distancia recorrida por frame;
+- calcula un límite dinámico `media + k * desviacion_tipica`;
+- bloquea reasignaciones cuya distancia supere ese límite (escalado por frames perdidos), con un suelo mínimo de movimiento permitido.
+
+Parámetros en `config.yaml`:
+- `motion_std_gate_enabled`
+- `motion_std_factor`
+- `motion_std_min_samples`
+- `motion_std_floor`
+
 Además, se implementa un mecanismo de **tolerancia a cambios temporales de equipo**:
 - Si el equipo asignado cambia en un frame, no se actualiza inmediatamente.
 - Se contabilizan los frames de discordancia en `team_switch_frames`.

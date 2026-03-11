@@ -94,6 +94,12 @@ tracking:
   reassign_motion_factor: 1.0
   reassign_min_distance: 25.0
   reassign_min_samples: 3
+  # Gate estadístico anti-saltos de ID (distancia por frame)
+  # límite = media_historica + motion_std_factor * desviacion_tipica
+  motion_std_gate_enabled: true
+  motion_std_factor: 10.0
+  motion_std_min_samples: 8
+  motion_std_floor: 0.5
   # Recuperación específica de árbitros
   referee_recovery_max_lost_frames: 3
   referee_recovery_max_distance: 45.0

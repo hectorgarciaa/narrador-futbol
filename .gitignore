@@ -50,6 +50,9 @@ output/**
 pruebaTracker
 runs/
 
+# Root-level videos (do not commit local copies in repo root)
+/*.mp4
+
 # Logs
 *.log
 

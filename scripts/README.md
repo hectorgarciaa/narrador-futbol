@@ -68,6 +68,7 @@ El valor puede ser una clave de `paths.data` en `config.yaml` o una ruta de víd
 6. Llama a `Evaluator` para imprimir métricas en consola.
 
 **Nota Linux/headless:** si `visualization.show_output=true` pero no hay entorno gráfico (`DISPLAY`/`WAYLAND_DISPLAY`), la ventana en tiempo real se desactiva automáticamente y el script sigue generando el MP4 de salida.
+**Nota anti-ID-switch:** `track.py` aplica un gate estadístico configurable (`motion_std_*` en `config.yaml`) para bloquear reasignaciones con saltos de movimiento anómalos por frame.
 
 Es el script principal del proyecto y sirve como referencia de cómo usar el paquete `football_ai` completo.
 

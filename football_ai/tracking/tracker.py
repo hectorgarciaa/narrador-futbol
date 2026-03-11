@@ -68,6 +68,18 @@ class Tracker:
         self.reassign_min_samples = int(
             tracker_conf.get("reassign_min_samples", 3)
         )
+        self.motion_std_gate_enabled = bool(
+            tracker_conf.get("motion_std_gate_enabled", True)
+        )
+        self.motion_std_factor = float(
+            tracker_conf.get("motion_std_factor", 10.0)
+        )
+        self.motion_std_min_samples = int(
+            tracker_conf.get("motion_std_min_samples", 8)
+        )
+        self.motion_std_floor = float(
+            tracker_conf.get("motion_std_floor", 0.5)
+        )
         self.referee_recovery_max_lost_frames = int(
             tracker_conf.get("referee_recovery_max_lost_frames", 3)
         )
@@ -129,6 +141,16 @@ class Tracker:
         if field_position.size < 2 or not np.all(np.isfinite(field_position[:2])):
             return None
         return (float(field_position[0]), float(field_position[1]))
+
+    @staticmethod
+    def _update_running_stats(prev_count, prev_mean, prev_m2, value):
+        """Update running mean and variance accumulator (Welford)."""
+        count = int(prev_count) + 1
+        delta = float(value) - float(prev_mean)
+        mean = float(prev_mean) + (delta / count)
+        delta2 = float(value) - mean
+        m2 = float(prev_m2) + (delta * delta2)
+        return count, mean, m2
 
     def _use_field_position_for_class(self, class_name, field_position=None):
         if not self.use_field_positions:
@@ -212,12 +234,30 @@ class Tracker:
             max_allowed_jump = self.reassign_min_field_distance_m
         else:
             max_allowed_jump = self.reassign_min_distance
+        min_base_jump = max_allowed_jump
         if samples >= self.reassign_min_samples:
             expected_jump = mean_step_distance * lost_frames
             max_allowed_jump = max(
                 max_allowed_jump,
                 expected_jump * self.reassign_motion_factor,
             )
+
+        # Gate estadístico por velocidad (distancia por frame):
+        # bloquea saltos extremos respecto al histórico del propio track.
+        if self.motion_std_gate_enabled:
+            stats_count = int(previous_state.get("step_per_frame_count", 0))
+            if stats_count >= self.motion_std_min_samples:
+                stats_mean = float(previous_state.get("step_per_frame_mean", 0.0))
+                stats_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
+                variance = stats_m2 / max(1, stats_count - 1)
+                std_per_frame = max(
+                    float(np.sqrt(max(variance, 0.0))),
+                    self.motion_std_floor,
+                )
+                max_per_frame = stats_mean + (self.motion_std_factor * std_per_frame)
+                stats_jump_limit = max_per_frame * lost_frames
+                stats_jump_limit = max(stats_jump_limit, min_base_jump)
+                max_allowed_jump = min(max_allowed_jump, stats_jump_limit)
 
         return step_distance <= max_allowed_jump
 
@@ -690,6 +730,15 @@ class Tracker:
                 previous_state = canonical_state.get(canonical_id, {})
                 prev_samples = int(previous_state.get("movement_samples", 0))
                 prev_mean = float(previous_state.get("mean_step_distance", 0.0))
+                prev_last_frame = int(previous_state.get("last_frame", n_frame))
+                frame_gap = max(1, n_frame - prev_last_frame)
+                prev_step_pf_count = int(
+                    previous_state.get("step_per_frame_count", 0)
+                )
+                prev_step_pf_mean = float(
+                    previous_state.get("step_per_frame_mean", 0.0)
+                )
+                prev_step_pf_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
                 step_distance = self._step_distance(
                     previous_state.get("bbox"),
                     bbox,
@@ -708,6 +757,23 @@ class Tracker:
                 else:
                     movement_samples = prev_samples
                     mean_step_distance = prev_mean
+
+                if step_distance is not None:
+                    step_per_frame = step_distance / frame_gap
+                    (
+                        step_per_frame_count,
+                        step_per_frame_mean,
+                        step_per_frame_m2,
+                    ) = self._update_running_stats(
+                        prev_step_pf_count,
+                        prev_step_pf_mean,
+                        prev_step_pf_m2,
+                        step_per_frame,
+                    )
+                else:
+                    step_per_frame_count = prev_step_pf_count
+                    step_per_frame_mean = prev_step_pf_mean
+                    step_per_frame_m2 = prev_step_pf_m2
                 resolved_team = (
                     detected_team
                     if detected_team is not None
@@ -725,6 +791,9 @@ class Tracker:
                     "field_position": resolved_field_position,
                     "movement_samples": movement_samples,
                     "mean_step_distance": mean_step_distance,
+                    "step_per_frame_count": step_per_frame_count,
+                    "step_per_frame_mean": step_per_frame_mean,
+                    "step_per_frame_m2": step_per_frame_m2,
                 }
                 used_canonical_ids_in_frame.add(canonical_id)
 
