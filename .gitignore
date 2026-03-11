@@ -30,6 +30,10 @@ ENV/
 # Dataset files
 data/detection/**
 !data/detection/.gitkeep
+!data/partidosPosiciones/
+!data/partidosPosiciones/.gitkeep
+!data/partidosPosiciones/README.md
+!data/partidosPosiciones/**/*.mp4
 
 # Model files (large binary files, exclude all)
 models/reference_points/

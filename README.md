@@ -72,9 +72,10 @@ narrador-futbol/
 │   └── train/
 │       └── finetune_player.py    # Fine-tuning de YOLO para fútbol
 │
-├── data/                   # Datos de entrada (no versionados, ver data/README.md)
+├── data/                   # Datos de entrada (ver data/README.md)
 │   ├── detection/          # Datasets de detección (formato YOLOv11)
-│   └── partidoPrueba/      # Vídeos de partido para desarrollo
+│   ├── partidoPrueba/      # Vídeos de partido para tracking/detección
+│   └── partidosPosiciones/ # Clips para construir dataset de roles posicionales
 │
 ├── models/                 # Pesos de modelos (no versionados, ver models/README.md)
 │   ├── yolo/               # Modelos base YOLOv8 y YOLOv11
@@ -83,6 +84,7 @@ narrador-futbol/
 │
 └── experiments/            # Notebooks de análisis y visualización
     ├── detection/
+    ├── positions/          # Dataset supervisado de roles por posición (experimental)
     ├── reference_points/
     ├── tracking/
     └── visualization/
@@ -217,9 +219,11 @@ También puedes indicar un shortcut de vídeo definido en `paths.data`:
 ```bash
 python scripts/track.py video_prueba_ajustado
 ```
+Para los clips de `data/partidosPosiciones/` hay shortcuts `video_test_*` (ejemplo: `video_test_1`, `video_test_29`).
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Por defecto usa `paths.data.video_prueba_corto` (si existe) y, en caso contrario, `paths.data.video_prueba`.
 El MP4 de salida se guarda en `output/pruebaTracker/` con el nombre del vídeo de entrada y sufijo `_tracking.mp4` (ejemplo: `partido_ajustado_tracking.mp4`).
+El JSON de tracks se guarda en `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (formato esperado por `experiments/positions`) y además en `output/tracks_json/tracker/tracks.json` como compatibilidad legacy.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida.
@@ -271,6 +275,28 @@ Igual que en `scripts/track.py`, no hace falta clonar `PnLCalib` a mano en otra 
 
 Importante: `PnLCalib` está publicado con licencia `GPL-2.0`, así que si este método se fuese a integrar en un producto cerrado habría que revisar esa implicación legal antes.
 
+## 🧪 Dataset de roles posicionales (experimental)
+
+El repositorio incluye un flujo experimental para crear un dataset supervisado de rol nominal de jugador (por ejemplo, `POR`, `DFC_IZQ`, `MC`, `DC`) a partir de:
+- clips en `data/partidosPosiciones/`
+- tracking con homografía (`field_position_m`) en `output/tracks_json/tracker/`
+- etiquetado manual puntual por `team_id + player_id` en un frame
+
+Entrada principal:
+- Notebook: `experiments/positions/position_role_dataset.ipynb`
+- Utilidades: `experiments/positions/position_dataset.py`
+
+Salida del notebook (por ejecución):
+- `output/datasets/positions/<match_id>_<timestamp>/base_table.csv`
+- `output/datasets/positions/<match_id>_<timestamp>/samples_metadata_and_obj_features.csv`
+- `output/datasets/positions/<match_id>_<timestamp>/samples_teammates.npz`
+- `output/datasets/positions/<match_id>_<timestamp>/dataset_meta.json`
+
+Ejecución:
+```bash
+jupyter lab experiments/positions/position_role_dataset.ipynb
+```
+
 ### Detección con modelo fine-tuned de jugadores
 ```bash
 python scripts/detect_finetuned.py
@@ -305,6 +331,7 @@ paths:
   data:
     video_prueba_ajustado: "data/partidoPrueba/partido_ajustado.mp4"
     video_prueba: "data/partidoPrueba/partido.mp4"
+    video_test_1: "data/partidosPosiciones/test (1).mp4"
 
 detection:
   conf_threshold: 0.01

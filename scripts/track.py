@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -74,6 +75,35 @@ def build_output_video_path(config, video_path):
     return str(output_dir / output_name)
 
 
+def sanitize_video_stem(raw_stem):
+    """Sanitize video stem to align with experiments/positions naming convention."""
+    stem = str(raw_stem).strip()
+    if not stem:
+        return "video"
+    stem = re.sub(r"\s+", "_", stem)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem)
+    stem = re.sub(r"_+", "_", stem).strip("._-")
+    return stem or "video"
+
+
+def build_tracks_output_paths(config, video_path):
+    """
+    Build JSON output paths for tracking results:
+    - named path: required by experiments/positions notebook
+    - legacy path: backwards compatibility
+    """
+    tracks_dir = config.get_path(
+        "paths", "output", "tracks_json", create_if_missing=True
+    ) / "tracker"
+    tracks_dir.mkdir(parents=True, exist_ok=True)
+
+    video_stem = Path(video_path).stem
+    sanitized_stem = sanitize_video_stem(video_stem)
+    named_path = tracks_dir / f"{sanitized_stem}_tracks.json"
+    legacy_path = tracks_dir / "tracks.json"
+    return str(named_path), str(legacy_path)
+
+
 def save_result(tracks, output_path, logger):
     """Saves tracks in JSON format with error handling."""
     try:
@@ -106,7 +136,9 @@ if __name__ == "__main__":
         MODEL_PATH = str(config.get_path('paths', 'models', 'finetuned_player'))
         VIDEO_PATH, video_source = resolve_video_path(config, args.video_shortcut)
         OUTPUT = build_output_video_path(config, VIDEO_PATH)
-        OUTPUT_PATH = str(config.get_path('paths', 'output', 'tracks_json', create_if_missing=True) / "tracker" / "tracks.json")
+        OUTPUT_PATH_NAMED, OUTPUT_PATH_LEGACY = build_tracks_output_paths(
+            config, VIDEO_PATH
+        )
         
         # Configuration parameters
         CONF = config.get('detection', 'conf_threshold')
@@ -186,6 +218,8 @@ if __name__ == "__main__":
         logger.info(f"Model: {MODEL_PATH}")
         logger.info(f"Video: {VIDEO_PATH}")
         logger.info(f"Video source: {video_source}")
+        logger.info(f"Named tracks JSON output: {OUTPUT_PATH_NAMED}")
+        logger.info(f"Legacy tracks JSON output: {OUTPUT_PATH_LEGACY}")
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
         
@@ -217,7 +251,9 @@ if __name__ == "__main__":
         summary = evaluation["player"]["summary"]
         
         # Save tracks JSON
-        save_result(tracks, OUTPUT_PATH, logger)
+        save_result(tracks, OUTPUT_PATH_NAMED, logger)
+        if OUTPUT_PATH_LEGACY != OUTPUT_PATH_NAMED:
+            save_result(tracks, OUTPUT_PATH_LEGACY, logger)
         
         # Show summary
         logger.info("Evaluation summary:")

@@ -8,6 +8,9 @@ Notebooks de Jupyter para exploración, análisis y visualización interactiva d
 experiments/
 ├── detection/
 │   └── finetuning.ipynb              # Análisis del entrenamiento YOLO
+├── positions/
+│   ├── position_dataset.py            # Construcción de tablas/features para dataset de roles
+│   └── position_role_dataset.ipynb    # Pipeline guiado de etiquetado y exportación del dataset
 ├── reference_points/
 │   ├── classical_reference_points.py  # Utilidades para homografía clásica
 │   ├── pnlcalib_reference_points.py   # Wrapper para inferencia con PnLCalib
@@ -42,6 +45,50 @@ Puntos de análisis:
 - Distribución de confianzas de detección del balón.
 - Visualización frame a frame de los tracks generados.
 - Ajuste del parámetro `ball_min_conf` para el fallback.
+
+---
+
+## `positions/position_role_dataset.ipynb`
+
+**Objetivo:** Construir un dataset supervisado para clasificar el rol nominal de cada jugador (`POR`, `LI`, `DFC_IZQ`, `MC`, `DC`, etc.) usando tracks ya proyectados al campo.
+
+Pipeline que implementa:
+- Carga tracks desde `output/tracks_json/tracker/` y construye observaciones por frame (`x,y` normalizados, `x_m,y_m`, equipo, bbox, confianza).
+- Selecciona un frame inicial con suficientes jugadores visibles para etiquetar IDs.
+- Permite definir `ROLE_MAP` manual (`team_id -> player_id -> role_label`).
+- Propaga etiquetas al resto de frames por ID canónico.
+- Reorienta coordenadas por equipo para que el ataque del equipo objetivo apunte a `+x`.
+- Construye muestras con features del jugador objetivo + tensor de compañeros (con padding y máscara).
+- Exporta el dataset a `output/datasets/positions/<match_id>_<timestamp>/`.
+
+Salidas principales:
+- `base_table.csv`
+- `samples_metadata_and_obj_features.csv`
+- `samples_teammates.npz`
+- `dataset_meta.json`
+
+Requisitos:
+- Vídeos en `data/partidosPosiciones/`
+- `tracks.json` o `<video>_tracks.json` con `field_position_m` en tracks de `player/goalkeeper`
+
+---
+
+## `positions/position_dataset.py`
+
+**Objetivo:** Librería de utilidades reutilizable para el notebook de roles posicionales.
+
+Funciones clave:
+- `list_position_videos`: enumera vídeos en `data/partidosPosiciones/`.
+- `resolve_tracks_path_for_video`: busca `output/tracks_json/tracker/<video_sanitizado>_tracks.json` y cae a `tracks.json` legacy.
+- `build_observations_from_tracks`: convierte tracks a tabla tabular por jugador/frame.
+- `add_velocity_features`: añade `vx, vy` por jugador.
+- `choose_label_frame`: selecciona frame recomendado para etiquetado manual.
+- `render_frame_with_player_ids`: renderiza preview con `player_id:team_id`.
+- `validate_role_map` y `apply_role_map`: validación y aplicación del etiquetado manual.
+- `infer_attack_direction_by_team`: estima sentido de ataque por equipo.
+- `build_role_samples`: crea samples y tensores de compañeros + máscara para modelado.
+
+Labels permitidas (v1): `POR, LI, DFC_IZQ, DFC_DER, LD, MC, MI, MD, EI, ED, DC`.
 
 ---
 
