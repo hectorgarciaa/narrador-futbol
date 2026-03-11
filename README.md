@@ -350,8 +350,8 @@ tracking:
     referee: 3
   # Anti-ID-switch por movimiento anómalo (distancia por frame)
   motion_std_gate_enabled: true
-  motion_std_factor: 10.0
-  motion_std_min_samples: 8
+  motion_std_factor: 6.0
+  motion_std_min_samples: 5
   motion_std_floor: 0.5
 
 teams:
@@ -393,6 +393,11 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `motion_std_floor`
 - `referee_recovery_max_lost_frames`
 - `referee_recovery_max_distance`
+
+Si sigues viendo cambios de ID en clips largos, ajusta en este orden:
+1. Baja `motion_std_factor` (por ejemplo: `6 -> 5 -> 4`).
+2. Baja `reassign_min_distance` (píxeles) y `reassign_min_field_distance_m` (metros).
+3. Baja `motion_std_min_samples` para que el gate estadístico actúe antes.
 
 ---
 

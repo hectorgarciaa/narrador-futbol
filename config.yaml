@@ -92,13 +92,13 @@ tracking:
   unconfirmed_match_threshold: 0.8
   # Parámetros de reasignación y control de movimiento
   reassign_motion_factor: 1.0
-  reassign_min_distance: 25.0
+  reassign_min_distance: 15.0
   reassign_min_samples: 3
   # Gate estadístico anti-saltos de ID (distancia por frame)
   # límite = media_historica + motion_std_factor * desviacion_tipica
   motion_std_gate_enabled: true
-  motion_std_factor: 10.0
-  motion_std_min_samples: 8
+  motion_std_factor: 6.0
+  motion_std_min_samples: 5
   motion_std_floor: 0.5
   # Recuperación específica de árbitros
   referee_recovery_max_lost_frames: 3
@@ -119,7 +119,7 @@ tracking:
   field_position_device: null
   field_position_match_distance_gate_m: 8.0
   field_position_match_distance_weight: 0.25
-  reassign_min_field_distance_m: 4.0
+  reassign_min_field_distance_m: 2.0
   # Penalización de distancia cuando el equipo detectado difiere del track
   team_penalty: 1000
   # Frames consecutivos con equipo distinto para confirmar cambio real

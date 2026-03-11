@@ -123,6 +123,10 @@ Parámetros en `config.yaml`:
 - `motion_std_min_samples`
 - `motion_std_floor`
 
+Para reducir ID switches en clips largos, conviene combinar este gate con límites de reasignación más estrictos:
+- `reassign_min_distance` (imagen, píxeles)
+- `reassign_min_field_distance_m` (campo 2D, metros)
+
 Además, se implementa un mecanismo de **tolerancia a cambios temporales de equipo**:
 - Si el equipo asignado cambia en un frame, no se actualiza inmediatamente.
 - Se contabilizan los frames de discordancia en `team_switch_frames`.

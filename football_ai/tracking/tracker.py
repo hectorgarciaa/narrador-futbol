@@ -80,6 +80,12 @@ class Tracker:
         self.motion_std_floor = float(
             tracker_conf.get("motion_std_floor", 0.5)
         )
+        self.class_motion_stats = {
+            "player": {"count": 0, "mean": 0.0, "m2": 0.0},
+            "goalkeeper": {"count": 0, "mean": 0.0, "m2": 0.0},
+            "referee": {"count": 0, "mean": 0.0, "m2": 0.0},
+            "ball": {"count": 0, "mean": 0.0, "m2": 0.0},
+        }
         self.referee_recovery_max_lost_frames = int(
             tracker_conf.get("referee_recovery_max_lost_frames", 3)
         )
@@ -151,6 +157,15 @@ class Tracker:
         delta2 = float(value) - mean
         m2 = float(prev_m2) + (delta * delta2)
         return count, mean, m2
+
+    def _motion_limit_per_frame(self, stats_count, stats_mean, stats_m2):
+        """Compute per-frame motion cap from running mean/std stats."""
+        variance = float(stats_m2) / max(1, int(stats_count) - 1)
+        std_per_frame = max(
+            float(np.sqrt(max(variance, 0.0))),
+            self.motion_std_floor,
+        )
+        return float(stats_mean) + (self.motion_std_factor * std_per_frame)
 
     def _use_field_position_for_class(self, class_name, field_position=None):
         if not self.use_field_positions:
@@ -245,18 +260,42 @@ class Tracker:
         # Gate estadístico por velocidad (distancia por frame):
         # bloquea saltos extremos respecto al histórico del propio track.
         if self.motion_std_gate_enabled:
-            stats_count = int(previous_state.get("step_per_frame_count", 0))
-            if stats_count >= self.motion_std_min_samples:
-                stats_mean = float(previous_state.get("step_per_frame_mean", 0.0))
-                stats_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
-                variance = stats_m2 / max(1, stats_count - 1)
-                std_per_frame = max(
-                    float(np.sqrt(max(variance, 0.0))),
-                    self.motion_std_floor,
+            limits_per_frame = []
+
+            track_stats_count = int(previous_state.get("step_per_frame_count", 0))
+            if track_stats_count >= self.motion_std_min_samples:
+                track_stats_mean = float(
+                    previous_state.get("step_per_frame_mean", 0.0)
                 )
-                max_per_frame = stats_mean + (self.motion_std_factor * std_per_frame)
+                track_stats_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
+                limits_per_frame.append(
+                    self._motion_limit_per_frame(
+                        track_stats_count,
+                        track_stats_mean,
+                        track_stats_m2,
+                    )
+                )
+
+            class_stats = self.class_motion_stats.get(effective_class, {})
+            class_stats_count = int(class_stats.get("count", 0))
+            if class_stats_count >= self.motion_std_min_samples:
+                limits_per_frame.append(
+                    self._motion_limit_per_frame(
+                        class_stats_count,
+                        float(class_stats.get("mean", 0.0)),
+                        float(class_stats.get("m2", 0.0)),
+                    )
+                )
+
+            if limits_per_frame:
+                max_per_frame = min(limits_per_frame)
                 stats_jump_limit = max_per_frame * lost_frames
-                stats_jump_limit = max(stats_jump_limit, min_base_jump)
+                # Allow statistical gate to be stricter than base min jump.
+                # Keep only a small numerical floor to avoid over-constraining.
+                stats_jump_limit = max(
+                    stats_jump_limit,
+                    self.motion_std_floor * lost_frames,
+                )
                 max_allowed_jump = min(max_allowed_jump, stats_jump_limit)
 
         return step_distance <= max_allowed_jump
@@ -768,6 +807,20 @@ class Tracker:
                         prev_step_pf_count,
                         prev_step_pf_mean,
                         prev_step_pf_m2,
+                        step_per_frame,
+                    )
+                    class_stats = self.class_motion_stats.setdefault(
+                        output_class_name,
+                        {"count": 0, "mean": 0.0, "m2": 0.0},
+                    )
+                    (
+                        class_stats["count"],
+                        class_stats["mean"],
+                        class_stats["m2"],
+                    ) = self._update_running_stats(
+                        class_stats["count"],
+                        class_stats["mean"],
+                        class_stats["m2"],
                         step_per_frame,
                     )
                 else:

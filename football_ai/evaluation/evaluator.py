@@ -38,7 +38,9 @@ class Evaluator:
             if f != prev + 1:
                 gap_lengths.append(frame_gap)
 
-            bbox_current = id_bboxes[tid][n_frame]
+            # n_frame starts at 0 for the second observed frame, so we need +1
+            # to align with frames_seen_sorted[1:].
+            bbox_current = id_bboxes[tid][n_frame + 1]
             x1, y1, _, _ = bbox_current
             x1_prev, y1_prev, _, _ = bbox_prev
 
