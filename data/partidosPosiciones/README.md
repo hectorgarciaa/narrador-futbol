@@ -7,6 +7,7 @@ Clips de vídeo usados para el flujo experimental de dataset de roles posicional
 1. Genera tracks para cada clip con `scripts/track.py` (con `tracking.use_field_positions=true` en `config.yaml`), por ejemplo:
    - `python scripts/track.py video_test_1`
    - `python scripts/track.py video_test_29`
+   - o en lote: `python scripts/track_partidos_posiciones.py` (usa plan fijo de colores/equipos por `video_test_*`)
 2. Guarda el JSON de tracks por vídeo en:
    - `output/tracks_json/tracker/<video_sanitizado>_tracks.json`
 3. Ejecuta el notebook:

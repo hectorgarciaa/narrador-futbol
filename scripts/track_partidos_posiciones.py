@@ -11,6 +11,34 @@ if str(PROJECT_ROOT) not in sys.path:
 from football_ai.core import get_config
 
 
+DEFAULT_VIDEO_COLOR_PLAN = {
+    "video_test_1": ("rojo", "negro"),
+    "video_test_2": ("blanco", "amarillo"),
+    "video_test_11": ("gris", "negro"),
+    "video_test_12": ("rojo", "negro"),
+    "video_test_13": ("blanco", "azul"),
+    "video_test_14": ("blanco", "amarillo"),
+    "video_test_15": ("blanco", "rojo"),
+    "video_test_16": ("blanco", "negro"),
+    "video_test_18": ("amarillo", "gris"),
+    "video_test_20": ("amarillo", "gris"),
+    "video_test_22": ("rojo", "negro"),
+    "video_test_26": ("blanco", "negro"),
+    "video_test_27": ("amarillo", "gris"),
+    # Corregido desde "ojo y negro" (typo) a "rojo y negro".
+    "video_test_29": ("rojo", "negro"),
+}
+
+DEFAULT_TEAM_NAME_BY_COLOR = {
+    "blanco": "Real Madrid",
+    "negro": "Equipo Negro",
+    "rojo": "Equipo Rojo",
+    "amarillo": "Equipo Amarillo",
+    "gris": "Equipo Gris",
+    "azul": "Equipo Azul",
+}
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
@@ -42,7 +70,7 @@ def parse_args():
         action="store_true",
         help=(
             "Pide por terminal colores de equipo para cada vídeo. "
-            "Activado por defecto."
+            "Desactivado por defecto."
         ),
     )
     parser.add_argument(
@@ -51,7 +79,15 @@ def parse_args():
         action="store_false",
         help="Desactiva la petición interactiva de colores por vídeo.",
     )
-    parser.set_defaults(prompt_team_colors=True)
+    parser.add_argument(
+        "--no-default-color-plan",
+        action="store_true",
+        help=(
+            "Desactiva el plan fijo de colores por vídeo para data/partidosPosiciones. "
+            "Si lo usas, debes pasar --team-colors o activar --prompt-team-colors."
+        ),
+    )
+    parser.set_defaults(prompt_team_colors=False)
     return parser.parse_args()
 
 
@@ -73,6 +109,34 @@ def collect_partidos_posiciones_shortcuts(config):
         if partidos_dir == candidate.parent or partidos_dir in candidate.parents:
             selected.append(key)
     return sorted(selected, key=natural_video_key_sort)
+
+
+def normalize_color_name(color_name):
+    normalized = str(color_name).strip().lower()
+    normalized = normalized.replace("_", "-").replace(" ", "-")
+    while "--" in normalized:
+        normalized = normalized.replace("--", "-")
+    return normalized
+
+
+def build_team_colors_override(shortcut):
+    colors = DEFAULT_VIDEO_COLOR_PLAN.get(shortcut)
+    if not colors:
+        return None
+
+    entries = []
+    used_team_names = set()
+    for idx, color in enumerate(colors, start=1):
+        normalized_color = normalize_color_name(color)
+        team_name = DEFAULT_TEAM_NAME_BY_COLOR.get(
+            normalized_color,
+            f"Equipo {normalized_color.replace('-', ' ').title()}",
+        )
+        if team_name in used_team_names:
+            team_name = f"{team_name} {idx}"
+        used_team_names.add(team_name)
+        entries.append(f"{team_name}:{color}")
+    return "{" + ", ".join(entries) + "}"
 
 
 def ask_team_colors_for_video(shortcut, previous_value):
@@ -115,10 +179,28 @@ def main():
     skipped = []
     last_team_colors = args.team_colors
 
+    if not args.team_colors and not args.no_default_color_plan:
+        missing_shortcuts = [
+            shortcut for shortcut in shortcuts if shortcut not in DEFAULT_VIDEO_COLOR_PLAN
+        ]
+        if missing_shortcuts:
+            print(
+                "Falta plan de colores para: "
+                + ", ".join(missing_shortcuts)
+                + ". Añádelos a DEFAULT_VIDEO_COLOR_PLAN o ejecuta con "
+                "--team-colors / --prompt-team-colors.",
+                file=sys.stderr,
+            )
+            return 1
+
     for idx, shortcut in enumerate(shortcuts, start=1):
         current_team_colors = args.team_colors
+        if not current_team_colors and not args.no_default_color_plan:
+            current_team_colors = build_team_colors_override(shortcut)
+
         if args.prompt_team_colors and not args.dry_run:
-            selected_colors = ask_team_colors_for_video(shortcut, last_team_colors)
+            default_prompt_colors = current_team_colors or last_team_colors
+            selected_colors = ask_team_colors_for_video(shortcut, default_prompt_colors)
             if selected_colors == "quit":
                 print("Lote finalizado por usuario.")
                 break
@@ -135,6 +217,8 @@ def main():
 
         cmd_text = " ".join(f'"{token}"' if " " in token else token for token in command)
         print(f"[{idx}/{len(shortcuts)}] {shortcut}")
+        if current_team_colors:
+            print(f"  team-colors: {current_team_colors}")
         print(f"  -> {cmd_text}")
 
         if args.dry_run:

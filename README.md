@@ -235,7 +235,19 @@ Si quieres lanzar tracking para **todos** los vídeos de `data/partidosPosicione
 ```bash
 python scripts/track_partidos_posiciones.py
 ```
-Por defecto este script es interactivo: al terminar cada vídeo, espera a que introduzcas los colores del siguiente partido.
+Por defecto este script usa un plan fijo de colores por vídeo (`video_test_*`) y nombres de equipo consistentes por color.
+Ejemplo de convención:
+- `blanco` -> `Real Madrid`
+- `negro` -> `Equipo Negro`
+- `rojo` -> `Equipo Rojo`
+- `amarillo` -> `Equipo Amarillo`
+- `gris` -> `Equipo Gris`
+- `azul` -> `Equipo Azul`
+
+Si quieres introducir colores manualmente en cada vídeo:
+```bash
+python scripts/track_partidos_posiciones.py --prompt-team-colors
+```
 Modo prueba (sin ejecutar):
 ```bash
 python scripts/track_partidos_posiciones.py --dry-run
@@ -244,9 +256,9 @@ También puedes pasar colores de equipo para todo el lote:
 ```bash
 python scripts/track_partidos_posiciones.py --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
 ```
-Si quieres automatizar sin preguntas interactivas:
+Si quieres desactivar el plan fijo por vídeo:
 ```bash
-python scripts/track_partidos_posiciones.py --no-prompt-team-colors --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
+python scripts/track_partidos_posiciones.py --no-default-color-plan --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
 ```
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Por defecto usa `paths.data.video_prueba_corto` (si existe) y, en caso contrario, `paths.data.video_prueba`.
