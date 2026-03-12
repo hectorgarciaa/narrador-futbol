@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
@@ -20,6 +21,7 @@ from experiments.reference_points.pnlcalib_reference_points import (
 
 
 FIELD_POSITION_CLASSES = frozenset({"player", "goalkeeper"})
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -142,7 +144,6 @@ class PnLCalibFieldProjector:
     ) -> FieldProjectionResult:
         original_frame = np.asarray(frame_bgr)
         projected_frame = resize_frame(original_frame, max_width=self.max_width)
-        estimate = self.estimator.estimate(projected_frame)
 
         original_shape_hw = original_frame.shape[:2]
         projected_shape_hw = projected_frame.shape[:2]
@@ -153,11 +154,30 @@ class PnLCalibFieldProjector:
             target_shape_hw=projected_shape_hw,
         )
 
+        homography_image_to_field: Optional[np.ndarray] = None
+        estimation_mode = "error"
+        reprojection_error: Optional[float] = None
+        try:
+            estimate = self.estimator.estimate(projected_frame)
+            homography_image_to_field = estimate.homography_image_to_field
+            estimation_mode = str(getattr(estimate, "estimation_mode", "ok"))
+            reprojection_error = getattr(estimate, "reprojection_error", None)
+        except np.linalg.LinAlgError as exc:
+            logger.warning(
+                "PnLCalib devolvió homografía singular; se omite field_position_m en este frame. Error: %s",
+                exc,
+            )
+        except Exception as exc:  # pragma: no cover - fallback defensivo
+            logger.warning(
+                "PnLCalib falló en este frame; se omite field_position_m. Error: %s",
+                exc,
+            )
+
         field_positions_m = np.full((len(ground_points_projected), 2), np.nan, dtype=np.float32)
-        if estimate.homography_image_to_field is not None and len(ground_points_projected) > 0:
+        if homography_image_to_field is not None and len(ground_points_projected) > 0:
             field_positions_m = project_image_points(
                 ground_points_projected,
-                estimate.homography_image_to_field,
+                homography_image_to_field,
             ).astype(np.float32)
 
         if class_names is not None:
@@ -169,10 +189,10 @@ class PnLCalibFieldProjector:
         return FieldProjectionResult(
             frame_shape_original=original_shape_hw,
             frame_shape_projected=projected_shape_hw,
-            homography_image_to_field=estimate.homography_image_to_field,
+            homography_image_to_field=homography_image_to_field,
             field_positions_m=field_positions_m,
             ground_points_image_original=ground_points_original,
             ground_points_image_projected=ground_points_projected,
-            estimation_mode=estimate.estimation_mode,
-            reprojection_error=estimate.reprojection_error,
+            estimation_mode=estimation_mode,
+            reprojection_error=reprojection_error,
         )
