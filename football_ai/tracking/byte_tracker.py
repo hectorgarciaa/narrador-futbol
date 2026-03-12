@@ -59,6 +59,8 @@ class ByteTrack:
         field_distance_growth_mode: str = "power",
         field_distance_lost_exponent: float = 1.0,
         field_distance_decay_per_frame: float = 0.0,
+        lost_time_penalty_weight: float = 0.0,
+        lost_time_penalty_max_frames: int = 10,
         use_field_position_as_primary_cost: bool = False,
         use_bbox_center_for_matching: bool = True,
         bbox_center_distance_weight: float = 0.5,
@@ -99,6 +101,8 @@ class ByteTrack:
             or self.field_distance_decay_per_frame < 0.0
         ):
             self.field_distance_decay_per_frame = 0.0
+        self.lost_time_penalty_weight = float(max(0.0, lost_time_penalty_weight))
+        self.lost_time_penalty_max_frames = max(1, int(lost_time_penalty_max_frames))
         self.use_field_position_as_primary_cost = bool(
             use_field_position_as_primary_cost
         )
@@ -180,6 +184,33 @@ class ByteTrack:
     def _track_image_distance_gate(self, track: STrack) -> float:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
         return self.bbox_center_distance_gate_px * lost_frames
+
+    def _track_missed_frames(self, track: STrack) -> int:
+        # tracked in previous frame => 0 missed frames penalty
+        return max(0, self.frame_id - int(getattr(track, "frame_id", self.frame_id)) - 1)
+
+    def _apply_lost_time_penalty(
+        self,
+        dists: np.ndarray,
+        tracks: list[STrack],
+    ) -> np.ndarray:
+        if (
+            self.lost_time_penalty_weight <= 0.0
+            or dists.size == 0
+            or len(tracks) == 0
+        ):
+            return dists
+
+        for i, track in enumerate(tracks):
+            missed_frames = self._track_missed_frames(track)
+            if missed_frames <= 0:
+                continue
+            penalty_factor = min(
+                float(missed_frames) / float(self.lost_time_penalty_max_frames),
+                1.0,
+            )
+            dists[i, :] += self.lost_time_penalty_weight * penalty_factor
+        return dists
 
     @staticmethod
     def _bbox_center_from_tlbr(tlbr: np.ndarray) -> np.ndarray:
@@ -529,6 +560,7 @@ class ByteTrack:
 
         dists = self._apply_field_position_costs(dists, strack_pool, detections)
         dists = matching.fuse_score(dists, detections)
+        dists = self._apply_lost_time_penalty(dists, strack_pool)
         matches, u_track, u_detection = matching.linear_assignment(
             dists, thresh=self.minimum_matching_threshold
         )
@@ -626,6 +658,7 @@ class ByteTrack:
             r_tracked_stracks,
             detections_second,
         )
+        dists = self._apply_lost_time_penalty(dists, r_tracked_stracks)
         matches, u_track, u_detection_second = matching.linear_assignment(
             dists, thresh=self.second_match_threshold
         )
@@ -659,6 +692,7 @@ class ByteTrack:
 
         dists = self._apply_field_position_costs(dists, unconfirmed, detections)
         dists = matching.fuse_score(dists, detections)
+        dists = self._apply_lost_time_penalty(dists, unconfirmed)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(
             dists, thresh=self.unconfirmed_match_threshold
         )

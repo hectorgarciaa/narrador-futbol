@@ -81,6 +81,12 @@ class Tracker:
             field_distance_decay_per_frame=field_tracking_conf.get(
                 "match_distance_decay_per_frame", 0.0
             ),
+            lost_time_penalty_weight=tracker_conf.get(
+                "lost_time_penalty_weight", 0.0
+            ),
+            lost_time_penalty_max_frames=tracker_conf.get(
+                "lost_time_penalty_max_frames", 10
+            ),
             use_field_position_as_primary_cost=tracker_conf.get(
                 "use_field_position_as_primary_cost", False
             ),

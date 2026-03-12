@@ -19,7 +19,7 @@ tracker = Tracker(
     model_path="models/finetuning/yolov11m.pt",
     conf=0.1,
     tracker_conf={
-        "track_thresh": 0.3,
+        "track_thresh": 0.15,
         "track_buffer": 90,
         "match_thresh": 0.945,
         "frame_rate": 25,
@@ -122,6 +122,8 @@ Parámetros en `config.yaml`:
 - `use_bbox_center_for_matching` (mezcla distancia entre centros de bbox en el coste de matching)
 - `bbox_center_distance_weight` (0..1, cuánto pesa bbox frente a IoU)
 - `bbox_center_distance_gate_px` (normalización en píxeles; escala con frames perdidos)
+- `lost_time_penalty_weight` (penaliza candidatos con más frames perdidos)
+- `lost_time_penalty_max_frames` (normalización del penalizador temporal)
 - `field_position_match_distance_gate_m` (base del gate espacial en metros)
 - `field_position_match_distance_max_lost_frames` (tope de crecimiento temporal del gate)
 - `field_position_match_distance_growth_mode` (`power` o `linear_decay`)

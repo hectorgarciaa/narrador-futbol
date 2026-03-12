@@ -66,7 +66,7 @@ detection:
 # Configuración de tracking (ByteTrack)
 tracking:
   # Umbral de activación de tracks (mayor = más estricto, menos falsos positivos)
-  track_thresh: 0.3
+  track_thresh: 0.15
   # Frames que se mantiene un track perdido antes de eliminarlo
   track_buffer: 90
   # Umbral de matching IoU (mayor = requiere más solapamiento para matching)
@@ -103,6 +103,9 @@ tracking:
   use_bbox_center_for_matching: false
   bbox_center_distance_weight: 0.7
   bbox_center_distance_gate_px: 120.0
+  # Prioriza tracks más recientes en matching (penaliza IDs más tiempo perdidos)
+  lost_time_penalty_weight: 0.12
+  lost_time_penalty_max_frames: 10
   # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
   strict_person_class_separation: true
   # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
@@ -135,7 +138,7 @@ tracking:
   field_position_temporal_blend: 0.20
   field_position_pixels_per_meter: 8
   field_position_device: null
-  field_position_match_distance_gate_m: 2.0
+  field_position_match_distance_gate_m: 1.5
   # Gate espacial en campo para matching:
   # Modo linear_decay:
   #   distancia_max = sum_{k=0..lost-1} max(gate_m - k*decay_per_frame, 0)

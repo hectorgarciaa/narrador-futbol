@@ -182,6 +182,12 @@ if __name__ == "__main__":
             "bbox_center_distance_gate_px": tracking_cfg.get(
                 "bbox_center_distance_gate_px", 120.0
             ),
+            "lost_time_penalty_weight": tracking_cfg.get(
+                "lost_time_penalty_weight", 0.0
+            ),
+            "lost_time_penalty_max_frames": tracking_cfg.get(
+                "lost_time_penalty_max_frames", 10
+            ),
             "strict_person_class_separation": tracking_cfg.get(
                 "strict_person_class_separation", True
             ),

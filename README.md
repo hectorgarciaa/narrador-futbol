@@ -338,7 +338,7 @@ detection:
   ball_min_conf: 0.01
 
 tracking:
-  track_thresh: 0.3           # Confianza mínima para activar un track
+  track_thresh: 0.15          # Confianza mínima para activar un track
   track_buffer: 90            # Frames que sobrevive un track sin ser visto
   match_thresh: 0.945         # IoU mínimo para asociar detección a track
   frame_rate: 25
@@ -353,7 +353,9 @@ tracking:
   use_bbox_center_for_matching: false
   bbox_center_distance_weight: 0.7
   bbox_center_distance_gate_px: 120.0
-  field_position_match_distance_gate_m: 2.0
+  lost_time_penalty_weight: 0.12
+  lost_time_penalty_max_frames: 10
+  field_position_match_distance_gate_m: 1.5
   field_position_match_distance_max_lost_frames: 10
   field_position_match_distance_growth_mode: linear_decay
   field_position_match_distance_lost_exponent: 0.5
@@ -403,6 +405,8 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `use_bbox_center_for_matching`
 - `bbox_center_distance_weight`
 - `bbox_center_distance_gate_px`
+- `lost_time_penalty_weight`
+- `lost_time_penalty_max_frames`
 - `field_position_match_distance_gate_m`
 - `field_position_match_distance_max_lost_frames`
 - `field_position_match_distance_growth_mode`
