@@ -306,7 +306,7 @@ Importante: `PnLCalib` está publicado con licencia `GPL-2.0`, así que si este 
 El repositorio incluye un flujo experimental para crear un dataset supervisado de rol nominal de jugador (por ejemplo, `POR`, `DFC_IZQ`, `MC`, `DC`) a partir de:
 - clips en `data/partidosPosiciones/`
 - tracking con homografía (`field_position_m`) en `output/tracks_json/tracker/`
-- etiquetado manual puntual por `team_id + player_id` en un frame
+- etiquetado manual periódico por JSON cada 6 segundos (`frame_id + team_id + player_id`)
 
 Entrada principal:
 - Notebook: `experiments/positions/position_role_dataset.ipynb`
@@ -317,6 +317,13 @@ Salida del notebook (por ejecución):
 - `output/datasets/positions/<match_id>_<timestamp>/samples_metadata_and_obj_features.csv`
 - `output/datasets/positions/<match_id>_<timestamp>/samples_teammates.npz`
 - `output/datasets/positions/<match_id>_<timestamp>/dataset_meta.json`
+
+Salida adicional acumulada (dataset común):
+- `output/datasets/positions/common/base_table.csv`
+- `output/datasets/positions/common/samples_metadata_and_obj_features.csv`
+- `output/datasets/positions/common/samples_teammates.npz`
+- `output/datasets/positions/common/dataset_meta.json`
+- `output/datasets/positions/common/sources.jsonl`
 
 Ejecución:
 ```bash
@@ -375,7 +382,7 @@ tracking:
     ball: 1
     referee: 3
   # Anti-ID-switch por clase y movimiento
-  use_field_position_as_primary_cost: true
+  use_field_position_as_primary_cost: false
   use_bbox_center_for_matching: false
   bbox_center_distance_weight: 0.7
   bbox_center_distance_gate_px: 120.0

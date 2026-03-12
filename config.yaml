@@ -94,12 +94,11 @@ tracking:
   reassign_motion_factor: 0.75
   reassign_min_distance: 10.0
   reassign_min_samples: 3
-  # Matching principal de ByteTrack.
-  # Si use_field_position_as_primary_cost=true (recomendado), player/goalkeeper
-  # se asocian por distancia en campo (metros). La mezcla IoU+bbox queda opcional.
-  # Si true, para player/goalkeeper el coste principal de matching pasa a ser
-  # la distancia en campo (metros), y no IoU.
-  use_field_position_as_primary_cost: true
+  # Matching de ByteTrack para player/goalkeeper:
+  # - false: combina IoU + penalización por distancia en campo (recomendado si
+  #   quieres usar señal visual y geométrica a la vez).
+  # - true: usa como coste principal la distancia en campo.
+  use_field_position_as_primary_cost: false
   use_bbox_center_for_matching: false
   bbox_center_distance_weight: 0.7
   bbox_center_distance_gate_px: 120.0
