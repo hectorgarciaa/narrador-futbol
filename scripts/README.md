@@ -56,6 +56,7 @@ python scripts/<nombre>.py
 python scripts/track.py video_prueba_ajustado
 ```
 El valor puede ser una clave de `paths.data` en `config.yaml` o una ruta de vídeo directa.
+También admite `--team-colors "{Equipo:color, Otro:color}"`, con colores en lenguaje natural (ej. `rojo`, `verde clarito`, `azul marino`) o en HEX/RGB. Si incluyes equipos no definidos en `config.yaml`, se aceptan y se usan para esa ejecución.
 
 **Flujo:**
 1. Carga toda la configuración de `config.yaml` (modelo, video, output, confianza, tracker, equipos).

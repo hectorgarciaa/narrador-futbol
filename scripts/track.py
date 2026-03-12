@@ -1,4 +1,5 @@
 import argparse
+import colorsys
 import difflib
 import json
 import re
@@ -50,6 +51,63 @@ COLOR_NAME_TO_RGB = {
     "gris": (128, 128, 128),
 }
 
+NATURAL_COMPOUND_COLOR_TO_RGB = {
+    "azul-marino": (18, 42, 84),
+    "azul-celeste": (135, 206, 235),
+    "verde-oliva": (107, 142, 35),
+    "verde-limon": (50, 205, 50),
+    "rojo-granate": (128, 0, 32),
+    "gris-oscuro": (64, 64, 64),
+    "gris-claro": (192, 192, 192),
+}
+
+BASE_COLOR_TOKEN_TO_RGB = {
+    "blanco": (255, 255, 255),
+    "white": (255, 255, 255),
+    "negro": (0, 0, 0),
+    "black": (0, 0, 0),
+    "rojo": (220, 20, 60),
+    "red": (220, 20, 60),
+    "verde": (0, 170, 0),
+    "green": (0, 170, 0),
+    "azul": (0, 102, 255),
+    "blue": (0, 102, 255),
+    "amarillo": (255, 221, 0),
+    "yellow": (255, 221, 0),
+    "naranja": (255, 140, 0),
+    "orange": (255, 140, 0),
+    "rosa": (255, 105, 180),
+    "pink": (255, 105, 180),
+    "morado": (128, 0, 128),
+    "violeta": (128, 0, 128),
+    "purpura": (128, 0, 128),
+    "purple": (128, 0, 128),
+    "cian": (0, 180, 200),
+    "cyan": (0, 180, 200),
+    "turquesa": (64, 224, 208),
+    "celeste": (135, 206, 235),
+    "marron": (139, 69, 19),
+    "brown": (139, 69, 19),
+    "beige": (245, 245, 220),
+    "gris": (128, 128, 128),
+    "gray": (128, 128, 128),
+    "grey": (128, 128, 128),
+}
+
+LIGHT_TOKENS = {
+    "claro",
+    "clara",
+    "clarito",
+    "clarita",
+    "pastel",
+    "suave",
+    "light",
+}
+DARK_TOKENS = {"oscuro", "oscura", "oscurito", "oscurita", "dark"}
+SAT_UP_TOKENS = {"vivo", "viva", "vibrante", "intenso", "intensa", "neon", "fluor"}
+SAT_DOWN_TOKENS = {"apagado", "apagada", "grisaceo", "grisacea", "mate"}
+INTENSIFIER_TOKENS = {"muy", "super", "re", "bien", "bastante"}
+
 
 def parse_args():
     """Parse CLI arguments for the tracking script."""
@@ -74,8 +132,9 @@ def parse_args():
         help=(
             "Override de colores por terminal en formato "
             "'{Equipo:color, Otro:color}'. "
-            "Acepta nombre de color (ej. blanco, verde-claro), HEX (#RRGGBB) "
-            "o RGB (255,255,255)."
+            "Acepta lenguaje natural (ej. rojo, verde clarito, azul marino), "
+            "HEX (#RRGGBB) o RGB (255,255,255). Si usas nombres de equipo que "
+            "no existan en config.yaml, se usarán esos equipos nuevos para este run."
         ),
     )
     return parser.parse_args()
@@ -100,6 +159,80 @@ def parse_rgb_triplet(raw_value):
     return values
 
 
+def _clip01(value):
+    return min(1.0, max(0.0, float(value)))
+
+
+def _apply_natural_modifiers(rgb_color, normalized_tokens):
+    rgb_01 = tuple(channel / 255.0 for channel in rgb_color)
+    h, l, s = colorsys.rgb_to_hls(*rgb_01)
+
+    light_count = sum(token in LIGHT_TOKENS for token in normalized_tokens)
+    dark_count = sum(token in DARK_TOKENS for token in normalized_tokens)
+    sat_up_count = sum(token in SAT_UP_TOKENS for token in normalized_tokens)
+    sat_down_count = sum(token in SAT_DOWN_TOKENS for token in normalized_tokens)
+    intensifier_count = sum(token in INTENSIFIER_TOKENS for token in normalized_tokens)
+
+    intensity_factor = 1.0 + (0.5 * intensifier_count)
+    light_delta = (0.18 * light_count - 0.18 * dark_count) * intensity_factor
+    sat_delta = (0.14 * sat_up_count - 0.14 * sat_down_count) * intensity_factor
+
+    if any(token in {"neon", "fluor"} for token in normalized_tokens):
+        l = max(l, 0.58)
+        sat_delta += 0.10
+
+    l = _clip01(l + light_delta)
+    s = _clip01(s + sat_delta)
+
+    r_out, g_out, b_out = colorsys.hls_to_rgb(h, l, s)
+    return (
+        int(round(r_out * 255.0)),
+        int(round(g_out * 255.0)),
+        int(round(b_out * 255.0)),
+    )
+
+
+def parse_natural_color_to_rgb(raw_color):
+    normalized_text = normalize_token(raw_color)
+    if not normalized_text:
+        return None
+
+    if normalized_text in COLOR_NAME_TO_RGB:
+        return COLOR_NAME_TO_RGB[normalized_text]
+    if normalized_text in NATURAL_COMPOUND_COLOR_TO_RGB:
+        return NATURAL_COMPOUND_COLOR_TO_RGB[normalized_text]
+
+    tokens = [token for token in normalized_text.split("-") if token]
+    if not tokens:
+        return None
+
+    base_colors = []
+    for token in tokens:
+        if token in BASE_COLOR_TOKEN_TO_RGB:
+            base_colors.append(BASE_COLOR_TOKEN_TO_RGB[token])
+            continue
+        close = difflib.get_close_matches(
+            token,
+            list(BASE_COLOR_TOKEN_TO_RGB.keys()),
+            n=1,
+            cutoff=0.8,
+        )
+        if close:
+            base_colors.append(BASE_COLOR_TOKEN_TO_RGB[close[0]])
+
+    if not base_colors:
+        return None
+
+    if len(base_colors) == 1:
+        base_rgb = base_colors[0]
+    else:
+        base_rgb = tuple(
+            int(round(sum(component[idx] for component in base_colors) / len(base_colors)))
+            for idx in range(3)
+        )
+    return _apply_natural_modifiers(base_rgb, tokens)
+
+
 def parse_color_to_rgb(raw_color):
     color_text = str(raw_color).strip().strip('"').strip("'")
     normalized_color = normalize_token(color_text)
@@ -116,11 +249,16 @@ def parse_color_to_rgb(raw_color):
     if rgb_triplet is not None:
         return rgb_triplet
 
+    natural_rgb = parse_natural_color_to_rgb(color_text)
+    if natural_rgb is not None:
+        return natural_rgb
+
     available_colors = ", ".join(sorted(COLOR_NAME_TO_RGB.keys()))
     raise ValueError(
         f"Color no soportado '{raw_color}'. "
-        f"Usa un nombre conocido, HEX (#RRGGBB) o RGB. "
-        f"Colores conocidos: {available_colors}."
+        "Usa lenguaje natural (ej. 'verde clarito', 'azul marino', "
+        "'rojo oscuro'), HEX (#RRGGBB) o RGB. "
+        f"Colores base conocidos: {available_colors}."
     )
 
 
@@ -164,7 +302,7 @@ def parse_team_color_overrides(raw_text):
     return pairs
 
 
-def resolve_team_name(team_alias, available_team_names):
+def try_resolve_team_name(team_alias, available_team_names):
     normalized_alias = normalize_token(team_alias)
     normalized_team_map = {
         normalize_token(team_name): team_name for team_name in available_team_names
@@ -190,10 +328,7 @@ def resolve_team_name(team_alias, available_team_names):
     if close_matches:
         return normalized_team_map[close_matches[0]]
 
-    available = ", ".join(available_team_names)
-    raise ValueError(
-        f"No se pudo mapear el equipo '{team_alias}'. Equipos disponibles: {available}"
-    )
+    return None
 
 
 def apply_team_color_overrides(base_team_colors, raw_overrides, logger):
@@ -201,10 +336,28 @@ def apply_team_color_overrides(base_team_colors, raw_overrides, logger):
     if not overrides:
         return base_team_colors
 
-    updated_team_colors = dict(base_team_colors)
-    applied = {}
+    base_team_names = list(base_team_colors.keys())
+    resolved_overrides = []
+    has_unmatched_team_name = False
+
     for team_alias, color_value in overrides:
-        resolved_team_name = resolve_team_name(team_alias, list(updated_team_colors.keys()))
+        resolved_team_name = try_resolve_team_name(team_alias, base_team_names)
+        if resolved_team_name is None:
+            has_unmatched_team_name = True
+            resolved_team_name = str(team_alias).strip()
+        resolved_overrides.append((team_alias, resolved_team_name, color_value))
+
+    # Si aparece al menos un nombre no reconocido, asumimos que el usuario
+    # quiere definir explícitamente los equipos del partido para este run.
+    if has_unmatched_team_name:
+        updated_team_colors = {}
+        override_mode = "explicit_teams"
+    else:
+        updated_team_colors = dict(base_team_colors)
+        override_mode = "partial_update"
+
+    applied = {}
+    for team_alias, resolved_team_name, color_value in resolved_overrides:
         rgb_color = parse_color_to_rgb(color_value)
         lab_color = rgb_to_lab_opencv(rgb_color)
         updated_team_colors[resolved_team_name] = lab_color
@@ -216,8 +369,9 @@ def apply_team_color_overrides(base_team_colors, raw_overrides, logger):
         }
 
     logger.info(
-        "Team colors override applied (LAB OpenCV): "
-        f"{json.dumps(applied, ensure_ascii=False)}"
+        f"Team colors override applied mode={override_mode} "
+        f"active_teams={sorted(updated_team_colors.keys())} "
+        f"(LAB OpenCV): {json.dumps(applied, ensure_ascii=False)}"
     )
     return updated_team_colors
 

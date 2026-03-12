@@ -224,10 +224,12 @@ También puedes sobreescribir por terminal los colores de equipo y convertirlos 
 python scripts/track.py video_prueba_ajustado --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
 ```
 `--team-colors` acepta:
-- nombres de color (ej. `blanco`, `verde-claro`, `azul-claro`)
+- lenguaje natural de color (ej. `rojo`, `verde clarito`, `azul marino`, `rojo oscuro`)
 - HEX (ej. `#90EE90`)
 - RGB (ej. `255,255,255`)
 Los nombres de equipo se mapean de forma flexible contra los equipos de `config.yaml` (mayúsculas/minúsculas, acentos y pequeñas erratas).
+Si pasas un nombre que no exista en `config.yaml` (ej. `Stutgart`), no falla: ese nombre se usa como equipo nuevo para esa ejecución.
+Si en `--team-colors` hay al menos un equipo nuevo, se usan exactamente los equipos indicados ahí para ese run.
 Para los clips de `data/partidosPosiciones/` hay shortcuts `video_test_*` (ejemplo: `video_test_1`, `video_test_29`).
 Si quieres lanzar tracking para **todos** los vídeos de `data/partidosPosiciones` en lote:
 ```bash
