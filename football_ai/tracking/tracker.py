@@ -69,6 +69,18 @@ class Tracker:
             field_distance_weight=field_tracking_conf.get(
                 "match_distance_weight", 0.25
             ),
+            field_distance_gate_max_lost_frames=field_tracking_conf.get(
+                "match_distance_max_lost_frames"
+            ),
+            field_distance_growth_mode=field_tracking_conf.get(
+                "match_distance_growth_mode", "power"
+            ),
+            field_distance_lost_exponent=field_tracking_conf.get(
+                "match_distance_lost_exponent", 1.0
+            ),
+            field_distance_decay_per_frame=field_tracking_conf.get(
+                "match_distance_decay_per_frame", 0.0
+            ),
             use_field_position_as_primary_cost=tracker_conf.get(
                 "use_field_position_as_primary_cost", False
             ),

@@ -66,7 +66,7 @@ detection:
 # Configuración de tracking (ByteTrack)
 tracking:
   # Umbral de activación de tracks (mayor = más estricto, menos falsos positivos)
-  track_thresh: 0.5
+  track_thresh: 0.3
   # Frames que se mantiene un track perdido antes de eliminarlo
   track_buffer: 90
   # Umbral de matching IoU (mayor = requiere más solapamiento para matching)
@@ -74,7 +74,7 @@ tracking:
   # Frame rate del video
   frame_rate: 25
   # Frames consecutivos mínimos para confirmar un track
-  minimum_consecutive_frames: 5
+  minimum_consecutive_frames: 4
   # Límite global de IDs canónicos visibles
   max_total_tracks: 25
   # Si es false, el límite por clase se aplica en reasignación final, no dentro de ByteTrack
@@ -136,6 +136,14 @@ tracking:
   field_position_pixels_per_meter: 8
   field_position_device: null
   field_position_match_distance_gate_m: 2.0
+  # Gate espacial en campo para matching:
+  # Modo linear_decay:
+  #   distancia_max = sum_{k=0..lost-1} max(gate_m - k*decay_per_frame, 0)
+  # y se satura con max_lost_frames. Ejemplo: 2.0, 1.9, 1.8, ...
+  field_position_match_distance_max_lost_frames: 10
+  field_position_match_distance_growth_mode: linear_decay
+  field_position_match_distance_lost_exponent: 0.5
+  field_position_match_distance_decay_per_frame: 0.1
   field_position_match_distance_weight: 0.25
   reassign_min_field_distance_m: 1.2
   # Penalización de distancia cuando el equipo detectado difiere del track

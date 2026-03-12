@@ -55,6 +55,10 @@ class ByteTrack:
         field_position_classes: Optional[list[str]] = None,
         field_distance_gate_m: float = 8.0,
         field_distance_weight: float = 0.25,
+        field_distance_gate_max_lost_frames: Optional[int] = None,
+        field_distance_growth_mode: str = "power",
+        field_distance_lost_exponent: float = 1.0,
+        field_distance_decay_per_frame: float = 0.0,
         use_field_position_as_primary_cost: bool = False,
         use_bbox_center_for_matching: bool = True,
         bbox_center_distance_weight: float = 0.5,
@@ -72,6 +76,29 @@ class ByteTrack:
         )
         self.field_distance_gate_m = float(field_distance_gate_m)
         self.field_distance_weight = float(field_distance_weight)
+        if field_distance_gate_max_lost_frames is None:
+            self.field_distance_gate_max_lost_frames = None
+        else:
+            self.field_distance_gate_max_lost_frames = max(
+                1, int(field_distance_gate_max_lost_frames)
+            )
+        self.field_distance_growth_mode = str(
+            field_distance_growth_mode or "power"
+        ).strip().lower()
+        if self.field_distance_growth_mode not in {"power", "linear_decay"}:
+            self.field_distance_growth_mode = "power"
+        self.field_distance_lost_exponent = float(field_distance_lost_exponent)
+        if (
+            not np.isfinite(self.field_distance_lost_exponent)
+            or self.field_distance_lost_exponent <= 0.0
+        ):
+            self.field_distance_lost_exponent = 1.0
+        self.field_distance_decay_per_frame = float(field_distance_decay_per_frame)
+        if (
+            not np.isfinite(self.field_distance_decay_per_frame)
+            or self.field_distance_decay_per_frame < 0.0
+        ):
+            self.field_distance_decay_per_frame = 0.0
         self.use_field_position_as_primary_cost = bool(
             use_field_position_as_primary_cost
         )
@@ -133,7 +160,22 @@ class ByteTrack:
 
     def _track_distance_gate(self, track: STrack) -> float:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
-        return self.field_distance_gate_m * lost_frames
+        if self.field_distance_gate_max_lost_frames is not None:
+            lost_frames = min(lost_frames, self.field_distance_gate_max_lost_frames)
+        if self.field_distance_growth_mode == "linear_decay":
+            step_base = self.field_distance_gate_m
+            decay = self.field_distance_decay_per_frame
+            gate = 0.0
+            for step_idx in range(lost_frames):
+                step = step_base - (decay * step_idx)
+                if step <= 0.0:
+                    break
+                gate += step
+            # Keep at least one-step gate for numerical safety.
+            return max(step_base, gate)
+
+        growth = float(lost_frames) ** self.field_distance_lost_exponent
+        return self.field_distance_gate_m * growth
 
     def _track_image_distance_gate(self, track: STrack) -> float:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))

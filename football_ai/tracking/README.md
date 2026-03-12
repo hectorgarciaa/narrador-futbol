@@ -19,11 +19,11 @@ tracker = Tracker(
     model_path="models/finetuning/yolov11m.pt",
     conf=0.1,
     tracker_conf={
-        "track_thresh": 0.5,
+        "track_thresh": 0.3,
         "track_buffer": 90,
         "match_thresh": 0.945,
         "frame_rate": 25,
-        "minimum_consecutive_frames": 5
+        "minimum_consecutive_frames": 4
     },
     team_colors={
         "Real Madrid": np.array([255, 127, 127]),
@@ -122,6 +122,11 @@ Parámetros en `config.yaml`:
 - `use_bbox_center_for_matching` (mezcla distancia entre centros de bbox en el coste de matching)
 - `bbox_center_distance_weight` (0..1, cuánto pesa bbox frente a IoU)
 - `bbox_center_distance_gate_px` (normalización en píxeles; escala con frames perdidos)
+- `field_position_match_distance_gate_m` (base del gate espacial en metros)
+- `field_position_match_distance_max_lost_frames` (tope de crecimiento temporal del gate)
+- `field_position_match_distance_growth_mode` (`power` o `linear_decay`)
+- `field_position_match_distance_lost_exponent` (si < 1, crecimiento sublineal)
+- `field_position_match_distance_decay_per_frame` (en `linear_decay`, cuánto decrece cada paso por frame perdido)
 - `motion_std_gate_enabled`
 - `motion_std_factor`
 - `motion_std_min_samples`

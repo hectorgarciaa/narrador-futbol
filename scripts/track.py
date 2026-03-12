@@ -236,6 +236,18 @@ if __name__ == "__main__":
             "match_distance_gate_m": tracking_cfg.get(
                 "field_position_match_distance_gate_m", 8.0
             ),
+            "match_distance_max_lost_frames": tracking_cfg.get(
+                "field_position_match_distance_max_lost_frames"
+            ),
+            "match_distance_growth_mode": tracking_cfg.get(
+                "field_position_match_distance_growth_mode", "power"
+            ),
+            "match_distance_lost_exponent": tracking_cfg.get(
+                "field_position_match_distance_lost_exponent", 1.0
+            ),
+            "match_distance_decay_per_frame": tracking_cfg.get(
+                "field_position_match_distance_decay_per_frame", 0.0
+            ),
             "match_distance_weight": tracking_cfg.get(
                 "field_position_match_distance_weight", 0.25
             ),
