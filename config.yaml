@@ -94,9 +94,13 @@ tracking:
   reassign_motion_factor: 0.75
   reassign_min_distance: 10.0
   reassign_min_samples: 3
-  # Matching principal de ByteTrack: mezcla IoU + distancia entre centros de bbox.
-  # weight alto => más peso a posición bbox, menos a IoU.
-  use_bbox_center_for_matching: true
+  # Matching principal de ByteTrack.
+  # Si use_field_position_as_primary_cost=true (recomendado), player/goalkeeper
+  # se asocian por distancia en campo (metros). La mezcla IoU+bbox queda opcional.
+  # Si true, para player/goalkeeper el coste principal de matching pasa a ser
+  # la distancia en campo (metros), y no IoU.
+  use_field_position_as_primary_cost: true
+  use_bbox_center_for_matching: false
   bbox_center_distance_weight: 0.7
   bbox_center_distance_gate_px: 120.0
   # Si true, nunca mezcla player/goalkeeper en la reasignación canónica

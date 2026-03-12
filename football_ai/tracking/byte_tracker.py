@@ -55,6 +55,7 @@ class ByteTrack:
         field_position_classes: Optional[list[str]] = None,
         field_distance_gate_m: float = 8.0,
         field_distance_weight: float = 0.25,
+        use_field_position_as_primary_cost: bool = False,
         use_bbox_center_for_matching: bool = True,
         bbox_center_distance_weight: float = 0.5,
         bbox_center_distance_gate_px: float = 120.0,
@@ -71,6 +72,9 @@ class ByteTrack:
         )
         self.field_distance_gate_m = float(field_distance_gate_m)
         self.field_distance_weight = float(field_distance_weight)
+        self.use_field_position_as_primary_cost = bool(
+            use_field_position_as_primary_cost
+        )
         self.use_bbox_center_for_matching = bool(use_bbox_center_for_matching)
         self.bbox_center_distance_weight = float(
             min(1.0, max(0.0, bbox_center_distance_weight))
@@ -204,10 +208,11 @@ class ByteTrack:
 
         for i, track in enumerate(tracks):
             track_class = getattr(track, "class_name", None)
+            uses_field_for_track = self._uses_field_positions_for_class(track_class)
             track_position = self._field_position_to_array(
                 getattr(track, "field_position", None)
             )
-            if track_position is None or not self._uses_field_positions_for_class(track_class):
+            if not uses_field_for_track:
                 continue
 
             max_distance = max(self._track_distance_gate(track), 1e-6)
@@ -218,14 +223,19 @@ class ByteTrack:
                 det_position = self._field_position_to_array(
                     getattr(det, "field_position", None)
                 )
-                if det_position is None:
+                if track_position is None or det_position is None:
+                    if self.use_field_position_as_primary_cost:
+                        dists[i, j] += 1000.0
                     continue
                 field_distance = float(np.linalg.norm(track_position - det_position))
                 if field_distance > max_distance:
                     dists[i, j] += 1000.0
                     continue
                 normalized_distance = min(field_distance / max_distance, 1.0)
-                dists[i, j] += self.field_distance_weight * normalized_distance
+                if self.use_field_position_as_primary_cost:
+                    dists[i, j] = normalized_distance
+                else:
+                    dists[i, j] += self.field_distance_weight * normalized_distance
 
         return dists
 

@@ -69,6 +69,9 @@ class Tracker:
             field_distance_weight=field_tracking_conf.get(
                 "match_distance_weight", 0.25
             ),
+            use_field_position_as_primary_cost=tracker_conf.get(
+                "use_field_position_as_primary_cost", False
+            ),
             use_bbox_center_for_matching=tracker_conf.get(
                 "use_bbox_center_for_matching", True
             ),
