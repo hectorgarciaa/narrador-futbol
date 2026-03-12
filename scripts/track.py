@@ -1,8 +1,13 @@
 import argparse
+import difflib
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
+
+import cv2
+import numpy as np
 
 # Permite ejecutar `python scripts/track.py` sin instalar el paquete en editable.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +18,37 @@ from football_ai.tracking import Tracker
 from football_ai.evaluation import Evaluator
 from football_ai.visualization import Drawer
 from football_ai.core import get_config, get_logger, Logger, convert_to_serializable
+
+COLOR_NAME_TO_RGB = {
+    "white": (255, 255, 255),
+    "blanco": (255, 255, 255),
+    "black": (0, 0, 0),
+    "negro": (0, 0, 0),
+    "red": (255, 0, 0),
+    "rojo": (255, 0, 0),
+    "blue": (0, 102, 255),
+    "azul": (0, 102, 255),
+    "light-blue": (173, 216, 230),
+    "azul-claro": (173, 216, 230),
+    "green": (0, 170, 0),
+    "verde": (0, 170, 0),
+    "light-green": (144, 238, 144),
+    "verde-claro": (144, 238, 144),
+    "yellow": (255, 255, 0),
+    "amarillo": (255, 255, 0),
+    "orange": (255, 165, 0),
+    "naranja": (255, 165, 0),
+    "cyan": (0, 255, 255),
+    "cian": (0, 255, 255),
+    "pink": (255, 105, 180),
+    "rosa": (255, 105, 180),
+    "purple": (128, 0, 128),
+    "morado": (128, 0, 128),
+    "violeta": (128, 0, 128),
+    "gray": (128, 128, 128),
+    "grey": (128, 128, 128),
+    "gris": (128, 128, 128),
+}
 
 
 def parse_args():
@@ -32,7 +68,158 @@ def parse_args():
             "You can also pass a direct video path."
         ),
     )
+    parser.add_argument(
+        "--team-colors",
+        default=None,
+        help=(
+            "Override de colores por terminal en formato "
+            "'{Equipo:color, Otro:color}'. "
+            "Acepta nombre de color (ej. blanco, verde-claro), HEX (#RRGGBB) "
+            "o RGB (255,255,255)."
+        ),
+    )
     return parser.parse_args()
+
+
+def normalize_token(value):
+    normalized = unicodedata.normalize("NFKD", str(value))
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    normalized = normalized.strip().lower()
+    normalized = re.sub(r"[\s_]+", "-", normalized)
+    normalized = re.sub(r"-+", "-", normalized)
+    return normalized
+
+
+def parse_rgb_triplet(raw_value):
+    numbers = re.findall(r"\d+", raw_value)
+    if len(numbers) != 3:
+        return None
+    values = tuple(int(v) for v in numbers)
+    if any(v < 0 or v > 255 for v in values):
+        raise ValueError(f"RGB inválido '{raw_value}'. Cada canal debe estar en 0..255.")
+    return values
+
+
+def parse_color_to_rgb(raw_color):
+    color_text = str(raw_color).strip().strip('"').strip("'")
+    normalized_color = normalize_token(color_text)
+
+    if normalized_color in COLOR_NAME_TO_RGB:
+        return COLOR_NAME_TO_RGB[normalized_color]
+
+    hex_match = re.fullmatch(r"#?([0-9a-fA-F]{6})", color_text)
+    if hex_match:
+        hex_code = hex_match.group(1)
+        return tuple(int(hex_code[i : i + 2], 16) for i in (0, 2, 4))
+
+    rgb_triplet = parse_rgb_triplet(color_text)
+    if rgb_triplet is not None:
+        return rgb_triplet
+
+    available_colors = ", ".join(sorted(COLOR_NAME_TO_RGB.keys()))
+    raise ValueError(
+        f"Color no soportado '{raw_color}'. "
+        f"Usa un nombre conocido, HEX (#RRGGBB) o RGB. "
+        f"Colores conocidos: {available_colors}."
+    )
+
+
+def rgb_to_lab_opencv(rgb_color):
+    rgb_pixel = np.array([[list(rgb_color)]], dtype=np.uint8)
+    lab_pixel = cv2.cvtColor(rgb_pixel, cv2.COLOR_RGB2LAB)[0, 0]
+    return lab_pixel.astype(np.float32)
+
+
+def parse_team_color_overrides(raw_text):
+    text = str(raw_text).strip()
+    if not text:
+        return []
+
+    if text.startswith("{") and text.endswith("}"):
+        text = text[1:-1]
+
+    if not text.strip():
+        return []
+
+    pairs = []
+    for item in text.split(","):
+        segment = item.strip()
+        if not segment:
+            continue
+        separator = ":" if ":" in segment else "=" if "=" in segment else None
+        if separator is None:
+            raise ValueError(
+                f"Formato inválido en '{segment}'. "
+                "Usa 'Equipo:color' separado por comas."
+            )
+        team_name, color_name = segment.split(separator, 1)
+        team_name = team_name.strip().strip('"').strip("'")
+        color_name = color_name.strip().strip('"').strip("'")
+        if not team_name or not color_name:
+            raise ValueError(
+                f"Par inválido '{segment}'. "
+                "Equipo y color no pueden estar vacíos."
+            )
+        pairs.append((team_name, color_name))
+    return pairs
+
+
+def resolve_team_name(team_alias, available_team_names):
+    normalized_alias = normalize_token(team_alias)
+    normalized_team_map = {
+        normalize_token(team_name): team_name for team_name in available_team_names
+    }
+
+    if normalized_alias in normalized_team_map:
+        return normalized_team_map[normalized_alias]
+
+    contains_matches = [
+        team_name
+        for normalized_name, team_name in normalized_team_map.items()
+        if normalized_alias in normalized_name or normalized_name in normalized_alias
+    ]
+    if len(contains_matches) == 1:
+        return contains_matches[0]
+
+    close_matches = difflib.get_close_matches(
+        normalized_alias,
+        list(normalized_team_map.keys()),
+        n=1,
+        cutoff=0.65,
+    )
+    if close_matches:
+        return normalized_team_map[close_matches[0]]
+
+    available = ", ".join(available_team_names)
+    raise ValueError(
+        f"No se pudo mapear el equipo '{team_alias}'. Equipos disponibles: {available}"
+    )
+
+
+def apply_team_color_overrides(base_team_colors, raw_overrides, logger):
+    overrides = parse_team_color_overrides(raw_overrides)
+    if not overrides:
+        return base_team_colors
+
+    updated_team_colors = dict(base_team_colors)
+    applied = {}
+    for team_alias, color_value in overrides:
+        resolved_team_name = resolve_team_name(team_alias, list(updated_team_colors.keys()))
+        rgb_color = parse_color_to_rgb(color_value)
+        lab_color = rgb_to_lab_opencv(rgb_color)
+        updated_team_colors[resolved_team_name] = lab_color
+        applied[resolved_team_name] = {
+            "input_team": team_alias,
+            "input_color": color_value,
+            "rgb": list(rgb_color),
+            "lab_opencv": [float(channel) for channel in lab_color],
+        }
+
+    logger.info(
+        "Team colors override applied (LAB OpenCV): "
+        f"{json.dumps(applied, ensure_ascii=False)}"
+    )
+    return updated_team_colors
 
 
 def resolve_video_path(config, video_shortcut):
@@ -267,6 +454,12 @@ if __name__ == "__main__":
         
         # Team colors
         TEAM_COLORS = config.get_team_colors()
+        if args.team_colors:
+            TEAM_COLORS = apply_team_color_overrides(
+                TEAM_COLORS,
+                args.team_colors,
+                logger,
+            )
         
         logger.info(f"Model: {MODEL_PATH}")
         logger.info(f"Video: {VIDEO_PATH}")

@@ -23,7 +23,7 @@ tracker = Tracker(
         "track_buffer": 90,
         "match_thresh": 0.945,
         "frame_rate": 25,
-        "minimum_consecutive_frames": 4
+        "minimum_consecutive_frames": 5
     },
     team_colors={
         "Real Madrid": np.array([255, 127, 127]),

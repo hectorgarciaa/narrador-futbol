@@ -219,7 +219,33 @@ También puedes indicar un shortcut de vídeo definido en `paths.data`:
 ```bash
 python scripts/track.py video_prueba_ajustado
 ```
+También puedes sobreescribir por terminal los colores de equipo y convertirlos a `LAB` de OpenCV automáticamente:
+```bash
+python scripts/track.py video_prueba_ajustado --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
+```
+`--team-colors` acepta:
+- nombres de color (ej. `blanco`, `verde-claro`, `azul-claro`)
+- HEX (ej. `#90EE90`)
+- RGB (ej. `255,255,255`)
+Los nombres de equipo se mapean de forma flexible contra los equipos de `config.yaml` (mayúsculas/minúsculas, acentos y pequeñas erratas).
 Para los clips de `data/partidosPosiciones/` hay shortcuts `video_test_*` (ejemplo: `video_test_1`, `video_test_29`).
+Si quieres lanzar tracking para **todos** los vídeos de `data/partidosPosiciones` en lote:
+```bash
+python scripts/track_partidos_posiciones.py
+```
+Por defecto este script es interactivo: al terminar cada vídeo, espera a que introduzcas los colores del siguiente partido.
+Modo prueba (sin ejecutar):
+```bash
+python scripts/track_partidos_posiciones.py --dry-run
+```
+También puedes pasar colores de equipo para todo el lote:
+```bash
+python scripts/track_partidos_posiciones.py --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
+```
+Si quieres automatizar sin preguntas interactivas:
+```bash
+python scripts/track_partidos_posiciones.py --no-prompt-team-colors --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
+```
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Por defecto usa `paths.data.video_prueba_corto` (si existe) y, en caso contrario, `paths.data.video_prueba`.
 El MP4 de salida se guarda en `output/pruebaTracker/` con el nombre del vídeo de entrada y sufijo `_tracking.mp4` (ejemplo: `partido_ajustado_tracking.mp4`).
@@ -342,7 +368,7 @@ tracking:
   track_buffer: 90            # Frames que sobrevive un track sin ser visto
   match_thresh: 0.945         # IoU mínimo para asociar detección a track
   frame_rate: 25
-  minimum_consecutive_frames: 4
+  minimum_consecutive_frames: 5
   max_total_tracks: 25
   max_tracks_per_class:
     player: 22

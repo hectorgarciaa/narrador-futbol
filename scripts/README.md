@@ -74,6 +74,26 @@ Es el script principal del proyecto y sirve como referencia de cómo usar el paq
 
 ---
 
+### `track_partidos_posiciones.py` — Batch para `data/partidosPosiciones`
+
+**Objetivo:** ejecutar `scripts/track.py` automáticamente para todos los vídeos definidos en `config.yaml` dentro de `paths.data` que apunten a `data/partidosPosiciones/`.
+
+**Uso básico:**
+```bash
+python scripts/track_partidos_posiciones.py
+```
+Por defecto funciona en modo interactivo: pide colores por terminal para cada vídeo antes de lanzarlo.
+
+**Opciones útiles:**
+- `--dry-run`: muestra qué comandos ejecutaría sin lanzar el tracking.
+- `--continue-on-error`: continúa con el siguiente vídeo si uno falla.
+- `--team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"`: reenvía el override de colores a cada ejecución de `track.py`.
+- `--no-prompt-team-colors`: desactiva el modo interactivo para ejecución totalmente automática.
+
+El script procesa los shortcuts en orden natural (`video_test_1`, `video_test_2`, `video_test_11`, ...), muestra progreso en consola y devuelve código de salida `1` si hay fallos.
+
+---
+
 ### `track_experiments.py` — Grid search de hiperparámetros
 
 **Objetivo:** Ejecutar automáticamente múltiples experimentos variando los hiperparámetros del tracker (`conf`, `track_thresh`, `match_thresh`, `minimum_consecutive_frames`) y guardar todos los resultados para analizarlos después con `ExperimentVisualizer`.
