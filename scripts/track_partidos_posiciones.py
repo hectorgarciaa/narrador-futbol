@@ -1,4 +1,5 @@
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -87,6 +88,14 @@ def parse_args():
             "Si lo usas, debes pasar --team-colors o activar --prompt-team-colors."
         ),
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Reprocesa también vídeos que ya tengan "
+            "output/tracks_json/tracker/<video>_tracks.json."
+        ),
+    )
     parser.set_defaults(prompt_team_colors=False)
     return parser.parse_args()
 
@@ -109,6 +118,26 @@ def collect_partidos_posiciones_shortcuts(config):
         if partidos_dir == candidate.parent or partidos_dir in candidate.parents:
             selected.append(key)
     return sorted(selected, key=natural_video_key_sort)
+
+
+def sanitize_video_stem(raw_stem):
+    stem = str(raw_stem).strip()
+    if not stem:
+        return "video"
+    stem = re.sub(r"\s+", "_", stem)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem)
+    stem = re.sub(r"_+", "_", stem).strip("._-")
+    return stem or "video"
+
+
+def expected_tracks_json_path(config, shortcut):
+    video_path = config.get_path("paths", "data", shortcut)
+    tracks_dir = config.get_path(
+        "paths", "output", "tracks_json", create_if_missing=True
+    ) / "tracker"
+    tracks_dir.mkdir(parents=True, exist_ok=True)
+    sanitized_stem = sanitize_video_stem(video_path.stem)
+    return tracks_dir / f"{sanitized_stem}_tracks.json"
 
 
 def normalize_color_name(color_name):
@@ -194,6 +223,13 @@ def main():
             return 1
 
     for idx, shortcut in enumerate(shortcuts, start=1):
+        tracks_json_path = expected_tracks_json_path(config, shortcut)
+        if tracks_json_path.exists() and not args.force:
+            print(f"[{idx}/{len(shortcuts)}] {shortcut}")
+            print(f"  skip: ya existe {tracks_json_path}")
+            skipped.append(shortcut)
+            continue
+
         current_team_colors = args.team_colors
         if not current_team_colors and not args.no_default_color_plan:
             current_team_colors = build_team_colors_override(shortcut)

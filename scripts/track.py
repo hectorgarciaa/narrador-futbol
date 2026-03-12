@@ -1,10 +1,12 @@
 import argparse
 import colorsys
+import csv
 import difflib
 import json
 import re
 import sys
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -445,6 +447,26 @@ def build_tracks_output_paths(config, video_path):
     return str(named_path), str(legacy_path)
 
 
+def build_tracking_metrics_output_paths(config, video_path):
+    """
+    Build output paths for per-video summary and aggregated metrics dataset.
+    """
+    tracks_dir = config.get_path(
+        "paths", "output", "tracks_json", create_if_missing=True
+    ) / "tracker"
+    tracks_dir.mkdir(parents=True, exist_ok=True)
+
+    output_base = config.get_path("paths", "output", "base", create_if_missing=True)
+    dataset_path = (
+        output_base / "datasets" / "positions" / "common" / "tracking_metrics.csv"
+    )
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sanitized_stem = sanitize_video_stem(Path(video_path).stem)
+    summary_path = tracks_dir / f"{sanitized_stem}_summary.json"
+    return str(summary_path), str(dataset_path)
+
+
 def save_result(tracks, output_path, logger):
     """Saves tracks in JSON format with error handling."""
     try:
@@ -458,6 +480,89 @@ def save_result(tracks, output_path, logger):
         logger.error(f"Error saving tracks to {output_path}: {e}")
     except Exception as e:
         logger.error(f"Unexpected error saving tracks: {e}")
+
+
+def save_summary(summary, output_path, logger):
+    """Save evaluation summary JSON for a single video."""
+    try:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(
+                convert_to_serializable(summary),
+                f,
+                indent=2,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        logger.info(f"Tracking summary saved to: {output_path}")
+    except Exception as e:
+        logger.error(f"Error saving tracking summary to {output_path}: {e}")
+
+
+def _read_csv_rows(csv_path):
+    with open(csv_path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        return list(reader), list(reader.fieldnames or [])
+
+
+def upsert_tracking_metrics_dataset(
+    dataset_path,
+    video_path,
+    video_source,
+    tracks_json_path,
+    summary_json_path,
+    summary,
+    logger,
+):
+    """
+    Upsert a row in tracking_metrics.csv keyed by video_source.
+    """
+    try:
+        dataset_path = Path(dataset_path)
+        dataset_path.parent.mkdir(parents=True, exist_ok=True)
+
+        video_path_obj = Path(video_path)
+        row = {
+            "video_source": str(video_source),
+            "video_filename": video_path_obj.name,
+            "video_stem": video_path_obj.stem,
+            "video_path": str(video_path),
+            "tracks_json_path": str(tracks_json_path),
+            "summary_json_path": str(summary_json_path),
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        for key, value in summary.items():
+            row[str(key)] = value
+
+        rows = []
+        fieldnames = list(row.keys())
+        if dataset_path.exists():
+            existing_rows, existing_fieldnames = _read_csv_rows(dataset_path)
+            rows = [
+                existing_row
+                for existing_row in existing_rows
+                if existing_row.get("video_source") != row["video_source"]
+            ]
+            for key in existing_fieldnames:
+                if key not in fieldnames:
+                    fieldnames.append(key)
+            for key in row.keys():
+                if key not in fieldnames:
+                    fieldnames.append(key)
+
+        rows.append(row)
+        rows.sort(key=lambda item: item.get("video_source", ""))
+
+        with open(dataset_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for item in rows:
+                writer.writerow({name: item.get(name, "") for name in fieldnames})
+
+        logger.info(f"Tracking metrics dataset updated: {dataset_path}")
+    except Exception as e:
+        logger.error(f"Error updating tracking metrics dataset {dataset_path}: {e}")
 
 
 if __name__ == "__main__":
@@ -478,6 +583,9 @@ if __name__ == "__main__":
         VIDEO_PATH, video_source = resolve_video_path(config, args.video_shortcut)
         OUTPUT = build_output_video_path(config, VIDEO_PATH)
         OUTPUT_PATH_NAMED, OUTPUT_PATH_LEGACY = build_tracks_output_paths(
+            config, VIDEO_PATH
+        )
+        SUMMARY_PATH, METRICS_DATASET_PATH = build_tracking_metrics_output_paths(
             config, VIDEO_PATH
         )
         
@@ -620,6 +728,8 @@ if __name__ == "__main__":
         logger.info(f"Video source: {video_source}")
         logger.info(f"Named tracks JSON output: {OUTPUT_PATH_NAMED}")
         logger.info(f"Legacy tracks JSON output: {OUTPUT_PATH_LEGACY}")
+        logger.info(f"Summary JSON output: {SUMMARY_PATH}")
+        logger.info(f"Tracking metrics dataset CSV: {METRICS_DATASET_PATH}")
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
         
@@ -654,6 +764,16 @@ if __name__ == "__main__":
         save_result(tracks, OUTPUT_PATH_NAMED, logger)
         if OUTPUT_PATH_LEGACY != OUTPUT_PATH_NAMED:
             save_result(tracks, OUTPUT_PATH_LEGACY, logger)
+        save_summary(summary, SUMMARY_PATH, logger)
+        upsert_tracking_metrics_dataset(
+            METRICS_DATASET_PATH,
+            VIDEO_PATH,
+            video_source,
+            OUTPUT_PATH_NAMED,
+            SUMMARY_PATH,
+            summary,
+            logger,
+        )
         
         # Show summary
         logger.info("Evaluation summary:")

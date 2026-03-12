@@ -235,6 +235,11 @@ Si quieres lanzar tracking para **todos** los vídeos de `data/partidosPosicione
 ```bash
 python scripts/track_partidos_posiciones.py
 ```
+Por defecto solo procesa vídeos que **todavía no tienen** `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (evita reejecutar).
+Si quieres reprocesar todo:
+```bash
+python scripts/track_partidos_posiciones.py --force
+```
 Por defecto este script usa un plan fijo de colores por vídeo (`video_test_*`) y nombres de equipo consistentes por color.
 Ejemplo de convención:
 - `blanco` -> `Real Madrid`
@@ -264,6 +269,8 @@ Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo ano
 Por defecto usa `paths.data.video_prueba_corto` (si existe) y, en caso contrario, `paths.data.video_prueba`.
 El MP4 de salida se guarda en `output/pruebaTracker/` con el nombre del vídeo de entrada y sufijo `_tracking.mp4` (ejemplo: `partido_ajustado_tracking.mp4`).
 El JSON de tracks se guarda en `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (formato esperado por `experiments/positions`) y además en `output/tracks_json/tracker/tracks.json` como compatibilidad legacy.
+También se guarda el resumen por vídeo en `output/tracks_json/tracker/<video_sanitizado>_summary.json`.
+Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `output/datasets/positions/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`).
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
