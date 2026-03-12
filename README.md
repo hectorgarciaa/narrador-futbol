@@ -356,10 +356,11 @@ tracking:
   lost_time_penalty_weight: 0.12
   lost_time_penalty_max_frames: 10
   field_position_match_distance_gate_m: 1.5
+  field_position_match_distance_cap_m: 6.0
   field_position_match_distance_max_lost_frames: 10
   field_position_match_distance_growth_mode: linear_decay
   field_position_match_distance_lost_exponent: 0.5
-  field_position_match_distance_decay_per_frame: 0.1
+  field_position_match_distance_decay_per_frame: 0.5
   strict_person_class_separation: true
   require_field_position_for_reassign: true
   max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
@@ -408,6 +409,7 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `lost_time_penalty_weight`
 - `lost_time_penalty_max_frames`
 - `field_position_match_distance_gate_m`
+- `field_position_match_distance_cap_m`
 - `field_position_match_distance_max_lost_frames`
 - `field_position_match_distance_growth_mode`
 - `field_position_match_distance_lost_exponent`

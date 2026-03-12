@@ -245,6 +245,9 @@ if __name__ == "__main__":
             "match_distance_max_lost_frames": tracking_cfg.get(
                 "field_position_match_distance_max_lost_frames"
             ),
+            "match_distance_cap_m": tracking_cfg.get(
+                "field_position_match_distance_cap_m", 6.0
+            ),
             "match_distance_growth_mode": tracking_cfg.get(
                 "field_position_match_distance_growth_mode", "power"
             ),

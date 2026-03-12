@@ -139,6 +139,8 @@ tracking:
   field_position_pixels_per_meter: 8
   field_position_device: null
   field_position_match_distance_gate_m: 1.5
+  # Tope absoluto del radio de matching en campo (metros), incluso con acumulación por frames perdidos
+  field_position_match_distance_cap_m: 6.0
   # Gate espacial en campo para matching:
   # Modo linear_decay:
   #   distancia_max = sum_{k=0..lost-1} max(gate_m - k*decay_per_frame, 0)
@@ -146,7 +148,7 @@ tracking:
   field_position_match_distance_max_lost_frames: 10
   field_position_match_distance_growth_mode: linear_decay
   field_position_match_distance_lost_exponent: 0.5
-  field_position_match_distance_decay_per_frame: 0.1
+  field_position_match_distance_decay_per_frame: 0.5
   field_position_match_distance_weight: 0.25
   reassign_min_field_distance_m: 1.2
   # Penalización de distancia cuando el equipo detectado difiere del track

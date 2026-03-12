@@ -72,6 +72,9 @@ class Tracker:
             field_distance_gate_max_lost_frames=field_tracking_conf.get(
                 "match_distance_max_lost_frames"
             ),
+            field_distance_gate_cap_m=field_tracking_conf.get(
+                "match_distance_cap_m"
+            ),
             field_distance_growth_mode=field_tracking_conf.get(
                 "match_distance_growth_mode", "power"
             ),

@@ -125,6 +125,7 @@ Parámetros en `config.yaml`:
 - `lost_time_penalty_weight` (penaliza candidatos con más frames perdidos)
 - `lost_time_penalty_max_frames` (normalización del penalizador temporal)
 - `field_position_match_distance_gate_m` (base del gate espacial en metros)
+- `field_position_match_distance_cap_m` (tope absoluto del gate espacial acumulado)
 - `field_position_match_distance_max_lost_frames` (tope de crecimiento temporal del gate)
 - `field_position_match_distance_growth_mode` (`power` o `linear_decay`)
 - `field_position_match_distance_lost_exponent` (si < 1, crecimiento sublineal)

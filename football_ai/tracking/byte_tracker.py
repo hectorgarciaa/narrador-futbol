@@ -56,6 +56,7 @@ class ByteTrack:
         field_distance_gate_m: float = 8.0,
         field_distance_weight: float = 0.25,
         field_distance_gate_max_lost_frames: Optional[int] = None,
+        field_distance_gate_cap_m: Optional[float] = None,
         field_distance_growth_mode: str = "power",
         field_distance_lost_exponent: float = 1.0,
         field_distance_decay_per_frame: float = 0.0,
@@ -83,6 +84,13 @@ class ByteTrack:
         else:
             self.field_distance_gate_max_lost_frames = max(
                 1, int(field_distance_gate_max_lost_frames)
+            )
+        if field_distance_gate_cap_m is None:
+            self.field_distance_gate_cap_m = None
+        else:
+            gate_cap = float(field_distance_gate_cap_m)
+            self.field_distance_gate_cap_m = (
+                gate_cap if np.isfinite(gate_cap) and gate_cap > 0.0 else None
             )
         self.field_distance_growth_mode = str(
             field_distance_growth_mode or "power"
@@ -176,10 +184,14 @@ class ByteTrack:
                     break
                 gate += step
             # Keep at least one-step gate for numerical safety.
-            return max(step_base, gate)
+            gate = max(step_base, gate)
+        else:
+            growth = float(lost_frames) ** self.field_distance_lost_exponent
+            gate = self.field_distance_gate_m * growth
 
-        growth = float(lost_frames) ** self.field_distance_lost_exponent
-        return self.field_distance_gate_m * growth
+        if self.field_distance_gate_cap_m is not None:
+            gate = min(gate, self.field_distance_gate_cap_m)
+        return gate
 
     def _track_image_distance_gate(self, track: STrack) -> float:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
