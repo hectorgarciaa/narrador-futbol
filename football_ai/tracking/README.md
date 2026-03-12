@@ -118,6 +118,9 @@ En `Tracker` se aplica además un filtro de movimiento por track canónico:
 - bloquea reasignaciones cuya distancia supere ese límite (escalado por frames perdidos), con un suelo mínimo de movimiento permitido.
 
 Parámetros en `config.yaml`:
+- `use_bbox_center_for_matching` (mezcla distancia entre centros de bbox en el coste de matching)
+- `bbox_center_distance_weight` (0..1, cuánto pesa bbox frente a IoU)
+- `bbox_center_distance_gate_px` (normalización en píxeles; escala con frames perdidos)
 - `motion_std_gate_enabled`
 - `motion_std_factor`
 - `motion_std_min_samples`

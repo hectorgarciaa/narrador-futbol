@@ -94,6 +94,11 @@ tracking:
   reassign_motion_factor: 0.75
   reassign_min_distance: 10.0
   reassign_min_samples: 3
+  # Matching principal de ByteTrack: mezcla IoU + distancia entre centros de bbox.
+  # weight alto => más peso a posición bbox, menos a IoU.
+  use_bbox_center_for_matching: true
+  bbox_center_distance_weight: 0.7
+  bbox_center_distance_gate_px: 120.0
   # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
   strict_person_class_separation: true
   # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.

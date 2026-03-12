@@ -349,6 +349,9 @@ tracking:
     ball: 1
     referee: 3
   # Anti-ID-switch por clase y movimiento
+  use_bbox_center_for_matching: true
+  bbox_center_distance_weight: 0.7
+  bbox_center_distance_gate_px: 120.0
   strict_person_class_separation: true
   require_field_position_for_reassign: true
   max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
@@ -390,6 +393,9 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `reassign_motion_factor`
 - `reassign_min_distance`
 - `reassign_min_samples`
+- `use_bbox_center_for_matching`
+- `bbox_center_distance_weight`
+- `bbox_center_distance_gate_px`
 - `strict_person_class_separation`
 - `require_field_position_for_reassign`
 - `max_reassign_lost_frames`

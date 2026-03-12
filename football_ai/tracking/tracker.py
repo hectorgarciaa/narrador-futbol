@@ -69,6 +69,15 @@ class Tracker:
             field_distance_weight=field_tracking_conf.get(
                 "match_distance_weight", 0.25
             ),
+            use_bbox_center_for_matching=tracker_conf.get(
+                "use_bbox_center_for_matching", True
+            ),
+            bbox_center_distance_weight=tracker_conf.get(
+                "bbox_center_distance_weight", 0.7
+            ),
+            bbox_center_distance_gate_px=tracker_conf.get(
+                "bbox_center_distance_gate_px", 120.0
+            ),
         )
         self.ball_min_conf = ball_min_conf
         self.reassign_motion_factor = float(

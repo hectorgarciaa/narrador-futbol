@@ -55,6 +55,9 @@ class ByteTrack:
         field_position_classes: Optional[list[str]] = None,
         field_distance_gate_m: float = 8.0,
         field_distance_weight: float = 0.25,
+        use_bbox_center_for_matching: bool = True,
+        bbox_center_distance_weight: float = 0.5,
+        bbox_center_distance_gate_px: float = 120.0,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
@@ -68,6 +71,11 @@ class ByteTrack:
         )
         self.field_distance_gate_m = float(field_distance_gate_m)
         self.field_distance_weight = float(field_distance_weight)
+        self.use_bbox_center_for_matching = bool(use_bbox_center_for_matching)
+        self.bbox_center_distance_weight = float(
+            min(1.0, max(0.0, bbox_center_distance_weight))
+        )
+        self.bbox_center_distance_gate_px = float(max(1.0, bbox_center_distance_gate_px))
         self.assigned_track_ids_by_class = {
             class_name: set() for class_name in self.max_tracks_per_class
         }
@@ -122,6 +130,63 @@ class ByteTrack:
     def _track_distance_gate(self, track: STrack) -> float:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
         return self.field_distance_gate_m * lost_frames
+
+    def _track_image_distance_gate(self, track: STrack) -> float:
+        lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
+        return self.bbox_center_distance_gate_px * lost_frames
+
+    @staticmethod
+    def _bbox_center_from_tlbr(tlbr: np.ndarray) -> np.ndarray:
+        tlbr = np.asarray(tlbr, dtype=np.float32).reshape(-1)
+        if tlbr.size < 4 or not np.all(np.isfinite(tlbr[:4])):
+            return np.array([np.nan, np.nan], dtype=np.float32)
+        x1, y1, x2, y2 = tlbr[:4]
+        return np.array([(x1 + x2) * 0.5, (y1 + y2) * 0.5], dtype=np.float32)
+
+    def _apply_bbox_center_costs(
+        self,
+        dists: np.ndarray,
+        tracks: list[STrack],
+        detections: list[STrack],
+    ) -> np.ndarray:
+        if (
+            not self.use_bbox_center_for_matching
+            or self.bbox_center_distance_weight <= 0.0
+            or dists.size == 0
+            or len(tracks) == 0
+            or len(detections) == 0
+        ):
+            return dists
+
+        bbox_weight = self.bbox_center_distance_weight
+        iou_weight = 1.0 - bbox_weight
+
+        for i, track in enumerate(tracks):
+            track_center = self._bbox_center_from_tlbr(getattr(track, "tlbr", None))
+            if not np.all(np.isfinite(track_center)):
+                continue
+
+            max_distance = max(self._track_image_distance_gate(track), 1e-6)
+            track_class = getattr(track, "class_name", None)
+            for j, det in enumerate(detections):
+                det_class = getattr(det, "class_name", None)
+                if (
+                    track_class is not None
+                    and det_class is not None
+                    and track_class != det_class
+                ):
+                    continue
+                det_center = self._bbox_center_from_tlbr(getattr(det, "tlbr", None))
+                if not np.all(np.isfinite(det_center)):
+                    continue
+
+                center_distance = float(np.linalg.norm(track_center - det_center))
+                normalized_distance = min(center_distance / max_distance, 1.0)
+                dists[i, j] = (iou_weight * dists[i, j]) + (
+                    bbox_weight * normalized_distance
+                )
+
+        return dists
 
     def _apply_field_position_costs(
         self,
@@ -398,6 +463,7 @@ class ByteTrack:
         # Predict the current location with KF
         STrack.multi_predict(strack_pool, self.shared_kalman)
         dists = matching.iou_distance(strack_pool, detections)
+        dists = self._apply_bbox_center_costs(dists, strack_pool, detections)
 
         # Penalizaciones en matching.
         for i, track in enumerate(strack_pool):
@@ -493,6 +559,11 @@ class ByteTrack:
             if strack_pool[i].state == TrackState.Tracked
         ]
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
+        dists = self._apply_bbox_center_costs(
+            dists,
+            r_tracked_stracks,
+            detections_second,
+        )
         for i, track in enumerate(r_tracked_stracks):
             for j, det in enumerate(detections_second):
                 if hasattr(track, "class_name") and hasattr(det, "class_name"):
@@ -527,6 +598,7 @@ class ByteTrack:
         """Deal with unconfirmed tracks, usually tracks with only one beginning frame"""
         detections = [detections[i] for i in u_detection]
         dists = matching.iou_distance(unconfirmed, detections)
+        dists = self._apply_bbox_center_costs(dists, unconfirmed, detections)
         for i, track in enumerate(unconfirmed):
             for j, det in enumerate(detections):
                 if hasattr(track, "class_name") and hasattr(det, "class_name"):

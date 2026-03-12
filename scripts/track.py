@@ -170,6 +170,15 @@ if __name__ == "__main__":
             "reassign_motion_factor": tracking_cfg.get("reassign_motion_factor", 1.0),
             "reassign_min_distance": tracking_cfg.get("reassign_min_distance", 25.0),
             "reassign_min_samples": tracking_cfg.get("reassign_min_samples", 3),
+            "use_bbox_center_for_matching": tracking_cfg.get(
+                "use_bbox_center_for_matching", True
+            ),
+            "bbox_center_distance_weight": tracking_cfg.get(
+                "bbox_center_distance_weight", 0.7
+            ),
+            "bbox_center_distance_gate_px": tracking_cfg.get(
+                "bbox_center_distance_gate_px", 120.0
+            ),
             "strict_person_class_separation": tracking_cfg.get(
                 "strict_person_class_separation", True
             ),
