@@ -46,7 +46,7 @@ Asignar cada detección del modelo YOLO al equipo correspondiente y mantener un 
 `TeamDetector` soporta dos estrategias:
 
 - `reference` (compatibilidad): usa colores de referencia (`teams` en `config.yaml` o `--team-colors`) y ajuste adaptativo.
-- `auto-bootstrap`: ignora nombres de equipo predefinidos, agrupa colores de camiseta en los frames iniciales y fija centroides para todo el vídeo (nombres automáticos por color, p. ej. `Equipo Rojo`, `Equipo Azul`).
+- `auto-bootstrap`: ignora nombres de equipo predefinidos, agrupa colores de camiseta en los frames iniciales y fija una referencia robusta por equipo para todo el vídeo (nombres neutrales, p. ej. `Equipo 1`, `Equipo 2`).
 
 En ambos modos, por defecto solo participan `player` y `goalkeeper` en la inferencia de equipo.
 
@@ -59,7 +59,7 @@ Antes de que un equipo tenga suficientes muestras, el color de referencia puede 
 5. Ese equipo queda marcado como "confirmado" y su color ya no se actualiza más.
 
 Esto permite que el sistema se adapte automáticamente al color exacto de las camisetas en las condiciones de iluminación del partido, en lugar de depender únicamente de los colores precalibrados.
-En `auto-bootstrap`, tras cerrar bootstrap, los centroides quedan fijos para evitar cambios de etiqueta durante el vídeo.
+En `auto-bootstrap`, tras cerrar bootstrap, la referencia de cada equipo se calcula como **mediana por cluster** y queda fija para evitar cambios de etiqueta durante el vídeo. Además, se exige un mínimo de muestras por cluster (por defecto 4): si aparece un cluster pequeño (<=3), se re-clusteriza sobre el cluster grande para evitar que outliers (p. ej. árbitros) dominen un equipo.
 
 #### 3. Asignación (`assign_team`)
 Con los colores (iniciales o confirmados), asigna el equipo por **distancia euclidiana mínima en espacio RGB** entre el color de camiseta detectado y los colores de referencia actualizados.

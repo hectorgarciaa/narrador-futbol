@@ -1,4 +1,3 @@
-import cv2
 import logging
 import numpy as np
 from sklearn.cluster import KMeans
@@ -6,21 +5,6 @@ from sklearn.cluster import KMeans
 from football_ai.identification.shirt_detector import ShirtDetector
 
 logger = logging.getLogger(__name__)
-
-
-AUTO_COLOR_PALETTE_RGB = {
-    "Rojo": np.array([220, 20, 60], dtype=np.float32),
-    "Azul": np.array([0, 102, 255], dtype=np.float32),
-    "Verde": np.array([0, 170, 0], dtype=np.float32),
-    "Amarillo": np.array([255, 221, 0], dtype=np.float32),
-    "Naranja": np.array([255, 140, 0], dtype=np.float32),
-    "Morado": np.array([128, 0, 128], dtype=np.float32),
-    "Rosa": np.array([255, 105, 180], dtype=np.float32),
-    "Cian": np.array([0, 180, 200], dtype=np.float32),
-    "Blanco": np.array([245, 245, 245], dtype=np.float32),
-    "Negro": np.array([15, 15, 15], dtype=np.float32),
-    "Gris": np.array([128, 128, 128], dtype=np.float32),
-}
 
 
 class TeamDetector:
@@ -33,6 +17,7 @@ class TeamDetector:
         auto_bootstrap_frames=1,
         auto_bootstrap_min_samples=12,
         auto_num_teams=2,
+        auto_min_cluster_samples=4,
         auto_team_name_prefix="Equipo",
         team_candidate_classes=None,
         shirt_detector_kwargs=None,
@@ -60,6 +45,7 @@ class TeamDetector:
         self.auto_bootstrap_frames = max(1, int(auto_bootstrap_frames))
         self.auto_bootstrap_min_samples = max(2, int(auto_bootstrap_min_samples))
         self.auto_num_teams = max(2, int(auto_num_teams))
+        self.auto_min_cluster_samples = max(1, int(auto_min_cluster_samples))
         self.auto_team_name_prefix = str(auto_team_name_prefix or "Equipo").strip() or "Equipo"
         self.team_candidate_classes = set(
             team_candidate_classes or ["player", "goalkeeper"]
@@ -73,13 +59,6 @@ class TeamDetector:
         self.shirt_detector = ShirtDetector(**shirt_detector_kwargs)
 
     @staticmethod
-    def _lab_to_rgb_color(lab_color):
-        clipped = np.clip(np.asarray(lab_color, dtype=np.float32), 0.0, 255.0)
-        lab_pixel = np.array([[clipped]], dtype=np.uint8)
-        rgb_pixel = cv2.cvtColor(lab_pixel, cv2.COLOR_LAB2RGB)[0, 0]
-        return rgb_pixel.astype(np.float32)
-
-    @staticmethod
     def _center_hue_key(lab_color):
         lab_color = np.asarray(lab_color, dtype=np.float32).reshape(-1)
         if lab_color.size < 3:
@@ -91,17 +70,6 @@ class TeamDetector:
         lightness = float(lab_color[0])
         return (hue, -chroma, -lightness)
 
-    def _closest_basic_color_name(self, lab_color):
-        rgb_color = self._lab_to_rgb_color(lab_color)
-        best_name = "Color"
-        best_distance = None
-        for color_name, reference_rgb in AUTO_COLOR_PALETTE_RGB.items():
-            distance = float(np.linalg.norm(rgb_color - reference_rgb))
-            if best_distance is None or distance < best_distance:
-                best_distance = distance
-                best_name = color_name
-        return best_name
-
     def _build_auto_team_refs(self, centers):
         centers = np.asarray(centers, dtype=np.float32)
         if centers.ndim != 2 or centers.shape[0] <= 0:
@@ -109,13 +77,8 @@ class TeamDetector:
         sorted_centers = sorted(centers, key=self._center_hue_key)
 
         team_refs = {}
-        used_names = set()
         for idx, center in enumerate(sorted_centers, start=1):
-            color_name = self._closest_basic_color_name(center)
-            team_name = f"{self.auto_team_name_prefix} {color_name}".strip()
-            if team_name in used_names:
-                team_name = f"{team_name} {idx}"
-            used_names.add(team_name)
+            team_name = f"{self.auto_team_name_prefix} {idx}".strip()
             team_refs[team_name] = center.astype(np.float32)
         return team_refs
 
@@ -139,16 +102,73 @@ class TeamDetector:
         if not force and sample_count < self.auto_bootstrap_min_samples:
             return
 
+        def fit_kmeans(input_samples):
+            km = KMeans(
+                n_clusters=self.auto_num_teams,
+                init="k-means++",
+                n_init=10,
+                random_state=0,
+            )
+            km.fit(input_samples)
+            return km
+
+        def cluster_sizes(labels):
+            return np.array(
+                [int(np.sum(labels == idx)) for idx in range(self.auto_num_teams)],
+                dtype=int,
+            )
+
         samples = np.asarray(self.bootstrap_samples, dtype=np.float32)
-        km = KMeans(
-            n_clusters=self.auto_num_teams,
-            init="k-means++",
-            n_init=10,
-            random_state=0,
-        )
-        km.fit(samples)
-        centers = km.cluster_centers_
-        auto_refs = self._build_auto_team_refs(centers)
+        working_samples = samples
+        km = fit_kmeans(working_samples)
+        labels = km.labels_
+        sizes = cluster_sizes(labels)
+
+        # Si aparece un cluster demasiado pequeño (<=3 por defecto), lo tratamos
+        # como ruido y re-clusterizamos solo con el cluster mayor.
+        if (
+            self.auto_num_teams == 2
+            and sizes.size == 2
+            and int(np.min(sizes)) < self.auto_min_cluster_samples
+        ):
+            small_size = int(np.min(sizes))
+            large_cluster_idx = int(np.argmax(sizes))
+            large_cluster_samples = working_samples[labels == large_cluster_idx]
+            if large_cluster_samples.shape[0] >= self.auto_num_teams:
+                logger.info(
+                    "Auto bootstrap: cluster pequeño detectado (%d muestras). "
+                    "Se re-clusteriza sobre el cluster mayor (%d muestras).",
+                    small_size,
+                    int(large_cluster_samples.shape[0]),
+                )
+                working_samples = large_cluster_samples
+                km = fit_kmeans(working_samples)
+                labels = km.labels_
+                sizes = cluster_sizes(labels)
+
+        # Regla de calidad: todos los clusters deben tener más de 3 nodos
+        # (configurable con auto_min_cluster_samples, por defecto 4).
+        if sizes.size > 0 and int(np.min(sizes)) < self.auto_min_cluster_samples:
+            logger.info(
+                "Auto bootstrap pendiente: clusters con pocas muestras %s "
+                "(mínimo requerido=%d). Se esperan más detecciones.",
+                sizes.tolist(),
+                self.auto_min_cluster_samples,
+            )
+            return
+
+        cluster_refs = []
+        for cluster_idx in range(self.auto_num_teams):
+            cluster_points = working_samples[labels == cluster_idx]
+            if cluster_points.size == 0:
+                # Fallback defensivo: usa el centro de KMeans si el cluster queda vacío.
+                cluster_ref = np.asarray(km.cluster_centers_[cluster_idx], dtype=np.float32)
+            else:
+                # Usa la mediana por canal (L, A, B) para robustez ante outliers.
+                cluster_ref = np.median(cluster_points, axis=0).astype(np.float32)
+            cluster_refs.append(cluster_ref)
+
+        auto_refs = self._build_auto_team_refs(cluster_refs)
         if len(auto_refs) < 2:
             logger.warning(
                 "Auto bootstrap no pudo construir suficientes equipos (%d). "

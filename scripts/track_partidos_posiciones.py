@@ -145,6 +145,15 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--team-bootstrap-min-cluster-samples",
+        type=int,
+        default=None,
+        help=(
+            "Reenvía a track.py el mínimo de muestras por cluster al cerrar "
+            "auto-bootstrap."
+        ),
+    )
+    parser.add_argument(
         "--continue-on-error",
         action="store_true",
         help="Si un vídeo falla, continúa con el siguiente.",
@@ -507,6 +516,13 @@ def main():
                     str(int(args.team_bootstrap_min_samples)),
                 ]
             )
+        if args.team_bootstrap_min_cluster_samples is not None:
+            command.extend(
+                [
+                    "--team-bootstrap-min-cluster-samples",
+                    str(int(args.team_bootstrap_min_cluster_samples)),
+                ]
+            )
 
         cmd_text = " ".join(f'"{token}"' if " " in token else token for token in command)
         print(f"[{idx}/{total_targets}] {target.label}")
@@ -514,6 +530,11 @@ def main():
             print(f"  team-colors: {current_team_colors}")
         if current_team_mode:
             print(f"  team-mode: {current_team_mode}")
+        if args.team_bootstrap_min_cluster_samples is not None:
+            print(
+                "  team-bootstrap-min-cluster-samples: "
+                f"{int(args.team_bootstrap_min_cluster_samples)}"
+            )
         print(f"  -> {cmd_text}")
 
         if args.dry_run:

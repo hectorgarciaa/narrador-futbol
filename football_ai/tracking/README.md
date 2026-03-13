@@ -104,13 +104,14 @@ Se ha añadido un atributo `team` a cada `STrack`. Si en la primera asociación 
 
 Parámetros en `config.yaml`:
 - `team_assignment_mode`: `reference` o `auto-bootstrap`.
-- `team_bootstrap_frames`: frames iniciales usados para construir centroides en `auto-bootstrap`.
+- `team_bootstrap_frames`: frames iniciales usados para construir clusters de color en `auto-bootstrap`.
 - `team_bootstrap_min_samples`: muestras mínimas de color para cerrar bootstrap.
-- `team_bootstrap_num_teams`: número de centroides/equipos a separar (normalmente 2).
-- `team_auto_name_prefix`: prefijo de nombres automáticos (`Equipo Rojo`, `Equipo Azul`, ...).
+- `team_bootstrap_num_teams`: número de equipos/clusters a separar (normalmente 2).
+- `team_bootstrap_min_cluster_samples`: mínimo de muestras por cluster al cerrar bootstrap (por defecto 4, es decir, >3 nodos por cluster).
+- `team_auto_name_prefix`: prefijo de nombres automáticos (`Equipo 1`, `Equipo 2`, ...).
 - `team_candidate_classes`: clases que aportan muestras de color (por defecto `player`, `goalkeeper`).
 
-En `auto-bootstrap`, una vez cerrada la fase inicial, los centroides se fijan para todo el vídeo para evitar intercambio de etiquetas entre frames.
+En `auto-bootstrap`, una vez cerrada la fase inicial, cada equipo queda fijado con la **mediana de su cluster** para evitar intercambio de etiquetas entre frames. Si aparece un cluster pequeño (<=3), se descarta como ruido y se re-clusteriza sobre el cluster mayor.
 
 ### Extensión: coste espacial en campo 2D
 

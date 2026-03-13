@@ -167,6 +167,15 @@ def parse_args():
             "'auto-bootstrap'. Si no se indica, usa config.yaml."
         ),
     )
+    parser.add_argument(
+        "--team-bootstrap-min-cluster-samples",
+        type=int,
+        default=None,
+        help=(
+            "Muestras mínimas por cluster al cerrar bootstrap en modo "
+            "'auto-bootstrap'. Si no se indica, usa config.yaml."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -763,6 +772,11 @@ if __name__ == "__main__":
             if args.team_bootstrap_min_samples is not None
             else tracking_cfg.get("team_bootstrap_min_samples", 12)
         )
+        team_bootstrap_min_cluster_samples = (
+            args.team_bootstrap_min_cluster_samples
+            if args.team_bootstrap_min_cluster_samples is not None
+            else tracking_cfg.get("team_bootstrap_min_cluster_samples", 4)
+        )
         TEAM_DETECTOR_CONF = {
             "confirmation_threshold": color_clustering_cfg.get("confirmation_threshold", 3),
             "color_tolerance": color_clustering_cfg.get("color_tolerance", 25),
@@ -770,6 +784,7 @@ if __name__ == "__main__":
             "auto_bootstrap_frames": team_bootstrap_frames,
             "auto_bootstrap_min_samples": team_bootstrap_min_samples,
             "auto_num_teams": tracking_cfg.get("team_bootstrap_num_teams", 2),
+            "auto_min_cluster_samples": team_bootstrap_min_cluster_samples,
             "auto_team_name_prefix": tracking_cfg.get("team_auto_name_prefix", "Equipo"),
             "team_candidate_classes": tracking_cfg.get(
                 "team_candidate_classes",

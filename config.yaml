@@ -88,16 +88,19 @@ tracking:
   team_mismatch_penalty: 1000.0
   # Modo de asignación de equipo por color:
   # - reference: usa colores de teams (config.yaml/--team-colors) y ajuste adaptativo.
-  # - auto-bootstrap: aprende 2 centroides al inicio del vídeo y los fija para todo el run.
+  # - auto-bootstrap: aprende 2 clusters al inicio del vídeo y fija la mediana de cada uno para todo el run.
   team_assignment_mode: reference
   # Frames iniciales para bootstrap en modo auto-bootstrap.
   # 1 = usa el primer frame, valores 10-30 suelen ser más robustos.
   team_bootstrap_frames: 1
   # Muestras mínimas de color para cerrar bootstrap.
   team_bootstrap_min_samples: 12
-  # Número de equipos a separar en auto-bootstrap (dataset partido normal = 2).
+  # Número de equipos/clusters a separar en auto-bootstrap (dataset partido normal = 2).
   team_bootstrap_num_teams: 2
-  # Prefijo para los nombres automáticos (ej. "Equipo Rojo", "Equipo Azul").
+  # Tamaño mínimo por cluster en bootstrap (4 => obliga a >3 nodos por cluster).
+  # Si sale un cluster <=3, se re-clusteriza sobre el cluster grande.
+  team_bootstrap_min_cluster_samples: 4
+  # Prefijo para los nombres automáticos (ej. "Equipo 1", "Equipo 2").
   team_auto_name_prefix: "Equipo"
   # Clases que participan en la detección de color de equipo.
   team_candidate_classes: ["player", "goalkeeper"]

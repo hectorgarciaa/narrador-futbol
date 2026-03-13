@@ -61,8 +61,10 @@ También admite:
 - `--team-mode reference|auto-bootstrap`
 - `--team-bootstrap-frames N`
 - `--team-bootstrap-min-samples N`
+- `--team-bootstrap-min-cluster-samples N`
 
-`auto-bootstrap` aprende los centroides de color de camiseta en los frames iniciales y fija esos equipos para todo el vídeo (nombres automáticos por color, p. ej. `Equipo Rojo`, `Equipo Azul`).
+`auto-bootstrap` aprende dos clusters de color de camiseta en los frames iniciales y fija esos equipos para todo el vídeo (nombres neutrales, p. ej. `Equipo 1`, `Equipo 2`). El color final de cada equipo se toma como la **mediana por cluster**.
+Además, exige un mínimo de muestras por cluster (`--team-bootstrap-min-cluster-samples`, por defecto 4): si aparece un cluster pequeño (<=3), se re-clusteriza sobre el cluster grande.
 
 **Flujo:**
 1. Carga toda la configuración de `config.yaml` (modelo, video, output, confianza, tracker, equipos).
@@ -99,6 +101,7 @@ Por defecto usa `--video-source auto`: intenta Kaggle DFL y, si no está disponi
 - `--team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"`: reenvía el override de colores a cada ejecución de `track.py`.
 - `--team-mode auto-bootstrap`: fuerza bootstrap automático de equipos en cada vídeo.
 - `--team-bootstrap-frames N`: controla cuántos frames iniciales usa ese bootstrap.
+- `--team-bootstrap-min-cluster-samples N`: reenvía el mínimo de muestras por cluster para cerrar bootstrap.
 - `--no-prompt-team-colors`: desactiva el modo interactivo para ejecución totalmente automática.
 - `--video-source kaggle-all`: fuerza procesar el dataset Kaggle completo.
 - `--kaggle-path /ruta/al/dataset`: usa un dataset local ya descargado.

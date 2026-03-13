@@ -234,7 +234,9 @@ Si no quieres depender de nombres de equipo predefinidos, puedes activar bootstr
 ```bash
 python scripts/track.py video_prueba_ajustado --team-mode auto-bootstrap --team-bootstrap-frames 1
 ```
-En `auto-bootstrap`, el sistema aprende centroides de color al inicio del vídeo y fija esos equipos durante todo el run (nombres automáticos por color).
+En `auto-bootstrap`, el sistema aprende clusters de color al inicio del vídeo y fija esos equipos durante todo el run (nombres neutrales como `Equipo 1`, `Equipo 2`).
+En este modo, el color de cada equipo se calcula como la **mediana por cluster** (más robusta a outliers que la media).
+También se exige un mínimo de muestras por cluster (por defecto 4): si aparece un cluster pequeño (<=3), se re-clusteriza sobre el cluster grande.
 Para los clips de `data/partidosPosiciones/` hay shortcuts `video_test_*` (ejemplo: `video_test_1`, `video_test_29`).
 Si quieres lanzar tracking en lote con autodetección de fuente de vídeo (`--video-source auto`):
 ```bash
