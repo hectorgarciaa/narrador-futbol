@@ -139,6 +139,34 @@ def parse_args():
             "no existan en config.yaml, se usarán esos equipos nuevos para este run."
         ),
     )
+    parser.add_argument(
+        "--team-mode",
+        choices=("reference", "auto-bootstrap"),
+        default=None,
+        help=(
+            "Modo de asignación de equipo por color. "
+            "'reference' usa equipos de config/--team-colors; "
+            "'auto-bootstrap' aprende centroides al inicio y fija equipos por vídeo."
+        ),
+    )
+    parser.add_argument(
+        "--team-bootstrap-frames",
+        type=int,
+        default=None,
+        help=(
+            "Frames iniciales usados para bootstrap de equipos en modo "
+            "'auto-bootstrap'. Si no se indica, usa config.yaml."
+        ),
+    )
+    parser.add_argument(
+        "--team-bootstrap-min-samples",
+        type=int,
+        default=None,
+        help=(
+            "Muestras mínimas de color para cerrar bootstrap en modo "
+            "'auto-bootstrap'. Si no se indica, usa config.yaml."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -713,7 +741,8 @@ if __name__ == "__main__":
                 "reassign_min_field_distance_m", 4.0
             ),
         }
-        
+        color_clustering_cfg = config.color_clustering
+
         # Team colors
         TEAM_COLORS = config.get_team_colors()
         if args.team_colors:
@@ -722,6 +751,37 @@ if __name__ == "__main__":
                 args.team_colors,
                 logger,
             )
+
+        team_mode = args.team_mode or tracking_cfg.get("team_assignment_mode", "reference")
+        team_bootstrap_frames = (
+            args.team_bootstrap_frames
+            if args.team_bootstrap_frames is not None
+            else tracking_cfg.get("team_bootstrap_frames", 1)
+        )
+        team_bootstrap_min_samples = (
+            args.team_bootstrap_min_samples
+            if args.team_bootstrap_min_samples is not None
+            else tracking_cfg.get("team_bootstrap_min_samples", 12)
+        )
+        TEAM_DETECTOR_CONF = {
+            "confirmation_threshold": color_clustering_cfg.get("confirmation_threshold", 3),
+            "color_tolerance": color_clustering_cfg.get("color_tolerance", 25),
+            "assignment_mode": team_mode,
+            "auto_bootstrap_frames": team_bootstrap_frames,
+            "auto_bootstrap_min_samples": team_bootstrap_min_samples,
+            "auto_num_teams": tracking_cfg.get("team_bootstrap_num_teams", 2),
+            "auto_team_name_prefix": tracking_cfg.get("team_auto_name_prefix", "Equipo"),
+            "team_candidate_classes": tracking_cfg.get(
+                "team_candidate_classes",
+                ["player", "goalkeeper"],
+            ),
+            "shirt_detector_kwargs": {
+                "n_clusters": color_clustering_cfg.get("n_clusters", 2),
+                "init": color_clustering_cfg.get("init", "k-means++"),
+                "n_init": color_clustering_cfg.get("n_init", 10),
+                "random_state": color_clustering_cfg.get("random_state", 0),
+            },
+        }
         
         logger.info(f"Model: {MODEL_PATH}")
         logger.info(f"Video: {VIDEO_PATH}")
@@ -732,6 +792,7 @@ if __name__ == "__main__":
         logger.info(f"Tracking metrics dataset CSV: {METRICS_DATASET_PATH}")
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
+        logger.info(f"Team detector configuration: {TEAM_DETECTOR_CONF}")
         
         # Run tracking
         tracker = Tracker(
@@ -739,6 +800,7 @@ if __name__ == "__main__":
             CONF,
             TRACKER_CONF,
             TEAM_COLORS,
+            team_detector_conf=TEAM_DETECTOR_CONF,
             ball_min_conf=BALL_MIN_CONF,
             max_tracks_per_class=MAX_TRACKS_PER_CLASS,
             field_tracking_conf=FIELD_TRACKING_CONF,

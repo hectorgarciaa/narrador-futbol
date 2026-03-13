@@ -41,8 +41,14 @@ Asignar cada detección del modelo YOLO al equipo correspondiente y mantener un 
 
 ### Implementación
 
-#### 1. Inicialización con colores de referencia
-Se inicializa con los colores RGB de cada equipo definidos en `config.yaml`. Estos son los colores **iniciales** de referencia, que se afinarán con las primeras detecciones reales.
+#### 1. Modos de asignación
+
+`TeamDetector` soporta dos estrategias:
+
+- `reference` (compatibilidad): usa colores de referencia (`teams` en `config.yaml` o `--team-colors`) y ajuste adaptativo.
+- `auto-bootstrap`: ignora nombres de equipo predefinidos, agrupa colores de camiseta en los frames iniciales y fija centroides para todo el vídeo (nombres automáticos por color, p. ej. `Equipo Rojo`, `Equipo Azul`).
+
+En ambos modos, por defecto solo participan `player` y `goalkeeper` en la inferencia de equipo.
 
 #### 2. Sistema de confirmación adaptativo (`update_team_colors`)
 Antes de que un equipo tenga suficientes muestras, el color de referencia puede ser impreciso. El sistema:
@@ -53,6 +59,7 @@ Antes de que un equipo tenga suficientes muestras, el color de referencia puede 
 5. Ese equipo queda marcado como "confirmado" y su color ya no se actualiza más.
 
 Esto permite que el sistema se adapte automáticamente al color exacto de las camisetas en las condiciones de iluminación del partido, en lugar de depender únicamente de los colores precalibrados.
+En `auto-bootstrap`, tras cerrar bootstrap, los centroides quedan fijos para evitar cambios de etiqueta durante el vídeo.
 
 #### 3. Asignación (`assign_team`)
 Con los colores (iniciales o confirmados), asigna el equipo por **distancia euclidiana mínima en espacio RGB** entre el color de camiseta detectado y los colores de referencia actualizados.
@@ -70,7 +77,10 @@ td = TeamDetector(
         "Wolfsburgo":  np.array([224, 77, 196])
     },
     confirmation_threshold=3,   # de config.yaml: color_clustering.confirmation_threshold
-    color_tolerance=25          # de config.yaml: color_clustering.color_tolerance
+    color_tolerance=25,         # de config.yaml: color_clustering.color_tolerance
+    assignment_mode="auto-bootstrap",
+    auto_bootstrap_frames=1,
+    auto_bootstrap_min_samples=12
 )
 
 # frame_detections es el resultado YOLO de un frame (objeto Results)

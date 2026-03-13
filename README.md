@@ -230,17 +230,35 @@ python scripts/track.py video_prueba_ajustado --team-colors "{Madrid:blanco, Wol
 Los nombres de equipo se mapean de forma flexible contra los equipos de `config.yaml` (mayúsculas/minúsculas, acentos y pequeñas erratas).
 Si pasas un nombre que no exista en `config.yaml` (ej. `Stutgart`), no falla: ese nombre se usa como equipo nuevo para esa ejecución.
 Si en `--team-colors` hay al menos un equipo nuevo, se usan exactamente los equipos indicados ahí para ese run.
+Si no quieres depender de nombres de equipo predefinidos, puedes activar bootstrap automático por color:
+```bash
+python scripts/track.py video_prueba_ajustado --team-mode auto-bootstrap --team-bootstrap-frames 1
+```
+En `auto-bootstrap`, el sistema aprende centroides de color al inicio del vídeo y fija esos equipos durante todo el run (nombres automáticos por color).
 Para los clips de `data/partidosPosiciones/` hay shortcuts `video_test_*` (ejemplo: `video_test_1`, `video_test_29`).
-Si quieres lanzar tracking para **todos** los vídeos de `data/partidosPosiciones` en lote:
+Si quieres lanzar tracking en lote con autodetección de fuente de vídeo (`--video-source auto`):
 ```bash
 python scripts/track_partidos_posiciones.py
+```
+En `auto`, el script intenta primero el dataset Kaggle DFL (train+test) y, si no está disponible, cae a `data/partidosPosiciones`.
+Si quieres forzar cada modo:
+```bash
+# Solo clips de data/partidosPosiciones
+python scripts/track_partidos_posiciones.py --video-source partidos-posiciones
+
+# Dataset Kaggle DFL completo (train+test)
+python scripts/track_partidos_posiciones.py --video-source kaggle-all
+```
+Si el dataset ya está descargado localmente:
+```bash
+python scripts/track_partidos_posiciones.py --video-source kaggle-all --kaggle-path /ruta/al/dataset
 ```
 Por defecto solo procesa vídeos que **todavía no tienen** `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (evita reejecutar).
 Si quieres reprocesar todo:
 ```bash
 python scripts/track_partidos_posiciones.py --force
 ```
-Por defecto este script usa un plan fijo de colores por vídeo (`video_test_*`) y nombres de equipo consistentes por color.
+Cuando el lote usa `data/partidosPosiciones` (modo `partidos-posiciones` o fallback de `auto`), el script aplica un plan fijo de colores por vídeo (`video_test_*`) y nombres de equipo consistentes por color.
 Ejemplo de convención:
 - `blanco` -> `Real Madrid`
 - `negro` -> `Equipo Negro`
@@ -253,6 +271,11 @@ Si quieres introducir colores manualmente en cada vídeo:
 ```bash
 python scripts/track_partidos_posiciones.py --prompt-team-colors
 ```
+Si prefieres bootstrap automático por color en cada vídeo:
+```bash
+python scripts/track_partidos_posiciones.py --video-source kaggle-all --team-mode auto-bootstrap --team-bootstrap-frames 1
+```
+Para `kaggle-all`, si no pasas `--team-colors` ni `--team-mode`, el batch usa `auto-bootstrap` automáticamente.
 Modo prueba (sin ejecutar):
 ```bash
 python scripts/track_partidos_posiciones.py --dry-run
@@ -264,6 +287,14 @@ python scripts/track_partidos_posiciones.py --team-colors "{Madrid:blanco, Wolsf
 Si quieres desactivar el plan fijo por vídeo:
 ```bash
 python scripts/track_partidos_posiciones.py --no-default-color-plan --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
+```
+Paralelización opcional del lote:
+```bash
+# CPU o pruebas controladas
+python scripts/track_partidos_posiciones.py --workers 2 --continue-on-error
+
+# Forzar paralelo en GPU (usar con cautela por VRAM)
+python scripts/track_partidos_posiciones.py --workers 2 --allow-gpu-parallel --continue-on-error
 ```
 Ejecuta detección + identificación de equipo + ByteTrack, genera el vídeo anotado en `output/` y muestra métricas en consola.
 Por defecto usa `paths.data.video_prueba_corto` (si existe) y, en caso contrario, `paths.data.video_prueba`.

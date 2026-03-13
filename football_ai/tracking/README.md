@@ -48,7 +48,7 @@ Si no pasas `field_tracking_conf`, el tracker puede funcionar solo con `bbox` en
 Por cada frame del vídeo:
 
 1. **Detección YOLO** (`Detector.detect`): genera las detecciones brutas del frame.
-2. **Identificación de equipo** (`TeamDetector.detect_teams`): por cada detección extrae el color de camiseta (KMeans en LAB) y asigna un equipo.
+2. **Identificación de equipo** (`TeamDetector.detect_teams`): por cada detección de `player/goalkeeper` extrae color de camiseta (KMeans en LAB) y asigna equipo. Puede operar en modo `reference` o `auto-bootstrap`.
 3. **PnLCalibFieldProjector**: calibra el campo en ese frame y proyecta `player` y `goalkeeper` a coordenadas métricas `[x_m, y_m]` sobre el césped.
 4. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional y, para `player`/`goalkeeper`, incorpora distancia en el campo 2D al coste de asociación.
 5. **Fallback de balón**: si ByteTrack no activó ningún track para el balón en ese frame (porque su confianza es demasiado baja para el umbral de activación), se añaden las detecciones YOLO crudas con IDs `"fallback_N"`. Esto garantiza que siempre haya información del balón aunque no sea trazable.
@@ -99,6 +99,18 @@ ByteTrack es un algoritmo de tracking multi-objeto que mejora otros métodos al 
 ### Extensión: penalización por equipo
 
 Se ha añadido un atributo `team` a cada `STrack`. Si en la primera asociación se intenta asociar una detección de un equipo distinto al del track, se añade una **penalización** (configurable vía `team_penalty` en config.yaml, por defecto 1000) a la matriz de costes IoU, haciendo esa asociación prácticamente imposible.
+
+### Modos de asignación de equipo (TeamDetector)
+
+Parámetros en `config.yaml`:
+- `team_assignment_mode`: `reference` o `auto-bootstrap`.
+- `team_bootstrap_frames`: frames iniciales usados para construir centroides en `auto-bootstrap`.
+- `team_bootstrap_min_samples`: muestras mínimas de color para cerrar bootstrap.
+- `team_bootstrap_num_teams`: número de centroides/equipos a separar (normalmente 2).
+- `team_auto_name_prefix`: prefijo de nombres automáticos (`Equipo Rojo`, `Equipo Azul`, ...).
+- `team_candidate_classes`: clases que aportan muestras de color (por defecto `player`, `goalkeeper`).
+
+En `auto-bootstrap`, una vez cerrada la fase inicial, los centroides se fijan para todo el vídeo para evitar intercambio de etiquetas entre frames.
 
 ### Extensión: coste espacial en campo 2D
 

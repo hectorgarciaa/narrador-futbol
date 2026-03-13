@@ -57,6 +57,12 @@ python scripts/track.py video_prueba_ajustado
 ```
 El valor puede ser una clave de `paths.data` en `config.yaml` o una ruta de vídeo directa.
 También admite `--team-colors "{Equipo:color, Otro:color}"`, con colores en lenguaje natural (ej. `rojo`, `verde clarito`, `azul marino`) o en HEX/RGB. Si incluyes equipos no definidos en `config.yaml`, se aceptan y se usan para esa ejecución.
+También admite:
+- `--team-mode reference|auto-bootstrap`
+- `--team-bootstrap-frames N`
+- `--team-bootstrap-min-samples N`
+
+`auto-bootstrap` aprende los centroides de color de camiseta en los frames iniciales y fija esos equipos para todo el vídeo (nombres automáticos por color, p. ej. `Equipo Rojo`, `Equipo Azul`).
 
 **Flujo:**
 1. Carga toda la configuración de `config.yaml` (modelo, video, output, confianza, tracker, equipos).
@@ -75,23 +81,41 @@ Es el script principal del proyecto y sirve como referencia de cómo usar el paq
 
 ---
 
-### `track_partidos_posiciones.py` — Batch para `data/partidosPosiciones`
+### `track_partidos_posiciones.py` — Batch de tracking (partidosPosiciones o Kaggle DFL)
 
-**Objetivo:** ejecutar `scripts/track.py` automáticamente para todos los vídeos definidos en `config.yaml` dentro de `paths.data` que apunten a `data/partidosPosiciones/`.
+**Objetivo:** ejecutar `scripts/track.py` automáticamente en lote:
+- shortcuts `video_test_*` de `data/partidosPosiciones` (vía `config.yaml`), o
+- todos los `.mp4` del dataset Kaggle DFL (train+test).
 
 **Uso básico:**
 ```bash
 python scripts/track_partidos_posiciones.py
 ```
-Por defecto funciona en modo interactivo: pide colores por terminal para cada vídeo antes de lanzarlo.
+Por defecto usa `--video-source auto`: intenta Kaggle DFL y, si no está disponible, cae a `data/partidosPosiciones`.
 
 **Opciones útiles:**
 - `--dry-run`: muestra qué comandos ejecutaría sin lanzar el tracking.
 - `--continue-on-error`: continúa con el siguiente vídeo si uno falla.
 - `--team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"`: reenvía el override de colores a cada ejecución de `track.py`.
+- `--team-mode auto-bootstrap`: fuerza bootstrap automático de equipos en cada vídeo.
+- `--team-bootstrap-frames N`: controla cuántos frames iniciales usa ese bootstrap.
 - `--no-prompt-team-colors`: desactiva el modo interactivo para ejecución totalmente automática.
+- `--video-source kaggle-all`: fuerza procesar el dataset Kaggle completo.
+- `--kaggle-path /ruta/al/dataset`: usa un dataset local ya descargado.
+- `--workers N`: paraleliza el lote con N procesos de `track.py` (recomendado `1` en GPU salvo pruebas controladas).
+- `--allow-gpu-parallel`: permite `--workers > 1` aunque haya CUDA.
 
-El script procesa los shortcuts en orden natural (`video_test_1`, `video_test_2`, `video_test_11`, ...), muestra progreso en consola y devuelve código de salida `1` si hay fallos.
+Ejemplos Kaggle:
+```bash
+# Descarga con kagglehub (si no está cacheado) y procesa train+test
+python scripts/track_partidos_posiciones.py --video-source kaggle-all
+
+# Reutiliza dataset local sin descargar
+python scripts/track_partidos_posiciones.py --video-source kaggle-all --kaggle-path /ruta/dfl
+```
+
+El plan fijo de colores por vídeo (`video_test_*`) solo aplica a `data/partidosPosiciones`; para Kaggle puedes usar `--team-colors` global o `--prompt-team-colors`.
+Si en Kaggle no pasas `--team-colors` ni `--team-mode`, el batch usa `auto-bootstrap` por defecto.
 
 ---
 
