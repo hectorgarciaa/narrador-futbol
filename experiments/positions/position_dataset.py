@@ -14,10 +14,13 @@ import pandas as pd
 
 ROLE_LABELS_V1 = (
     "POR",
+    "CI",
     "LI",
     "DFC_IZQ",
+    "DFC_CENT",
     "DFC_DER",
     "LD",
+    "CD",
     "MC",
     "MI",
     "MD",
@@ -220,6 +223,7 @@ def build_periodic_label_schedule(
     every_seconds: float = 6.0,
     start_seconds: float = 0.0,
     min_players: int = 18,
+    window_frames: int = 0,
 ) -> pd.DataFrame:
     columns = [
         "target_second",
@@ -236,12 +240,14 @@ def build_periodic_label_schedule(
         raise ValueError(
             f"every_seconds debe ser > 0 (recibido {every_seconds})."
         )
+    if int(window_frames) < 0:
+        raise ValueError(
+            f"window_frames debe ser >= 0 (recibido {window_frames})."
+        )
 
-    per_frame_players = (
-        observations.groupby("frame_id")["player_id"]
-        .nunique()
-        .sort_index()
-    )
+    # En este pipeline `observations` ya contiene player+goalkeeper. Usamos
+    # el número total de detecciones por frame.
+    per_frame_players = observations.groupby("frame_id").size().sort_index()
     eligible = per_frame_players[per_frame_players >= int(min_players)]
     if eligible.empty:
         eligible = per_frame_players
@@ -252,23 +258,38 @@ def build_periodic_label_schedule(
     max_frame = int(per_frame_players.index.max())
     start_frame = max(0, int(round(float(start_seconds) * float(fps))))
     step_frames = max(1, int(round(float(every_seconds) * float(fps))))
+    window_frames = int(window_frames)
 
     target_frames = list(range(start_frame, max_frame + 1, step_frames))
     rows: list[dict[str, Any]] = []
     for target_frame in target_frames:
-        idx = int(np.searchsorted(available_frames, target_frame, side="left"))
-        candidates: list[int] = []
-        if idx < len(available_frames):
-            candidates.append(int(available_frames[idx]))
-        if idx > 0:
-            candidates.append(int(available_frames[idx - 1]))
-        if not candidates:
-            continue
+        if window_frames > 0:
+            window_start = int(target_frame)
+            window_end = int(min(target_frame + window_frames, max_frame))
+            in_window = eligible[
+                (eligible.index >= window_start) & (eligible.index <= window_end)
+            ]
+        else:
+            in_window = pd.Series(dtype=np.int64)
 
-        selected_frame = min(
-            candidates,
-            key=lambda frame_id: (abs(frame_id - target_frame), frame_id),
-        )
+        if not in_window.empty:
+            max_players = int(in_window.max())
+            # `in_window` ya está ordenada por frame_id ascendente, así que el
+            # primer candidato cumple el desempate "el primero".
+            selected_frame = int(in_window[in_window == max_players].index[0])
+        else:
+            idx = int(np.searchsorted(available_frames, target_frame, side="left"))
+            candidates: list[int] = []
+            if idx < len(available_frames):
+                candidates.append(int(available_frames[idx]))
+            if idx > 0:
+                candidates.append(int(available_frames[idx - 1]))
+            if not candidates:
+                continue
+            selected_frame = min(
+                candidates,
+                key=lambda frame_id: (abs(frame_id - target_frame), frame_id),
+            )
         rows.append(
             {
                 "target_second": float(target_frame / fps),
@@ -299,6 +320,7 @@ def build_periodic_role_label_template(
     every_seconds: float = 6.0,
     start_seconds: float = 0.0,
     min_players: int = 18,
+    window_frames: int = 0,
 ) -> dict[str, Any]:
     schedule_df = build_periodic_label_schedule(
         observations=observations,
@@ -306,6 +328,7 @@ def build_periodic_role_label_template(
         every_seconds=every_seconds,
         start_seconds=start_seconds,
         min_players=min_players,
+        window_frames=window_frames,
     )
 
     labels: list[dict[str, Any]] = []
@@ -527,6 +550,360 @@ def apply_periodic_role_labels(
     return result.merge(labels, on=merge_keys, how="left")
 
 
+def extract_schedule_frames_from_label_json(label_json_path: Path) -> list[int]:
+    with Path(label_json_path).open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, Mapping):
+        return []
+    schedule = payload.get("schedule", [])
+    if not isinstance(schedule, list):
+        return []
+    frames: list[int] = []
+    for row in schedule:
+        if not isinstance(row, Mapping):
+            continue
+        frame_id = row.get("frame_id")
+        try:
+            frames.append(int(frame_id))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(frames))
+
+
+def upsert_role_labels_in_template_json(
+    label_json_path: Path,
+    frame_role_maps: Mapping[Any, Mapping[Any, Mapping[Any, Any]]],
+) -> dict[str, Any]:
+    path = Path(label_json_path)
+    with path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"Formato inválido en {path}; se esperaba un objeto JSON.")
+
+    labels = payload.get("labels", [])
+    if not isinstance(labels, list):
+        raise ValueError(f"Formato inválido en {path}; 'labels' debe ser una lista.")
+
+    key_to_idx: dict[tuple[int, str, int], int] = {}
+    for idx, row in enumerate(labels):
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            frame_id = int(row.get("frame_id"))
+            team_id = str(row.get("team_id"))
+            player_id = int(row.get("player_id"))
+        except (TypeError, ValueError):
+            continue
+        key_to_idx[(frame_id, team_id, player_id)] = idx
+
+    updated = 0
+    inserted = 0
+    for frame_id_raw, team_map in frame_role_maps.items():
+        if not isinstance(team_map, Mapping):
+            continue
+        try:
+            frame_id = int(frame_id_raw)
+        except (TypeError, ValueError):
+            continue
+        for team_id_raw, player_map in team_map.items():
+            if not isinstance(player_map, Mapping):
+                continue
+            team_id = str(team_id_raw)
+            for player_id_raw, role_raw in player_map.items():
+                try:
+                    player_id = int(player_id_raw)
+                except (TypeError, ValueError):
+                    continue
+                role_label = None if role_raw is None else str(role_raw).strip()
+                if role_label == "":
+                    role_label = None
+
+                key = (frame_id, team_id, player_id)
+                if key in key_to_idx:
+                    idx = key_to_idx[key]
+                    row = dict(labels[idx]) if isinstance(labels[idx], Mapping) else {}
+                    row["frame_id"] = frame_id
+                    row["team_id"] = team_id
+                    row["player_id"] = player_id
+                    row["role_label"] = role_label
+                    labels[idx] = row
+                    updated += 1
+                else:
+                    labels.append(
+                        {
+                            "frame_id": frame_id,
+                            "team_id": team_id,
+                            "player_id": player_id,
+                            "role_label": role_label,
+                        }
+                    )
+                    key_to_idx[key] = len(labels) - 1
+                    inserted += 1
+
+    payload = dict(payload)
+    payload["labels"] = labels
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    return {
+        "label_json_path": str(path),
+        "updated": int(updated),
+        "inserted": int(inserted),
+        "total_labels": int(len(labels)),
+    }
+
+
+def apply_periodic_role_labels_propagated(
+    observations: pd.DataFrame,
+    label_entries: pd.DataFrame,
+    schedule_frames: Sequence[int] | None = None,
+) -> pd.DataFrame:
+    result = observations.copy()
+    if result.empty:
+        result["role_label"] = pd.NA
+        return result
+
+    result["role_label"] = pd.NA
+    if label_entries.empty:
+        return result
+
+    labels = label_entries.copy()
+    if "role_label" not in labels.columns:
+        labels["role_label"] = pd.NA
+    labels["role_label"] = labels["role_label"].astype("string").str.strip()
+    labels.loc[labels["role_label"] == "", "role_label"] = pd.NA
+    labels = labels[labels["role_label"].notna()].copy()
+    if labels.empty:
+        return result
+
+    labels["frame_id"] = pd.to_numeric(labels["frame_id"], errors="coerce").astype("Int64")
+    labels["player_id"] = pd.to_numeric(labels["player_id"], errors="coerce").astype("Int64")
+    labels["team_id"] = labels["team_id"].astype(str)
+    labels = labels.dropna(subset=["frame_id", "player_id"]).copy()
+    labels["frame_id"] = labels["frame_id"].astype(int)
+    labels["player_id"] = labels["player_id"].astype(int)
+
+    if schedule_frames is None:
+        keyframes = sorted(labels["frame_id"].unique().tolist())
+    else:
+        keyframes = sorted({int(frame) for frame in schedule_frames})
+    if not keyframes:
+        return result
+
+    merge_keys = ["team_id", "player_id"]
+    max_obs_frame = int(result["frame_id"].max())
+
+    for idx, start_frame in enumerate(keyframes):
+        end_frame_exclusive = (
+            keyframes[idx + 1]
+            if idx + 1 < len(keyframes)
+            else max_obs_frame + 1
+        )
+
+        frame_labels = labels[labels["frame_id"] == int(start_frame)][
+            merge_keys + ["role_label"]
+        ].drop_duplicates(subset=merge_keys, keep="last")
+        if frame_labels.empty:
+            continue
+
+        interval_mask = (
+            (result["frame_id"] >= int(start_frame))
+            & (result["frame_id"] < int(end_frame_exclusive))
+        )
+        if not bool(interval_mask.any()):
+            continue
+
+        joined = result.loc[interval_mask, merge_keys].merge(
+            frame_labels,
+            on=merge_keys,
+            how="left",
+        )
+        result.loc[interval_mask, "role_label"] = joined["role_label"].to_numpy()
+
+    return result
+
+
+def upsert_run_to_common_dataset(
+    project_root: Path,
+    labeled_obs_df: pd.DataFrame,
+    samples_df: pd.DataFrame,
+    teammates_tensor: np.ndarray,
+    teammate_mask: np.ndarray,
+    feature_spec: FeatureSpec,
+    source_info: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    if (
+        "match_id" not in labeled_obs_df.columns
+        or "match_id" not in samples_df.columns
+    ):
+        return append_run_to_common_dataset(
+            project_root=project_root,
+            labeled_obs_df=labeled_obs_df,
+            samples_df=samples_df,
+            teammates_tensor=teammates_tensor,
+            teammate_mask=teammate_mask,
+            feature_spec=feature_spec,
+            source_info=source_info,
+        )
+
+    common_dir = project_root / "output" / "datasets" / "positions" / "common"
+    common_dir.mkdir(parents=True, exist_ok=True)
+
+    base_table_path = common_dir / "base_table.csv"
+    samples_csv_path = common_dir / "samples_metadata_and_obj_features.csv"
+    samples_npz_path = common_dir / "samples_teammates.npz"
+    meta_json_path = common_dir / "dataset_meta.json"
+    sources_log_path = common_dir / "sources.jsonl"
+
+    new_matches = sorted(
+        {str(v) for v in samples_df["match_id"].dropna().astype(str).unique().tolist()}
+    )
+    if not new_matches:
+        return append_run_to_common_dataset(
+            project_root=project_root,
+            labeled_obs_df=labeled_obs_df,
+            samples_df=samples_df,
+            teammates_tensor=teammates_tensor,
+            teammate_mask=teammate_mask,
+            feature_spec=feature_spec,
+            source_info=source_info,
+        )
+
+    if base_table_path.exists():
+        existing_base = pd.read_csv(base_table_path)
+        if "match_id" in existing_base.columns:
+            existing_base = existing_base[
+                ~existing_base["match_id"].astype(str).isin(new_matches)
+            ].copy()
+        combined_base = pd.concat(
+            [existing_base, labeled_obs_df],
+            ignore_index=True,
+            sort=False,
+        )
+    else:
+        combined_base = labeled_obs_df.copy()
+    combined_base.to_csv(base_table_path, index=False)
+
+    new_tensor = np.asarray(teammates_tensor, dtype=np.float32)
+    new_mask = np.asarray(teammate_mask, dtype=np.uint8)
+    if new_tensor.ndim != 3:
+        raise ValueError(
+            f"teammates_tensor debe ser 3D; shape actual: {new_tensor.shape}"
+        )
+    if new_mask.ndim != 2:
+        raise ValueError(
+            f"teammate_mask debe ser 2D; shape actual: {new_mask.shape}"
+        )
+    if len(samples_df) != new_tensor.shape[0] or len(samples_df) != new_mask.shape[0]:
+        raise ValueError(
+            "Muestras y tensores nuevos no tienen la misma longitud."
+        )
+
+    if samples_csv_path.exists():
+        existing_samples = pd.read_csv(samples_csv_path)
+    else:
+        existing_samples = pd.DataFrame()
+
+    if samples_npz_path.exists():
+        with np.load(samples_npz_path) as old_npz:
+            old_tensor = np.asarray(old_npz["teammates_tensor"], dtype=np.float32)
+            old_mask = np.asarray(old_npz["teammate_mask"], dtype=np.uint8)
+    else:
+        old_tensor = np.zeros((0, new_tensor.shape[1], new_tensor.shape[2]), dtype=np.float32)
+        old_mask = np.zeros((0, new_mask.shape[1]), dtype=np.uint8)
+
+    if len(existing_samples) != old_tensor.shape[0] or len(existing_samples) != old_mask.shape[0]:
+        raise ValueError(
+            "Inconsistencia en dataset común: samples CSV y NPZ no coinciden en longitud."
+        )
+
+    if len(existing_samples) > 0 and "match_id" in existing_samples.columns:
+        keep_samples_mask = ~existing_samples["match_id"].astype(str).isin(new_matches)
+    else:
+        keep_samples_mask = np.ones((len(existing_samples),), dtype=bool)
+
+    keep_samples_mask = np.asarray(keep_samples_mask, dtype=bool)
+    kept_samples = existing_samples.loc[keep_samples_mask].reset_index(drop=True)
+    kept_tensor = old_tensor[keep_samples_mask]
+    kept_mask = old_mask[keep_samples_mask]
+
+    if kept_tensor.shape[0] > 0 and new_tensor.shape[0] > 0:
+        if kept_tensor.shape[1:] != new_tensor.shape[1:]:
+            raise ValueError(
+                "Incompatibilidad en teammates_tensor entre dataset existente y nuevo."
+            )
+        if kept_mask.shape[1:] != new_mask.shape[1:]:
+            raise ValueError(
+                "Incompatibilidad en teammate_mask entre dataset existente y nuevo."
+            )
+
+    combined_samples = pd.concat(
+        [kept_samples, samples_df],
+        ignore_index=True,
+        sort=False,
+    )
+    combined_samples.to_csv(samples_csv_path, index=False)
+
+    if kept_tensor.shape[0] == 0:
+        combined_tensor = new_tensor
+        combined_mask = new_mask
+    elif new_tensor.shape[0] == 0:
+        combined_tensor = kept_tensor
+        combined_mask = kept_mask
+    else:
+        combined_tensor = np.concatenate([kept_tensor, new_tensor], axis=0)
+        combined_mask = np.concatenate([kept_mask, new_mask], axis=0)
+
+    np.savez_compressed(
+        samples_npz_path,
+        teammates_tensor=combined_tensor.astype(np.float32),
+        teammate_mask=combined_mask.astype(np.uint8),
+    )
+
+    source_record = dict(source_info or {})
+    source_record["upserted_at"] = datetime.now().isoformat()
+    source_record["upsert_matches"] = new_matches
+    with sources_log_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(source_record, ensure_ascii=False, default=str) + "\n")
+
+    previous_meta = {}
+    if meta_json_path.exists():
+        try:
+            with meta_json_path.open("r", encoding="utf-8") as f:
+                previous_meta = json.load(f)
+        except Exception:
+            previous_meta = {}
+
+    meta = {
+        "updated_at": datetime.now().isoformat(),
+        "num_runs": int(previous_meta.get("num_runs", 0)) + 1,
+        "num_base_rows": int(len(combined_base)),
+        "num_samples": int(len(combined_samples)),
+        "num_matches": int(combined_samples["match_id"].nunique())
+        if "match_id" in combined_samples.columns and len(combined_samples) > 0
+        else 0,
+        "max_teammates": int(combined_tensor.shape[1]) if combined_tensor.ndim == 3 else 0,
+        "teammate_feature_dim": int(combined_tensor.shape[2]) if combined_tensor.ndim == 3 else 0,
+        "objective_feature_names": list(feature_spec.objective_feature_names),
+        "teammate_feature_names": list(feature_spec.teammate_feature_names),
+        "sources_log_path": str(sources_log_path),
+    }
+    with meta_json_path.open("w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    return {
+        "common_dir": common_dir,
+        "base_table_path": base_table_path,
+        "samples_csv_path": samples_csv_path,
+        "samples_npz_path": samples_npz_path,
+        "meta_json_path": meta_json_path,
+        "sources_log_path": sources_log_path,
+        "num_base_rows": int(len(combined_base)),
+        "num_samples": int(len(combined_samples)),
+        "upsert_matches": new_matches,
+    }
+
+
 def append_run_to_common_dataset(
     project_root: Path,
     labeled_obs_df: pd.DataFrame,
@@ -677,6 +1054,8 @@ def render_frame_with_player_ids(
     video_path: Path,
     frame_observations: pd.DataFrame,
     frame_id: int,
+    show_team_id: bool = False,
+    show_player_id: bool = True,
 ) -> np.ndarray:
     frame = get_video_frame(video_path, frame_id)
     if frame_observations.empty:
@@ -697,18 +1076,22 @@ def render_frame_with_player_ids(
             continue
         x1, y1, x2, y2 = [int(v) for v in bbox]
         color = team_colors.get(row["team_id"], (255, 255, 255))
-        label = f'{row["player_id"]}:{row["team_id"]}'
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(
-            frame,
-            label,
-            (x1, max(18, y1 - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            color,
-            2,
-            lineType=cv2.LINE_AA,
-        )
+        if show_player_id:
+            if show_team_id:
+                label = f'{row["player_id"]}:{row["team_id"]}'
+            else:
+                label = str(int(row["player_id"]))
+            cv2.putText(
+                frame,
+                label,
+                (x1, max(18, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                2,
+                lineType=cv2.LINE_AA,
+            )
     return frame
 
 
