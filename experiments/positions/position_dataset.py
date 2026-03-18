@@ -29,6 +29,10 @@ ROLE_LABELS_V1 = (
     "DC",
 )
 
+POSITIONS_DATASET_DIR = Path("data/posiciones_etiquetadas")
+POSITIONS_COMMON_DIR = POSITIONS_DATASET_DIR / "common"
+POSITIONS_LABELS_DIR = POSITIONS_DATASET_DIR / "labels"
+
 
 @dataclass(frozen=True)
 class FeatureSpec:
@@ -746,7 +750,7 @@ def upsert_run_to_common_dataset(
             source_info=source_info,
         )
 
-    common_dir = project_root / "output" / "datasets" / "positions" / "common"
+    common_dir = project_root / POSITIONS_COMMON_DIR
     common_dir.mkdir(parents=True, exist_ok=True)
 
     base_table_path = common_dir / "base_table.csv"
@@ -913,7 +917,7 @@ def append_run_to_common_dataset(
     feature_spec: FeatureSpec,
     source_info: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    common_dir = project_root / "output" / "datasets" / "positions" / "common"
+    common_dir = project_root / POSITIONS_COMMON_DIR
     common_dir.mkdir(parents=True, exist_ok=True)
 
     base_table_path = common_dir / "base_table.csv"
@@ -1219,7 +1223,9 @@ def _oriented_xy(
 ) -> tuple[np.ndarray, np.ndarray]:
     if int(attack_direction) >= 0:
         return x, y
-    return 1.0 - x, y
+    # Rotamos 180 grados la vista canónica para preservar la semántica
+    # futbolística izquierda/derecha al alinear el ataque a +x.
+    return 1.0 - x, 1.0 - y
 
 
 def build_role_samples(
@@ -1306,6 +1312,8 @@ def build_role_samples(
             if "vy" in team_frame.columns
             else np.zeros((len(team_frame),), dtype=np.float32)
         )
+        if attack_direction < 0:
+            team_frame["vy_ori"] = -team_frame["vy_ori"]
         team_frame["rank_x_team"] = (
             team_frame["x_ori"].rank(method="dense", ascending=True).astype(np.float32)
         )

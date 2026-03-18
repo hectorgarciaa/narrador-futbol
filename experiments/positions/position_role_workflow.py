@@ -13,6 +13,8 @@ import pandas as pd
 
 try:
     from .position_dataset import (
+        POSITIONS_DATASET_DIR,
+        POSITIONS_LABELS_DIR,
         ROLE_LABELS_V1,
         FeatureSpec,
         add_velocity_features,
@@ -42,6 +44,8 @@ except ImportError:  # pragma: no cover - soporte ejecución directa del archivo
         sys.path.insert(0, str(project_root))
 
     from experiments.positions.position_dataset import (  # type: ignore
+        POSITIONS_DATASET_DIR,
+        POSITIONS_LABELS_DIR,
         ROLE_LABELS_V1,
         FeatureSpec,
         add_velocity_features,
@@ -184,9 +188,7 @@ def prepare_periodic_role_workflow(config: WorkflowConfig) -> tuple[WorkflowCont
         )
 
     match_id = video_path.stem.replace(" ", "_")
-    labels_dir = config.labels_dir or (
-        project_root / "output" / "datasets" / "positions" / "labels"
-    )
+    labels_dir = config.labels_dir or (project_root / POSITIONS_LABELS_DIR)
     labels_json_path = labels_dir / f"{match_id}_labels_every_{int(config.label_every_seconds)}s.json"
 
     tracks = load_tracks_json(tracks_path)
@@ -338,13 +340,7 @@ def export_position_dataset_run(
     attack_direction_by_team: Mapping[str, int],
 ) -> dict[str, Any]:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = (
-        context.project_root
-        / "output"
-        / "datasets"
-        / "positions"
-        / f"{context.match_id}_{run_id}"
-    )
+    out_dir = context.project_root / POSITIONS_DATASET_DIR / f"{context.match_id}_{run_id}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     base_table_path = out_dir / "base_table.csv"

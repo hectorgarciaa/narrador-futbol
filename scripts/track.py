@@ -493,9 +493,8 @@ def build_tracking_metrics_output_paths(config, video_path):
     ) / "tracker"
     tracks_dir.mkdir(parents=True, exist_ok=True)
 
-    output_base = config.get_path("paths", "output", "base", create_if_missing=True)
     dataset_path = (
-        output_base / "datasets" / "positions" / "common" / "tracking_metrics.csv"
+        PROJECT_ROOT / "data" / "posiciones_etiquetadas" / "common" / "tracking_metrics.csv"
     )
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
 

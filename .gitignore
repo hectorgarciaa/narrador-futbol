@@ -30,6 +30,9 @@ ENV/
 # Dataset files
 data/detection/**
 !data/detection/.gitkeep
+data/posiciones_etiquetadas/**
+!data/posiciones_etiquetadas/
+!data/posiciones_etiquetadas/README.md
 !data/partidosPosiciones/
 !data/partidosPosiciones/.gitkeep
 !data/partidosPosiciones/README.md
@@ -37,6 +40,11 @@ data/detection/**
 
 # Model files (large binary files, exclude all)
 models/reference_points/
+models/positions/set_transformer/**
+!models/positions/
+!models/positions/README.md
+!models/positions/set_transformer/
+!models/positions/set_transformer/README.md
 models/finetuning/**/*.pt
 models/finetuning-balon/**/*.pt
 models/yolo/**/*.pt

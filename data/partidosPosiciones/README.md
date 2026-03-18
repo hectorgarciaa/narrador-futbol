@@ -12,7 +12,7 @@ Clips de vídeo usados para el flujo experimental de dataset de roles posicional
 2. Guarda el JSON de tracks por vídeo en:
    - `output/tracks_json/tracker/<video_sanitizado>_tracks.json`
    - resumen por vídeo: `output/tracks_json/tracker/<video_sanitizado>_summary.json`
-   - dataset acumulado de métricas: `output/datasets/positions/common/tracking_metrics.csv`
+   - dataset acumulado de métricas: `data/posiciones_etiquetadas/common/tracking_metrics.csv`
 3. Ejecuta el notebook:
    - `jupyter lab experiments/positions/position_role_dataset.ipynb`
 

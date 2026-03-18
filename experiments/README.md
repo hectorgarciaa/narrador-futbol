@@ -8,8 +8,10 @@ Notebooks de Jupyter para exploración, análisis y visualización interactiva d
 experiments/
 ├── detection/
 │   └── finetuning.ipynb              # Análisis del entrenamiento YOLO
+├── set_transformer.ipynb             # Entrenamiento + aplicación de Set Transformer para roles
 ├── positions/
 │   ├── position_dataset.py            # Construcción de tablas/features para dataset de roles
+│   ├── set_transformer_pipeline.py    # Pipeline reusable de entrenamiento/inferencia
 │   └── position_role_dataset.ipynb    # Pipeline guiado de etiquetado y exportación del dataset
 ├── reference_points/
 │   ├── classical_reference_points.py  # Utilidades para homografía clásica
@@ -59,7 +61,7 @@ Pipeline que implementa:
 - Propaga etiquetas al resto de frames por ID canónico.
 - Reorienta coordenadas por equipo para que el ataque del equipo objetivo apunte a `+x`.
 - Construye muestras con features del jugador objetivo + tensor de compañeros (con padding y máscara).
-- Exporta el dataset a `output/datasets/positions/<match_id>_<timestamp>/`.
+- Exporta el dataset a `data/posiciones_etiquetadas/<match_id>_<timestamp>/`.
 
 Salidas principales:
 - `base_table.csv`
@@ -89,6 +91,28 @@ Funciones clave:
 - `build_role_samples`: crea samples y tensores de compañeros + máscara para modelado.
 
 Labels permitidas (v1): `POR, LI, DFC_IZQ, DFC_DER, LD, MC, MI, MD, EI, ED, DC`.
+
+---
+
+## `set_transformer.ipynb`
+
+**Objetivo:** entrenar un clasificador de roles posicionales basado en Set Transformer usando el dataset común etiquetado y aplicar el checkpoint resultante sobre `data/partidoPrueba/partido_ajustado.mp4`.
+
+Pipeline que implementa:
+- reconstruye el dataset de entrenamiento a partir de `data/posiciones_etiquetadas/common/base_table.csv`;
+- embebe el jugador objetivo con una MLP pequeña;
+- embebe el set de compañeros con otra MLP;
+- canoniza el campo por equipo con una rotación de 180° cuando el ataque va hacia `-x`, para preservar la semántica `IZQ/DER`;
+- resume el contexto colectivo con Set Transformer;
+- fusiona `[h_obj; h_set]` y clasifica el rol final;
+- exporta checkpoint, métricas, predicciones por frame y resumen estable por jugador.
+
+Artefactos principales:
+- `models/positions/set_transformer/<timestamp>/set_transformer_checkpoint.pt`
+- `models/positions/set_transformer/<timestamp>/metrics.json`
+- `output/predictions/positions/partido_ajustado_<timestamp>/frame_role_predictions.csv`
+- `output/predictions/positions/partido_ajustado_<timestamp>/player_role_summary.csv`
+- `output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json`
 
 ---
 

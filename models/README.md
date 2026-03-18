@@ -18,6 +18,9 @@ models/
 ├── finetuning/
 │   ├── yolov11m.pt          ← modelo fine-tuned de jugadores
 │   └── yolov11x.pt          ← alternativa con modelo más grande
+├── positions/
+│   └── set_transformer/
+│       └── <timestamp>/     ← checkpoint + métricas del clasificador de roles
 └── finetuning-balon/
     └── yolov11m.pt          ← modelo fine-tuned de balón
 ```
@@ -44,6 +47,18 @@ Referenciado en `config.yaml` como `paths.models.finetuned_player`.
 Modelo YOLO fine-tuned específicamente para detección de balón, entrenado con `DetectR8` (cabeza con `reg_max=8` en lugar de 16). Optimizado para detectar objetos pequeños con mayor precisión.
 
 Referenciado en `config.yaml` como `paths.models.finetuned_ball`.
+
+### Modelo posicional Set Transformer (`positions/set_transformer/`)
+
+Checkpoint entrenado para clasificar roles nominales a partir del dataset etiquetado en `data/posiciones_etiquetadas/common/base_table.csv`.
+
+Cada run guarda:
+- `set_transformer_checkpoint.pt`
+- `metrics.json`
+- `training_history.csv`
+- `split.json`
+
+El checkpoint se usa desde `experiments/positions/set_transformer_pipeline.py`.
 
 ## Cómo poblar el directorio
 

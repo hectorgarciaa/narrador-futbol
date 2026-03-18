@@ -7,6 +7,61 @@ Utilidades y notebook para construir un dataset supervisado de rol nominal de ju
 - `position_dataset.py`: funciones para preparar observaciones, validar etiquetas de rol, inferir orientación de ataque y construir samples con features tabulares + tensor de compañeros.
 - `position_role_dataset.ipynb`: flujo end-to-end de creación del dataset.
 - `position_role_workflow.py`: implementación equivalente en script (`.py`) del flujo completo (preparación, etiquetado interactivo en Jupyter y exportación).
+- `set_transformer_pipeline.py`: entrenamiento e inferencia de un clasificador Set Transformer usando `base_table.csv` reconstruido por partido.
+
+## Set Transformer para inferencia de roles
+
+Si ya existe un dataset común etiquetado en `data/posiciones_etiquetadas/common/base_table.csv`, puedes entrenar un modelo de roles y aplicarlo al vídeo `partido_ajustado` sin pasar por el etiquetado manual otra vez.
+
+La generación de features canoniza cada equipo en una misma vista táctica:
+- si el equipo ataca hacia `+x`, se conserva `(x, y)`
+- si ataca hacia `-x`, se rota 180° a `(1 - x, 1 - y)` para mantener consistente la semántica `IZQ/DER`
+
+Entrenamiento:
+
+```bash
+cd /Users/carloscole/narrador-futbol
+python -m experiments.positions.set_transformer_pipeline train \
+  --project-root /Users/carloscole/narrador-futbol
+```
+
+Si cambias la canonización geométrica o cualquier feature derivada, añade:
+
+```bash
+  --rebuild-from-base-table
+```
+
+Inferencia:
+
+```bash
+cd /Users/carloscole/narrador-futbol
+python -m experiments.positions.set_transformer_pipeline predict \
+  --project-root /Users/carloscole/narrador-futbol \
+  --model-path models/positions/set_transformer/<timestamp>/set_transformer_checkpoint.pt \
+  --video-path data/partidoPrueba/partido_ajustado.mp4
+```
+
+Salidas:
+- checkpoint y métricas en `models/positions/set_transformer/<timestamp>/`
+- predicciones por frame en `output/predictions/positions/partido_ajustado_<timestamp>/frame_role_predictions.csv`
+- resumen estable por jugador en `output/predictions/positions/partido_ajustado_<timestamp>/player_role_summary.csv`
+- tracks enriquecidos con `predicted_role` en `output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json`
+
+Render de vídeo anotado:
+
+```bash
+cd /Users/carloscole/narrador-futbol
+python -m experiments.positions.set_transformer_pipeline render-video \
+  --project-root /Users/carloscole/narrador-futbol \
+  --video-path data/partidoPrueba/partido_ajustado.mp4 \
+  --tracks-path output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json
+```
+
+Salida adicional:
+- vídeo anotado en `output/predictions/positions/partido_ajustado_<timestamp>/partido_ajustado_roles_annotated.mp4`
+
+Nota:
+- El dataset común actual no contiene ejemplos etiquetados de `goalkeeper`, así que la inferencia asigna `POR` por heurística cuando `class_name == goalkeeper`.
 
 ## Uso recomendado en `.py` (sin depender del notebook)
 

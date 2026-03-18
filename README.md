@@ -84,6 +84,7 @@ narrador-futbol/
 │
 └── experiments/            # Notebooks de análisis y visualización
     ├── detection/
+    ├── set_transformer.ipynb # Entrenamiento + aplicación de Set Transformer para roles
     ├── positions/          # Dataset supervisado de roles por posición (experimental)
     ├── reference_points/
     ├── tracking/
@@ -303,7 +304,7 @@ Por defecto usa `paths.data.video_prueba_corto` (si existe) y, en caso contrario
 El MP4 de salida se guarda en `output/pruebaTracker/` con el nombre del vídeo de entrada y sufijo `_tracking.mp4` (ejemplo: `partido_ajustado_tracking.mp4`).
 El JSON de tracks se guarda en `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (formato esperado por `experiments/positions`) y además en `output/tracks_json/tracker/tracks.json` como compatibilidad legacy.
 También se guarda el resumen por vídeo en `output/tracks_json/tracker/<video_sanitizado>_summary.json`.
-Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `output/datasets/positions/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`).
+Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `data/posiciones_etiquetadas/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`).
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
@@ -366,24 +367,73 @@ El repositorio incluye un flujo experimental para crear un dataset supervisado d
 Entrada principal:
 - Notebook: `experiments/positions/position_role_dataset.ipynb`
 - Utilidades: `experiments/positions/position_dataset.py`
+- Entrenamiento/inferencia sobre dataset común: `experiments/set_transformer.ipynb`
+- Pipeline reusable: `experiments/positions/set_transformer_pipeline.py`
 
 Salida del notebook (por ejecución):
-- `output/datasets/positions/<match_id>_<timestamp>/base_table.csv`
-- `output/datasets/positions/<match_id>_<timestamp>/samples_metadata_and_obj_features.csv`
-- `output/datasets/positions/<match_id>_<timestamp>/samples_teammates.npz`
-- `output/datasets/positions/<match_id>_<timestamp>/dataset_meta.json`
+- `data/posiciones_etiquetadas/<match_id>_<timestamp>/base_table.csv`
+- `data/posiciones_etiquetadas/<match_id>_<timestamp>/samples_metadata_and_obj_features.csv`
+- `data/posiciones_etiquetadas/<match_id>_<timestamp>/samples_teammates.npz`
+- `data/posiciones_etiquetadas/<match_id>_<timestamp>/dataset_meta.json`
 
 Salida adicional acumulada (dataset común):
-- `output/datasets/positions/common/base_table.csv`
-- `output/datasets/positions/common/samples_metadata_and_obj_features.csv`
-- `output/datasets/positions/common/samples_teammates.npz`
-- `output/datasets/positions/common/dataset_meta.json`
-- `output/datasets/positions/common/sources.jsonl`
+- `data/posiciones_etiquetadas/common/base_table.csv`
+- `data/posiciones_etiquetadas/common/samples_metadata_and_obj_features.csv`
+- `data/posiciones_etiquetadas/common/samples_teammates.npz`
+- `data/posiciones_etiquetadas/common/dataset_meta.json`
+- `data/posiciones_etiquetadas/common/sources.jsonl`
+- `data/posiciones_etiquetadas/labels/<match_id>_labels_every_6s.json`
 
 Ejecución:
 ```bash
 jupyter lab experiments/positions/position_role_dataset.ipynb
 ```
+
+## 🤖 Modelo Set Transformer para roles posicionales
+
+Además del notebook de etiquetado, el repositorio incluye un notebook y un pipeline para entrenar un clasificador basado en Set Transformer a partir del dataset común acumulado en `data/posiciones_etiquetadas/common/base_table.csv` y aplicarlo después a `data/partidoPrueba/partido_ajustado.mp4`.
+
+Antes de construir las features del modelo, cada equipo se lleva a una vista táctica canónica. Si un equipo ataca hacia `-x`, la representación se rota 180° a `(1 - x, 1 - y)` para conservar la semántica posicional `IZQ/DER` además de la profundidad del campo.
+
+Entrenamiento por CLI:
+
+```bash
+python -m experiments.positions.set_transformer_pipeline train
+```
+
+Si has cambiado la canonización/ingeniería de features y quieres ignorar el cache derivado antiguo:
+
+```bash
+python -m experiments.positions.set_transformer_pipeline train --rebuild-from-base-table
+```
+
+Aplicación sobre `partido_ajustado`:
+
+```bash
+python -m experiments.positions.set_transformer_pipeline predict \
+  --model-path models/positions/set_transformer/<timestamp>/set_transformer_checkpoint.pt \
+  --video-path data/partidoPrueba/partido_ajustado.mp4
+```
+
+El notebook equivalente está en `experiments/set_transformer.ipynb` y ejecuta ese mismo flujo de forma interactiva.
+
+Artefactos generados:
+- checkpoint y métricas en `models/positions/set_transformer/<timestamp>/`
+- predicciones por frame en `output/predictions/positions/partido_ajustado_<timestamp>/frame_role_predictions.csv`
+- resumen estable por jugador en `output/predictions/positions/partido_ajustado_<timestamp>/player_role_summary.csv`
+- tracks enriquecidos con roles predichos en `output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json`
+- vídeo anotado con roles en `output/predictions/positions/partido_ajustado_<timestamp>/partido_ajustado_roles_annotated.mp4`
+
+Para renderizar el MP4 anotado a partir del JSON enriquecido:
+
+```bash
+python -m experiments.positions.set_transformer_pipeline render-video \
+  --video-path data/partidoPrueba/partido_ajustado.mp4 \
+  --tracks-path output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json
+```
+
+Limitación actual:
+- el dataset común etiquetado no contiene muestras `POR`, así que el pipeline asigna `POR` por heurística a los tracks cuya clase es `goalkeeper`.
 
 ### Detección con modelo fine-tuned de jugadores
 ```bash

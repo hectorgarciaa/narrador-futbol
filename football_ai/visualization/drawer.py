@@ -90,6 +90,22 @@ class Drawer:
         cv2.putText(frame, label, (x1, y1 - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
+        info_lines = []
+
+        predicted_role_frame = data.get("predicted_role_frame")
+        predicted_role = data.get("predicted_role")
+        if predicted_role_frame and predicted_role:
+            if str(predicted_role_frame) == str(predicted_role):
+                info_lines.append(f"role: {predicted_role_frame}")
+            else:
+                info_lines.append(
+                    f"role: {predicted_role_frame} | stable: {predicted_role}"
+                )
+        elif predicted_role_frame:
+            info_lines.append(f"role: {predicted_role_frame}")
+        elif predicted_role:
+            info_lines.append(f"role: {predicted_role}")
+
         # Show field coordinates (meters) under player bbox when available.
         if class_name == "player":
             field_position = data.get("field_position_m")
@@ -99,18 +115,22 @@ class Drawer:
                 and field_position[0] is not None
                 and field_position[1] is not None
             ):
-                pos_label = f"pos(m): {field_position[0]:.1f}, {field_position[1]:.1f}"
-                baseline_y = min(y2 + 15, frame.shape[0] - 5)
-                cv2.putText(
-                    frame,
-                    pos_label,
-                    (x1, baseline_y),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    color,
-                    1,
-                    cv2.LINE_AA,
+                info_lines.append(
+                    f"pos(m): {field_position[0]:.1f}, {field_position[1]:.1f}"
                 )
+
+        for idx, info_label in enumerate(info_lines):
+            baseline_y = min(y2 + 15 + (idx * 14), frame.shape[0] - 5)
+            cv2.putText(
+                frame,
+                info_label,
+                (x1, baseline_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
 
     def draw_all_detections_in_frame(self, frame, class_name, class_tracks, frame_id):
         """Draws all detections of a class in a frame."""

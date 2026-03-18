@@ -47,7 +47,8 @@ En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=Tru
 4. `draw_detection` pinta el bounding box con `cv2.rectangle` y la etiqueta con `cv2.putText`. La etiqueta incluye:
    - Clase y track_id (`"player #7"`)
    - Si hay información de equipo: el equipo asignado y las distancias a cada equipo dinámicamente (`"Real Madrid: [12.3, 45.6]"`)
-   - Si hay `field_position_m` en `player`: una segunda línea bajo el bbox con `pos(m): x, y`
+   - Si hay `predicted_role_frame` o `predicted_role`: una línea adicional bajo el bbox con el rol
+   - Si hay `field_position_m` en `player`: otra línea bajo el bbox con `pos(m): x, y`
 5. Escribe el frame anotado con `out.write(frame)`.
 6. En el bloque `finally`, libera `cap` y `out` siempre, incluso si hubo error.
 
