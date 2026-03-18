@@ -1,6 +1,6 @@
 # models
 
-Directorio de modelos de machine learning. **Los archivos de pesos (`.pt`) no se versionan en git** por su tamaño. Solo se mantiene la estructura de carpetas con `.gitkeep` para que otros desarrolladores sepan dónde colocar los modelos.
+Directorio de modelos de machine learning. En general, los archivos de pesos grandes (`.pt`) no se versionan en git por su tamaño. La excepción actual es el checkpoint del Set Transformer de roles, que sí se puede versionar porque su tamaño es reducido.
 
 ## Estructura esperada
 
@@ -51,6 +51,8 @@ Referenciado en `config.yaml` como `paths.models.finetuned_ball`.
 ### Modelo posicional Set Transformer (`positions/set_transformer/`)
 
 Checkpoint entrenado para clasificar roles nominales a partir del dataset etiquetado en `data/posiciones_etiquetadas/common/base_table.csv`.
+
+Este checkpoint sí puede versionarse en git cuando sea el modelo vigente, porque pesa poco frente al resto de pesos del repositorio.
 
 Cada run guarda:
 - `set_transformer_checkpoint.pt`
