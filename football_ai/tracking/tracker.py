@@ -506,6 +506,68 @@ class Tracker:
             dynamic_gate = max(dynamic_gate, mean_step * 2.5 * gap_frames)
         return float(dynamic_gate)
 
+    @staticmethod
+    def _clamp_coordinate(value, lower_bound, upper_bound):
+        return max(float(lower_bound), min(float(value), float(upper_bound)))
+
+    def _ball_prediction_reference(self, ball_state, current_frame, frame_size=None):
+        predicted_center = self._predict_ball_center(ball_state, current_frame)
+        if predicted_center is None:
+            return None, {}
+        if frame_size is None:
+            return predicted_center, {}
+
+        frame_width = max(1.0, float(frame_size[0]))
+        frame_height = max(1.0, float(frame_size[1]))
+        max_x = frame_width - 1.0
+        max_y = frame_height - 1.0
+        px, py = predicted_center
+        edge_constraints = {}
+
+        if px < 0.0:
+            edge_constraints["left"] = True
+        elif px > max_x:
+            edge_constraints["right"] = True
+
+        if py < 0.0:
+            edge_constraints["top"] = True
+        elif py > max_y:
+            edge_constraints["bottom"] = True
+
+        if not edge_constraints:
+            return predicted_center, {}
+
+        return (
+            self._clamp_coordinate(px, 0.0, max_x),
+            self._clamp_coordinate(py, 0.0, max_y),
+        ), edge_constraints
+
+    def _matches_ball_edge_constraints(
+        self,
+        candidate_center,
+        edge_constraints,
+        frame_size,
+        prediction_gate,
+    ):
+        if not edge_constraints or frame_size is None:
+            return True
+
+        frame_width = max(1.0, float(frame_size[0]))
+        frame_height = max(1.0, float(frame_size[1]))
+        edge_band = max(40.0, min(float(prediction_gate) * 0.5, 140.0))
+        cx, cy = candidate_center
+
+        if edge_constraints.get("left") and cx > edge_band:
+            return False
+        if edge_constraints.get("right") and cx < (frame_width - edge_band):
+            return False
+        if edge_constraints.get("top") and cy > edge_band:
+            return False
+        if edge_constraints.get("bottom") and cy < (frame_height - edge_band):
+            return False
+
+        return True
+
     def _is_ball_size_compatible(self, previous_state, new_bbox, confidence):
         if previous_state is None:
             return True
@@ -663,8 +725,16 @@ class Tracker:
             "ball_size_m2": ball_size_m2,
         }
 
-    def _select_ball_candidate(self, candidates, ball_state, current_frame):
-        reference_state = ball_state
+    def _select_ball_candidate(
+        self,
+        candidates,
+        ball_state,
+        current_frame,
+        frame_size=None,
+    ):
+        reference_state = (
+            ball_state if self._ball_state_is_active(ball_state, current_frame) else None
+        )
         evaluated_candidates = []
 
         for candidate in candidates:
@@ -675,18 +745,29 @@ class Tracker:
 
             expected_error = 0.0
             if reference_state is not None:
-                predicted_center = self._predict_ball_center(reference_state, current_frame)
+                predicted_center, edge_constraints = self._ball_prediction_reference(
+                    reference_state,
+                    current_frame,
+                    frame_size=frame_size,
+                )
                 if predicted_center is not None:
                     candidate_center = self._bbox_center(bbox)
-                    expected_error = float(
-                        ((candidate_center[0] - predicted_center[0]) ** 2 + (candidate_center[1] - predicted_center[1]) ** 2) ** 0.5
-                    )
                     prediction_gate = self._ball_prediction_gate_px(
                         reference_state,
                         current_frame,
                     )
                     if confidence >= self.ball_high_conf_override:
                         prediction_gate *= self.ball_expected_position_confidence_relax
+                    if not self._matches_ball_edge_constraints(
+                        candidate_center,
+                        edge_constraints,
+                        frame_size,
+                        prediction_gate,
+                    ):
+                        continue
+                    expected_error = float(
+                        ((candidate_center[0] - predicted_center[0]) ** 2 + (candidate_center[1] - predicted_center[1]) ** 2) ** 0.5
+                    )
                     if expected_error > prediction_gate:
                         continue
 
@@ -703,9 +784,8 @@ class Tracker:
             evaluated_candidates.sort(key=lambda item: item[:3])
             return evaluated_candidates[0][3]
 
-        # Solo permitimos bootstrap libre antes de haber visto el balón por primera vez.
-        # Si ya existe un estado previo, cualquier reaparición debe respetar la
-        # trayectoria esperada desde la última detección conocida.
+        # Antes de ver el balón por primera vez, o tras demasiados frames perdidos,
+        # permitimos redetección libre por confianza máxima.
         if reference_state is None and candidates:
             bootstrap_candidates = sorted(
                 candidates,
@@ -1087,6 +1167,13 @@ class Tracker:
         ball_state = None
         for n_frame, detections in enumerate(model_detections):
             detections_sv = sv.Detections.from_ultralytics(detections)
+            frame_size = None
+            original_frame_bgr = getattr(detections, "orig_img", None)
+            if original_frame_bgr is not None:
+                frame_size = (
+                    int(original_frame_bgr.shape[1]),
+                    int(original_frame_bgr.shape[0]),
+                )
 
             teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
             teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
@@ -1095,7 +1182,6 @@ class Tracker:
             field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
             ground_points_projected = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
             if self.field_projector is not None:
-                original_frame_bgr = getattr(detections, "orig_img", None)
                 if original_frame_bgr is not None:
                     field_projection = self.field_projector.project_detections(
                         original_frame_bgr,
@@ -1408,6 +1494,7 @@ class Tracker:
                 ball_candidates,
                 ball_state,
                 n_frame,
+                frame_size=frame_size,
             )
             if selected_ball is not None:
                 tracks["ball"][n_frame][0] = self._build_ball_track_payload(
@@ -1416,7 +1503,7 @@ class Tracker:
                     selected_ball["metadata"],
                 )
                 ball_state = self._update_ball_state(
-                    ball_state,
+                    ball_state if self._ball_state_is_active(ball_state, n_frame) else None,
                     selected_ball["bbox"],
                     n_frame,
                 )

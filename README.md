@@ -544,7 +544,7 @@ tracking:
   ball_size_min_samples: 5
   ball_size_std_factor: 3.0
   ball_size_std_floor: 1.0
-  ball_max_reassign_lost_frames: 4
+  ball_max_reassign_lost_frames: 30
   ball_high_conf_override: 0.6
 
 teams:

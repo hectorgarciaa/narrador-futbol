@@ -55,7 +55,7 @@ Por cada frame del vídeo:
    - no salte a una posición incompatible con su trayectoria reciente;
    - no cambie de tamaño de forma abrupta entre frames;
    - y, si hay varias candidatas plausibles, se prioriza la más coherente con la posición esperada y la confianza.
-   Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Tras la primera detección válida del balón, ya no se hace un “reinicio libre” en otra zona de la imagen: toda reaparición tiene que seguir respetando el rango compatible con la última trayectoria conocida.
+   Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Cuando la trayectoria prevista saca el balón fuera de la imagen, la búsqueda queda anclada al borde por el que salió; no se aceptan reapariciones “hacia atrás” dentro de la pantalla. Solo tras `ball_max_reassign_lost_frames` frames perdidos se permite una redetección libre por máxima confianza.
 
 ### Formato de salida
 
