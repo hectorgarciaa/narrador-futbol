@@ -61,7 +61,7 @@ detection:
   # Umbral de confianza para detecciones generales
   conf_threshold: 0.01
   # Umbral mínimo de confianza para detección de balón
-  ball_min_conf: 0.005
+  ball_min_conf: 0.0035
 
 # Configuración de tracking (ByteTrack)
 tracking:

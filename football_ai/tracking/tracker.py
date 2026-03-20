@@ -664,27 +664,25 @@ class Tracker:
         }
 
     def _select_ball_candidate(self, candidates, ball_state, current_frame):
-        active_state = (
-            ball_state if self._ball_state_is_active(ball_state, current_frame) else None
-        )
+        reference_state = ball_state
         evaluated_candidates = []
 
         for candidate in candidates:
             bbox = candidate["bbox"]
             confidence = float(candidate["confidence"])
-            if not self._is_ball_size_compatible(active_state, bbox, confidence):
+            if not self._is_ball_size_compatible(reference_state, bbox, confidence):
                 continue
 
             expected_error = 0.0
-            if active_state is not None:
-                predicted_center = self._predict_ball_center(active_state, current_frame)
+            if reference_state is not None:
+                predicted_center = self._predict_ball_center(reference_state, current_frame)
                 if predicted_center is not None:
                     candidate_center = self._bbox_center(bbox)
                     expected_error = float(
                         ((candidate_center[0] - predicted_center[0]) ** 2 + (candidate_center[1] - predicted_center[1]) ** 2) ** 0.5
                     )
                     prediction_gate = self._ball_prediction_gate_px(
-                        active_state,
+                        reference_state,
                         current_frame,
                     )
                     if confidence >= self.ball_high_conf_override:
@@ -705,7 +703,10 @@ class Tracker:
             evaluated_candidates.sort(key=lambda item: item[:3])
             return evaluated_candidates[0][3]
 
-        if active_state is None and candidates:
+        # Solo permitimos bootstrap libre antes de haber visto el balón por primera vez.
+        # Si ya existe un estado previo, cualquier reaparición debe respetar la
+        # trayectoria esperada desde la última detección conocida.
+        if reference_state is None and candidates:
             bootstrap_candidates = sorted(
                 candidates,
                 key=lambda candidate: (
@@ -1415,7 +1416,7 @@ class Tracker:
                     selected_ball["metadata"],
                 )
                 ball_state = self._update_ball_state(
-                    ball_state if self._ball_state_is_active(ball_state, n_frame) else None,
+                    ball_state,
                     selected_ball["bbox"],
                     n_frame,
                 )

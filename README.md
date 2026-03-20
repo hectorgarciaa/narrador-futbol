@@ -504,7 +504,7 @@ paths:
 
 detection:
   conf_threshold: 0.01
-  ball_min_conf: 0.005
+  ball_min_conf: 0.0035
 
 tracking:
   track_thresh: 0.15          # Confianza mínima para activar un track

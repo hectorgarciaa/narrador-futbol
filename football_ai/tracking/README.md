@@ -29,7 +29,7 @@ tracker = Tracker(
         "Real Madrid": np.array([255, 127, 127]),
         "Wolfsburgo": np.array([224, 77, 196])
     },
-    ball_min_conf=0.005,
+    ball_min_conf=0.0035,
     field_tracking_conf={
         "enabled": True,
         "method": "pnlcalib",
@@ -55,7 +55,7 @@ Por cada frame del vídeo:
    - no salte a una posición incompatible con su trayectoria reciente;
    - no cambie de tamaño de forma abrupta entre frames;
    - y, si hay varias candidatas plausibles, se prioriza la más coherente con la posición esperada y la confianza.
-   Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte.
+   Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Tras la primera detección válida del balón, ya no se hace un “reinicio libre” en otra zona de la imagen: toda reaparición tiene que seguir respetando el rango compatible con la última trayectoria conocida.
 
 ### Formato de salida
 
