@@ -8,6 +8,9 @@ Notebooks de Jupyter para exploración, análisis y visualización interactiva d
 experiments/
 ├── detection/
 │   └── finetuning.ipynb              # Análisis del entrenamiento YOLO
+├── possession/
+│   ├── README.md                     # Experimento de posesión por equipo
+│   └── team_possession.py            # Heurística de posesión + render anotado
 ├── set_transformer.ipynb             # Entrenamiento + aplicación de Set Transformer para roles
 ├── positions/
 │   ├── position_dataset.py            # Construcción de tablas/features para dataset de roles
@@ -47,6 +50,36 @@ Puntos de análisis:
 - Distribución de confianzas de detección del balón.
 - Visualización frame a frame de los tracks generados.
 - Ajuste del parámetro `ball_min_conf` para el fallback.
+
+---
+
+## `possession/team_possession.py`
+
+**Objetivo:** inferir por frame qué equipo tiene la posesión del balón usando únicamente tracks de `ball`, `player` y `goalkeeper`, y renderizar el equipo poseedor en una esquina del vídeo.
+
+La heurística combina:
+- filtrado temporal del balón con posición esperada según la trayectoria reciente;
+- distancia del balón al pie del jugador más cercano;
+- cambios de velocidad o dirección del balón para detectar toque/control;
+- confirmación temporal antes de aceptar muchos cambios rivales;
+- estabilización corta de lagunas/segmentos para evitar parpadeos en el vídeo;
+- continuidad temporal de la posesión para cubrir pases en tránsito dentro del mismo equipo.
+
+Entrada típica:
+- vídeo en `data/partidoPrueba/`
+- tracks en `output/tracks_json/tracker/<video>_tracks.json`
+
+Salidas:
+- `output/predictions/possession/<video>_<timestamp>/frame_possession.csv`
+- `output/predictions/possession/<video>_<timestamp>/summary.json`
+- `output/predictions/possession/<video>_<timestamp>/<video>_possession_annotated.mp4`
+
+Ejecución:
+
+```bash
+python -m experiments.possession.team_possession \
+  --video-path data/partidoPrueba/partido_ajustado.mp4
+```
 
 ---
 
@@ -96,7 +129,8 @@ Labels permitidas (v1): `POR, LI, DFC_IZQ, DFC_DER, LD, MC, MI, MD, EI, ED, DC`.
 
 ## `set_transformer.ipynb`
 
-**Objetivo:** entrenar un clasificador de roles posicionales basado en Set Transformer usando el dataset común etiquetado y aplicar el checkpoint resultante sobre `data/partidoPrueba/partido_ajustado.mp4`.
+**Objetivo:** usar un checkpoint ya entrenado de Set Transformer, o reentrenarlo si hace falta, y aplicarlo sobre `data/partidoPrueba/partido_ajustado.mp4`.
+La primera celda recarga explícitamente `experiments.positions.set_transformer_pipeline` para evitar que Jupyter reutilice una versión antigua del módulo tras editar el `.py`.
 
 Pipeline que implementa:
 - reconstruye el dataset de entrenamiento a partir de `data/posiciones_etiquetadas/common/base_table.csv`;
@@ -104,8 +138,9 @@ Pipeline que implementa:
 - embebe el set de compañeros con otra MLP;
 - canoniza el campo por equipo con una rotación de 180° cuando el ataque va hacia `-x`, para preservar la semántica `IZQ/DER`;
 - resume el contexto colectivo con Set Transformer;
+- permite imponer el once esperado por equipo con Hungarian sobre las probabilidades agregadas por jugador, dejando plazas vacías si falta detección y reasignando sobrantes al mejor rol permitido;
 - fusiona `[h_obj; h_set]` y clasifica el rol final;
-- exporta checkpoint, métricas, predicciones por frame y resumen estable por jugador.
+- exporta checkpoint, métricas, predicciones por frame, resumen estable por jugador y opcionalmente el vídeo anotado.
 
 Artefactos principales:
 - `models/positions/set_transformer/<timestamp>/set_transformer_checkpoint.pt`

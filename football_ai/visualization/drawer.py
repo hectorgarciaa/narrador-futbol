@@ -94,7 +94,13 @@ class Drawer:
 
         predicted_role_frame = data.get("predicted_role_frame")
         predicted_role = data.get("predicted_role")
-        if predicted_role_frame and predicted_role:
+        assignment_method = data.get("assignment_method")
+        expected_role_slot = data.get("expected_role_slot")
+        constrained_expected_role = bool(assignment_method) or bool(expected_role_slot)
+
+        if constrained_expected_role and predicted_role:
+            info_lines.append(f"role: {predicted_role}")
+        elif predicted_role_frame and predicted_role:
             if str(predicted_role_frame) == str(predicted_role):
                 info_lines.append(f"role: {predicted_role_frame}")
             else:

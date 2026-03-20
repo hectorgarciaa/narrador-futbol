@@ -1,0 +1,39 @@
+{
+  "updated_at": "2026-03-17T12:04:54.081089",
+  "num_runs": 9,
+  "num_base_rows": 114170,
+  "num_samples": 109519,
+  "num_matches": 8,
+  "max_teammates": 10,
+  "teammate_feature_dim": 11,
+  "objective_feature_names": [
+    "x",
+    "y",
+    "dist_left_sideline",
+    "dist_right_sideline",
+    "dist_own_goal",
+    "dist_opponent_goal",
+    "team_centroid_x",
+    "team_centroid_y",
+    "dx_centroid",
+    "dy_centroid",
+    "rank_x_team",
+    "rank_y_team",
+    "vx",
+    "vy"
+  ],
+  "teammate_feature_names": [
+    "dx_to_obj",
+    "dy_to_obj",
+    "dist_to_obj",
+    "x",
+    "y",
+    "dist_left_sideline",
+    "dist_right_sideline",
+    "dist_own_goal",
+    "dist_opponent_goal",
+    "vx",
+    "vy"
+  ],
+  "sources_log_path": "/Users/carloscole/narrador-futbol/data/posiciones_etiquetadas/common/sources.jsonl"
+}

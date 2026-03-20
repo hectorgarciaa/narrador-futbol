@@ -41,11 +41,20 @@ python -m experiments.positions.set_transformer_pipeline predict \
   --video-path data/partidoPrueba/partido_ajustado.mp4
 ```
 
+Si usas el notebook `experiments/set_transformer.ipynb`, puedes pasar además `EXPECTED_ROLES_BY_TEAM` para imponer el once esperado de cada equipo con Hungarian sobre las probabilidades agregadas por jugador.
+El notebook permite elegir entre reutilizar un checkpoint ya entrenado o reentrenar el modelo antes de inferir.
+La celda inicial recarga `set_transformer_pipeline.py`, así que cambios recientes del pipeline no requieren reiniciar el kernel para que se apliquen.
+Además, tras la inferencia, puede renderizar automáticamente el MP4 anotado usando el `tracks_with_predicted_roles.json`.
+
 Salidas:
 - checkpoint y métricas en `models/positions/set_transformer/<timestamp>/`
 - predicciones por frame en `output/predictions/positions/partido_ajustado_<timestamp>/frame_role_predictions.csv`
 - resumen estable por jugador en `output/predictions/positions/partido_ajustado_<timestamp>/player_role_summary.csv`
 - tracks enriquecidos con `predicted_role` en `output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json`
+
+Cuando activas esa restricción, el `player_role_summary.csv` conserva tanto la predicción libre (`predicted_role_unconstrained`) como la restringida (`predicted_role`), además del slot esperado asignado (`expected_role_slot`).
+Si sobran jugadores detectados respecto a las plazas esperadas, esos jugadores no fallan: reciben igualmente la mejor posición permitida dentro del once esperado y quedan marcados con `assignment_method = expected_roles_fallback_best_allowed`.
+En ese modo, el vídeo anotado enseña el `predicted_role` estable restringido y no el `predicted_role_frame` libre.
 
 Render de vídeo anotado:
 

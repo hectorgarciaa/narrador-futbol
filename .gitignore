@@ -30,9 +30,6 @@ ENV/
 # Dataset files
 data/detection/**
 !data/detection/.gitkeep
-data/posiciones_etiquetadas/**
-!data/posiciones_etiquetadas/
-!data/posiciones_etiquetadas/README.md
 !data/partidosPosiciones/
 !data/partidosPosiciones/.gitkeep
 !data/partidosPosiciones/README.md

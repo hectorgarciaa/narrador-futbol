@@ -415,7 +415,10 @@ python -m experiments.positions.set_transformer_pipeline predict \
   --video-path data/partidoPrueba/partido_ajustado.mp4
 ```
 
-El notebook equivalente está en `experiments/set_transformer.ipynb` y ejecuta ese mismo flujo de forma interactiva.
+El notebook equivalente está en `experiments/set_transformer.ipynb` y ejecuta ese mismo flujo de forma interactiva. Soporta dos modos: reutilizar un checkpoint ya entrenado o reentrenar antes de predecir. Después de la predicción puede renderizar también el MP4 anotado con `role`. Además, fuerza una recarga explícita del módulo `set_transformer_pipeline.py`, para que los cambios recientes del pipeline se apliquen aunque el kernel de Jupyter siga vivo.
+
+En el notebook puedes además fijar un once esperado por `team_id` y resolver la etiqueta estable con una asignación global tipo Hungarian. El modelo sigue produciendo probabilidades por jugador, pero el postproceso impone el multiconjunto de roles permitido para cada equipo; si faltan jugadores detectados, algunas plazas pueden quedar vacías, y si sobran jugadores detectados, los restantes caen a la mejor posición permitida dentro de ese once esperado.
+Cuando esa restricción está activa, el vídeo anotado renderiza el rol estable restringido por equipo, no la etiqueta frame a frame libre del clasificador.
 
 Artefactos generados:
 - checkpoint y métricas en `models/positions/set_transformer/<timestamp>/`
@@ -434,6 +437,34 @@ python -m experiments.positions.set_transformer_pipeline render-video \
 
 Limitación actual:
 - el dataset común etiquetado no contiene muestras `POR`, así que el pipeline asigna `POR` por heurística a los tracks cuya clase es `goalkeeper`.
+
+## ⚽ Posesión de balón por equipo (experimental)
+
+También hay un experimento incremental para estimar por frame qué equipo tiene la posesión del balón a partir del tracking ya generado en `output/tracks_json/tracker/`.
+
+Entrada principal:
+- Script: `experiments/possession/team_possession.py`
+- Vídeo de prueba habitual: `data/partidoPrueba/partido_ajustado.mp4`
+
+La heurística actual:
+- toma el centro del bbox del balón;
+- busca el jugador o portero más cercano usando el pie aproximado del bbox;
+- confirma toque/control cuando la proximidad coincide con una caída de velocidad, un cambio de dirección, un control del mismo jugador o una recuperación clara del rival;
+- añade histéresis temporal para no cambiar de equipo con una única observación rival dudosa;
+- rellena lagunas cortas y elimina segmentos mínimos espurios para estabilizar la posesión mostrada;
+- mantiene la posesión del equipo entre toques para cubrir pases en tránsito.
+
+Ejecución:
+
+```bash
+python -m experiments.possession.team_possession \
+  --video-path data/partidoPrueba/partido_ajustado.mp4
+```
+
+Artefactos generados:
+- `output/predictions/possession/partido_ajustado_<timestamp>/frame_possession.csv`
+- `output/predictions/possession/partido_ajustado_<timestamp>/summary.json`
+- `output/predictions/possession/partido_ajustado_<timestamp>/partido_ajustado_possession_annotated.mp4`
 
 ### Detección con modelo fine-tuned de jugadores
 ```bash
@@ -506,6 +537,15 @@ tracking:
   motion_std_factor: 4.0
   motion_std_min_samples: 5
   motion_std_floor: 0.5
+  ball_expected_position_gate_px: 90.0
+  ball_expected_position_gate_growth_per_frame: 35.0
+  ball_expected_position_confidence_relax: 1.4
+  ball_size_ratio_per_frame: 1.8
+  ball_size_min_samples: 5
+  ball_size_std_factor: 3.0
+  ball_size_std_floor: 1.0
+  ball_max_reassign_lost_frames: 4
+  ball_high_conf_override: 0.6
 
 teams:
   Real Madrid:

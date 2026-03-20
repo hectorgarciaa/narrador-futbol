@@ -51,7 +51,11 @@ Por cada frame del vídeo:
 2. **Identificación de equipo** (`TeamDetector.detect_teams`): por cada detección de `player/goalkeeper` extrae color de camiseta (KMeans en LAB) y asigna equipo. Puede operar en modo `reference` o `auto-bootstrap`.
 3. **PnLCalibFieldProjector**: calibra el campo en ese frame y proyecta `player` y `goalkeeper` a coordenadas métricas `[x_m, y_m]` sobre el césped.
 4. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional y, para `player`/`goalkeeper`, incorpora distancia en el campo 2D al coste de asociación.
-5. **Fallback de balón**: si ByteTrack no activó ningún track para el balón en ese frame (porque su confianza es demasiado baja para el umbral de activación), se añaden las detecciones YOLO crudas con IDs `"fallback_N"`. Esto garantiza que siempre haya información del balón aunque no sea trazable.
+5. **Selección robusta del balón**: las candidatas de balón, tanto las devueltas por ByteTrack como las detecciones YOLO crudas, pasan por un gate específico de continuidad. Se valida que el balón:
+   - no salte a una posición incompatible con su trayectoria reciente;
+   - no cambie de tamaño de forma abrupta entre frames;
+   - y, si hay varias candidatas plausibles, se prioriza la más coherente con la posición esperada y la confianza.
+   Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte.
 
 ### Formato de salida
 
@@ -64,7 +68,7 @@ tracks = {
 }
 ```
 
-Cada `frame_N_dict` es `{track_id: datos_objeto}` donde `track_id` es un entero (o `"fallback_N"` para balón sin tracking) y `datos_objeto` es:
+Cada `frame_N_dict` es `{track_id: datos_objeto}` donde `track_id` es un entero y `datos_objeto` es:
 
 ```python
 {
@@ -147,6 +151,15 @@ Parámetros en `config.yaml`:
 - `motion_std_factor`
 - `motion_std_min_samples`
 - `motion_std_floor`
+- `ball_expected_position_gate_px`
+- `ball_expected_position_gate_growth_per_frame`
+- `ball_expected_position_confidence_relax`
+- `ball_size_ratio_per_frame`
+- `ball_size_min_samples`
+- `ball_size_std_factor`
+- `ball_size_std_floor`
+- `ball_max_reassign_lost_frames`
+- `ball_high_conf_override`
 - `strict_person_class_separation` (si `true`, no mezcla `player` y `goalkeeper`)
 - `require_field_position_for_reassign` (si `true`, `player/goalkeeper` no hacen fallback a píxeles)
 - `max_reassign_lost_frames` / `max_reassign_lost_frames_by_class` (opcionales; `null` o `<=0` desactiva el corte temporal y permite reapariciones tardías)

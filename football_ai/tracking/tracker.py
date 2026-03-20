@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import supervision as sv
 
@@ -107,6 +109,33 @@ class Tracker:
             ),
         )
         self.ball_min_conf = ball_min_conf
+        self.ball_expected_position_gate_px = float(
+            tracker_conf.get("ball_expected_position_gate_px", 90.0)
+        )
+        self.ball_expected_position_gate_growth_per_frame = float(
+            tracker_conf.get("ball_expected_position_gate_growth_per_frame", 35.0)
+        )
+        self.ball_expected_position_confidence_relax = float(
+            tracker_conf.get("ball_expected_position_confidence_relax", 1.4)
+        )
+        self.ball_size_ratio_per_frame = float(
+            tracker_conf.get("ball_size_ratio_per_frame", 1.8)
+        )
+        self.ball_size_min_samples = int(
+            tracker_conf.get("ball_size_min_samples", 5)
+        )
+        self.ball_size_std_factor = float(
+            tracker_conf.get("ball_size_std_factor", 3.0)
+        )
+        self.ball_size_std_floor = float(
+            tracker_conf.get("ball_size_std_floor", 1.0)
+        )
+        self.ball_max_reassign_lost_frames = self._normalize_optional_positive_int(
+            tracker_conf.get("ball_max_reassign_lost_frames", 4)
+        )
+        self.ball_high_conf_override = float(
+            tracker_conf.get("ball_high_conf_override", 0.6)
+        )
         self.reassign_motion_factor = float(
             tracker_conf.get("reassign_motion_factor", 4.0)
         )
@@ -203,6 +232,14 @@ class Tracker:
     def _bbox_center(bbox):
         x1, y1, x2, y2 = bbox
         return (0.5 * (x1 + x2), 0.5 * (y1 + y2))
+
+    @staticmethod
+    def _bbox_area(bbox):
+        x1, y1, x2, y2 = bbox
+        return max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+
+    def _ball_size_measure(self, bbox):
+        return float(math.sqrt(max(self._bbox_area(bbox), 0.0)))
 
     @staticmethod
     def _field_position_to_tuple(field_position):
@@ -425,6 +462,272 @@ class Tracker:
         ax, ay = self._bbox_center(bbox_a)
         bx, by = self._bbox_center(bbox_b)
         return (ax - bx) ** 2 + (ay - by) ** 2
+
+    def _ball_state_is_active(self, ball_state, current_frame):
+        if ball_state is None:
+            return False
+        if self.ball_max_reassign_lost_frames is None:
+            return True
+        lost_frames = current_frame - int(ball_state.get("last_frame", current_frame))
+        return lost_frames <= self.ball_max_reassign_lost_frames
+
+    def _predict_ball_center(self, ball_state, current_frame):
+        if ball_state is None:
+            return None
+        previous_bbox = ball_state.get("bbox")
+        if previous_bbox is None:
+            return None
+        last_center = self._bbox_center(previous_bbox)
+        prev_center = ball_state.get("prev_center")
+        prev_frame = ball_state.get("prev_frame")
+        last_frame = int(ball_state.get("last_frame", current_frame))
+        gap_frames = max(1, current_frame - last_frame)
+        if prev_center is None or prev_frame is None:
+            return last_center
+        frame_delta = max(1, last_frame - int(prev_frame))
+        vx = (last_center[0] - float(prev_center[0])) / frame_delta
+        vy = (last_center[1] - float(prev_center[1])) / frame_delta
+        return (
+            last_center[0] + (vx * gap_frames),
+            last_center[1] + (vy * gap_frames),
+        )
+
+    def _ball_prediction_gate_px(self, ball_state, current_frame):
+        base_gate = float(self.ball_expected_position_gate_px)
+        if ball_state is None:
+            return base_gate
+        last_frame = int(ball_state.get("last_frame", current_frame))
+        gap_frames = max(1, current_frame - last_frame)
+        mean_step = float(ball_state.get("step_per_frame_mean", 0.0))
+        dynamic_gate = base_gate + (
+            self.ball_expected_position_gate_growth_per_frame * max(0, gap_frames - 1)
+        )
+        if mean_step > 0.0:
+            dynamic_gate = max(dynamic_gate, mean_step * 2.5 * gap_frames)
+        return float(dynamic_gate)
+
+    def _is_ball_size_compatible(self, previous_state, new_bbox, confidence):
+        if previous_state is None:
+            return True
+
+        prev_bbox = previous_state.get("bbox")
+        if prev_bbox is None:
+            return True
+
+        last_frame = int(previous_state.get("last_frame", 0))
+        new_size = self._ball_size_measure(new_bbox)
+        prev_size = self._ball_size_measure(prev_bbox)
+        if prev_size <= 0.0 or new_size <= 0.0:
+            return True
+
+        ratio_limit = float(self.ball_size_ratio_per_frame)
+        ratio_limit = max(1.0, ratio_limit)
+        size_ratio = max(new_size, prev_size) / max(min(new_size, prev_size), 1e-6)
+
+        if size_ratio <= ratio_limit:
+            return True
+
+        size_count = int(previous_state.get("ball_size_count", 0))
+        if size_count >= self.ball_size_min_samples:
+            size_mean = float(previous_state.get("ball_size_mean", prev_size))
+            size_m2 = float(previous_state.get("ball_size_m2", 0.0))
+            size_variance = size_m2 / max(1, size_count - 1)
+            size_std = max(
+                float(np.sqrt(max(size_variance, 0.0))),
+                self.ball_size_std_floor,
+            )
+            lower_bound = max(0.0, size_mean - (self.ball_size_std_factor * size_std))
+            upper_bound = size_mean + (self.ball_size_std_factor * size_std)
+            if lower_bound <= new_size <= upper_bound:
+                return True
+
+        if confidence >= self.ball_high_conf_override:
+            relaxed_ratio_limit = ratio_limit * self.ball_expected_position_confidence_relax
+            if size_ratio <= relaxed_ratio_limit:
+                return True
+
+        return False
+
+    def _build_ball_track_payload(self, bbox, confidence, metadata):
+        return {
+            "bbox": bbox,
+            "confidence": float(confidence),
+            "team": metadata.get("team"),
+            "distances": metadata.get("distances"),
+            "shirt_color": metadata.get("shirt_color"),
+            "bbox_size": metadata.get("bbox_size"),
+            "field_position_m": None,
+            "ground_point_image": None,
+        }
+
+    def _update_ball_state(self, previous_state, bbox, current_frame):
+        previous_bbox = previous_state.get("bbox") if previous_state is not None else None
+        prev_last_frame = (
+            int(previous_state.get("last_frame", current_frame))
+            if previous_state is not None
+            else current_frame
+        )
+        frame_gap = max(1, current_frame - prev_last_frame)
+
+        prev_samples = int(previous_state.get("movement_samples", 0)) if previous_state else 0
+        prev_mean = float(previous_state.get("mean_step_distance", 0.0)) if previous_state else 0.0
+        prev_step_pf_count = (
+            int(previous_state.get("step_per_frame_count", 0)) if previous_state else 0
+        )
+        prev_step_pf_mean = (
+            float(previous_state.get("step_per_frame_mean", 0.0)) if previous_state else 0.0
+        )
+        prev_step_pf_m2 = (
+            float(previous_state.get("step_per_frame_m2", 0.0)) if previous_state else 0.0
+        )
+
+        step_distance = self._step_distance(
+            previous_bbox,
+            bbox,
+            class_name="ball",
+            previous_field_position=None,
+            new_field_position=None,
+        )
+        if step_distance is not None:
+            movement_samples = prev_samples + 1
+            if prev_samples <= 0:
+                mean_step_distance = step_distance
+            else:
+                mean_step_distance = (
+                    (prev_mean * prev_samples) + step_distance
+                ) / movement_samples
+            step_per_frame = step_distance / frame_gap
+            (
+                step_per_frame_count,
+                step_per_frame_mean,
+                step_per_frame_m2,
+            ) = self._update_running_stats(
+                prev_step_pf_count,
+                prev_step_pf_mean,
+                prev_step_pf_m2,
+                step_per_frame,
+            )
+            class_stats = self.class_motion_stats.setdefault(
+                "ball",
+                {"count": 0, "mean": 0.0, "m2": 0.0},
+            )
+            (
+                class_stats["count"],
+                class_stats["mean"],
+                class_stats["m2"],
+            ) = self._update_running_stats(
+                class_stats["count"],
+                class_stats["mean"],
+                class_stats["m2"],
+                step_per_frame,
+            )
+        else:
+            movement_samples = prev_samples
+            mean_step_distance = prev_mean
+            step_per_frame_count = prev_step_pf_count
+            step_per_frame_mean = prev_step_pf_mean
+            step_per_frame_m2 = prev_step_pf_m2
+
+        new_size = self._ball_size_measure(bbox)
+        prev_size_count = int(previous_state.get("ball_size_count", 0)) if previous_state else 0
+        prev_size_mean = float(previous_state.get("ball_size_mean", 0.0)) if previous_state else 0.0
+        prev_size_m2 = float(previous_state.get("ball_size_m2", 0.0)) if previous_state else 0.0
+        (
+            ball_size_count,
+            ball_size_mean,
+            ball_size_m2,
+        ) = self._update_running_stats(
+            prev_size_count,
+            prev_size_mean,
+            prev_size_m2,
+            new_size,
+        )
+
+        return {
+            "bbox": bbox,
+            "class_name": "ball",
+            "last_frame": current_frame,
+            "field_position": None,
+            "team": None,
+            "movement_samples": movement_samples,
+            "mean_step_distance": mean_step_distance,
+            "step_per_frame_count": step_per_frame_count,
+            "step_per_frame_mean": step_per_frame_mean,
+            "step_per_frame_m2": step_per_frame_m2,
+            "prev_center": (
+                self._bbox_center(previous_bbox) if previous_bbox is not None else None
+            ),
+            "prev_frame": prev_last_frame if previous_bbox is not None else None,
+            "ball_size_count": ball_size_count,
+            "ball_size_mean": ball_size_mean,
+            "ball_size_m2": ball_size_m2,
+        }
+
+    def _select_ball_candidate(self, candidates, ball_state, current_frame):
+        active_state = (
+            ball_state if self._ball_state_is_active(ball_state, current_frame) else None
+        )
+        evaluated_candidates = []
+
+        for candidate in candidates:
+            bbox = candidate["bbox"]
+            confidence = float(candidate["confidence"])
+            motion_ok = True
+            if active_state is not None:
+                motion_ok = self._is_motion_compatible(
+                    active_state,
+                    bbox,
+                    current_frame,
+                    class_name="ball",
+                    new_field_position=None,
+                )
+            if not motion_ok:
+                continue
+
+            if not self._is_ball_size_compatible(active_state, bbox, confidence):
+                continue
+
+            expected_error = 0.0
+            if active_state is not None:
+                predicted_center = self._predict_ball_center(active_state, current_frame)
+                if predicted_center is not None:
+                    candidate_center = self._bbox_center(bbox)
+                    expected_error = float(
+                        ((candidate_center[0] - predicted_center[0]) ** 2 + (candidate_center[1] - predicted_center[1]) ** 2) ** 0.5
+                    )
+                    prediction_gate = self._ball_prediction_gate_px(
+                        active_state,
+                        current_frame,
+                    )
+                    if confidence >= self.ball_high_conf_override:
+                        prediction_gate *= self.ball_expected_position_confidence_relax
+                    if expected_error > prediction_gate:
+                        continue
+
+            evaluated_candidates.append(
+                (
+                    expected_error,
+                    -confidence,
+                    0 if candidate["source"] == "tracked" else 1,
+                    candidate,
+                )
+            )
+
+        if evaluated_candidates:
+            evaluated_candidates.sort(key=lambda item: item[:3])
+            return evaluated_candidates[0][3]
+
+        if active_state is None and candidates:
+            bootstrap_candidates = sorted(
+                candidates,
+                key=lambda candidate: (
+                    -float(candidate["confidence"]),
+                    0 if candidate["source"] == "tracked" else 1,
+                ),
+            )
+            return bootstrap_candidates[0]
+
+        return None
 
     def _resolve_candidate_class_for_detection(
         self,
@@ -792,6 +1095,7 @@ class Tracker:
         raw_to_canonical_id = {}
         canonical_to_raw_id = {}
         canonical_state = {}
+        ball_state = None
         for n_frame, detections in enumerate(model_detections):
             detections_sv = sv.Detections.from_ultralytics(detections)
 
@@ -843,7 +1147,6 @@ class Tracker:
             for key in tracks.keys():
                 tracks[key].append({})
 
-            has_tracked_ball = False
             used_canonical_ids_in_frame = set()
             sorted_tracked_detections = sorted(
                 list(tracks_detection),
@@ -851,6 +1154,7 @@ class Tracker:
                 reverse=True,
             )
             pending_detections = []
+            ball_candidates = []
 
             def commit_assignment(
                 raw_tracker_id,
@@ -985,19 +1289,14 @@ class Tracker:
                 field_position = metadata.get("field_position")
 
                 if class_name == "ball":
-                    has_tracked_ball = True
-                    current_ball = tracks["ball"][n_frame].get(0)
-                    if current_ball is None or confidence > float(current_ball["confidence"]):
-                        tracks["ball"][n_frame][0] = {
+                    ball_candidates.append(
+                        {
                             "bbox": bbox,
                             "confidence": confidence,
-                            "team": metadata.get("team"),
-                            "distances": metadata.get("distances"),
-                            "shirt_color": metadata.get("shirt_color"),
-                            "bbox_size": metadata.get("bbox_size"),
-                            "field_position_m": None,
-                            "ground_point_image": None,
+                            "metadata": metadata,
+                            "source": "tracked",
                         }
+                    )
                     continue
 
                 raw_tracker_id = int(tracker_id)
@@ -1091,32 +1390,46 @@ class Tracker:
                     pending["metadata"],
                 )
 
-            # Si el tracker no activó el balón, usar detecciones crudas (sin tracking)
-            if not has_tracked_ball and detections.boxes is not None and len(detections.boxes) > 0:
+            if detections.boxes is not None and len(detections.boxes) > 0:
                 boxes = detections.boxes
                 xyxy = boxes.xyxy.cpu().numpy()
                 conf = boxes.conf.cpu().numpy()
                 cls = boxes.cls.cpu().numpy().astype(int)
-                best_ball = None
                 for bbox, score, cid in zip(xyxy, conf, cls):
                     class_name = detections.names[cid]
                     if class_name != "ball" or score < self.ball_min_conf:
                         continue
-                    if best_ball is None or score > best_ball[1]:
-                        best_ball = (bbox, score)
-
-                if best_ball is not None:
-                    bbox, score = best_ball
                     x1, y1, x2, y2 = bbox.tolist()
-                    tracks["ball"][n_frame][0] = {
-                        "bbox": [x1, y1, x2, y2],
-                        "confidence": float(score),
-                        "team": None,
-                        "distances": None,
-                        "shirt_color": None,
-                        "bbox_size": float((x2 - x1) * (y2 - y1)),
-                        "field_position_m": None,
-                        "ground_point_image": None,
-                    }
+                    ball_candidates.append(
+                        {
+                            "bbox": [x1, y1, x2, y2],
+                            "confidence": float(score),
+                            "metadata": {
+                                "team": None,
+                                "distances": None,
+                                "shirt_color": None,
+                                "bbox_size": float((x2 - x1) * (y2 - y1)),
+                                "ground_point_image": None,
+                            },
+                            "source": "raw",
+                        }
+                    )
+
+            selected_ball = self._select_ball_candidate(
+                ball_candidates,
+                ball_state,
+                n_frame,
+            )
+            if selected_ball is not None:
+                tracks["ball"][n_frame][0] = self._build_ball_track_payload(
+                    selected_ball["bbox"],
+                    selected_ball["confidence"],
+                    selected_ball["metadata"],
+                )
+                ball_state = self._update_ball_state(
+                    ball_state if self._ball_state_is_active(ball_state, n_frame) else None,
+                    selected_ball["bbox"],
+                    n_frame,
+                )
         
         return tracks

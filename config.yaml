@@ -138,6 +138,18 @@ tracking:
   motion_std_factor: 4.0
   motion_std_min_samples: 5
   motion_std_floor: 0.5
+  # Restricciones específicas del balón en imagen:
+  # - posición esperada según la trayectoria reciente
+  # - cambio de tamaño acotado entre frames
+  ball_expected_position_gate_px: 90.0
+  ball_expected_position_gate_growth_per_frame: 35.0
+  ball_expected_position_confidence_relax: 1.4
+  ball_size_ratio_per_frame: 1.8
+  ball_size_min_samples: 5
+  ball_size_std_factor: 3.0
+  ball_size_std_floor: 1.0
+  ball_max_reassign_lost_frames: 4
+  ball_high_conf_override: 0.6
   # Recuperación específica de árbitros
   referee_recovery_max_lost_frames: 3
   referee_recovery_max_distance: 45.0

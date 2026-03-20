@@ -693,6 +693,33 @@ if __name__ == "__main__":
                 "motion_std_min_samples", 8
             ),
             "motion_std_floor": tracking_cfg.get("motion_std_floor", 0.5),
+            "ball_expected_position_gate_px": tracking_cfg.get(
+                "ball_expected_position_gate_px", 90.0
+            ),
+            "ball_expected_position_gate_growth_per_frame": tracking_cfg.get(
+                "ball_expected_position_gate_growth_per_frame", 35.0
+            ),
+            "ball_expected_position_confidence_relax": tracking_cfg.get(
+                "ball_expected_position_confidence_relax", 1.4
+            ),
+            "ball_size_ratio_per_frame": tracking_cfg.get(
+                "ball_size_ratio_per_frame", 1.8
+            ),
+            "ball_size_min_samples": tracking_cfg.get(
+                "ball_size_min_samples", 5
+            ),
+            "ball_size_std_factor": tracking_cfg.get(
+                "ball_size_std_factor", 3.0
+            ),
+            "ball_size_std_floor": tracking_cfg.get(
+                "ball_size_std_floor", 1.0
+            ),
+            "ball_max_reassign_lost_frames": tracking_cfg.get(
+                "ball_max_reassign_lost_frames", 4
+            ),
+            "ball_high_conf_override": tracking_cfg.get(
+                "ball_high_conf_override", 0.6
+            ),
             "referee_recovery_max_lost_frames": tracking_cfg.get(
                 "referee_recovery_max_lost_frames", 3
             ),

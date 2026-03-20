@@ -48,6 +48,7 @@ En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=Tru
    - Clase y track_id (`"player #7"`)
    - Si hay información de equipo: el equipo asignado y las distancias a cada equipo dinámicamente (`"Real Madrid: [12.3, 45.6]"`)
    - Si hay `predicted_role_frame` o `predicted_role`: una línea adicional bajo el bbox con el rol
+   - Si existe `assignment_method`/`expected_role_slot` por una asignación restringida (por ejemplo Hungarian con once esperado), prioriza mostrar el `predicted_role` estable
    - Si hay `field_position_m` en `player`: otra línea bajo el bbox con `pos(m): x, y`
 5. Escribe el frame anotado con `out.write(frame)`.
 6. En el bloque `finally`, libera `cap` y `out` siempre, incluso si hubo error.

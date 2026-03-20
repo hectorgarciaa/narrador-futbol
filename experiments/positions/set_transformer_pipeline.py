@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.utils.class_weight import compute_class_weight
@@ -112,6 +113,13 @@ class ArtifactPaths:
     history_csv_path: Path
     metrics_json_path: Path
     split_json_path: Path
+
+
+@dataclass(frozen=True)
+class ExpectedRoleSlot:
+    input_label: str
+    slot_label: str
+    allowed_labels: tuple[str, ...]
 
 
 def set_global_seed(seed: int) -> None:
@@ -1096,6 +1104,68 @@ def _predict_probabilities(
     return np.concatenate(probs, axis=0)
 
 
+ROLE_SLOT_ALIASES: dict[str, tuple[str, ...]] = {
+    "GK": ("POR",),
+    "GOALKEEPER": ("POR",),
+    "KEEPER": ("POR",),
+    "DFIZQ": ("DFC_IZQ",),
+    "DF_IZQ": ("DFC_IZQ",),
+    "DFCIZQ": ("DFC_IZQ",),
+    "DFDCHA": ("DFC_DER",),
+    "DF_DCHA": ("DFC_DER",),
+    "DFC_DCHA": ("DFC_DER",),
+    "DFDER": ("DFC_DER",),
+    "DF_DER": ("DFC_DER",),
+    "DFCENT": ("DFC_CENT",),
+    "DFCENT": ("DFC_CENT",),
+    "DFC_CENTRAL": ("DFC_CENT",),
+    "DEL": ("DC",),
+    "ST": ("DC",),
+    "STRIKER": ("DC",),
+}
+
+
+def _normalize_role_token(value: Any) -> str:
+    token = str(value).strip().upper()
+    token = token.replace("-", "_").replace(" ", "_")
+    token = "_".join(part for part in token.split("_") if part)
+    return token
+
+
+def _resolve_expected_role_slot(
+    role_label: Any,
+    label_names: Sequence[str],
+) -> ExpectedRoleSlot:
+    slot_label = _normalize_role_token(role_label)
+    known_labels = {str(label) for label in label_names}
+
+    if slot_label in known_labels or slot_label == "POR":
+        return ExpectedRoleSlot(
+            input_label=str(role_label),
+            slot_label=slot_label,
+            allowed_labels=(slot_label,),
+        )
+
+    allowed = ROLE_SLOT_ALIASES.get(slot_label)
+    if allowed is None:
+        supported = sorted(set(known_labels).union(ROLE_SLOT_ALIASES.keys(), {"POR"}))
+        raise ValueError(
+            f"Rol esperado no soportado: {role_label!r}. "
+            f"Usa labels del modelo o aliases soportados: {supported}"
+        )
+
+    filtered = tuple(label for label in allowed if label == "POR" or label in known_labels)
+    if not filtered:
+        raise ValueError(
+            f"El rol esperado {role_label!r} no es compatible con las clases del checkpoint."
+        )
+    return ExpectedRoleSlot(
+        input_label=str(role_label),
+        slot_label=slot_label,
+        allowed_labels=filtered,
+    )
+
+
 def _aggregate_player_predictions(
     frame_df: pd.DataFrame,
     label_names: Sequence[str],
@@ -1108,33 +1178,197 @@ def _aggregate_player_predictions(
         class_name = class_name_mode.iloc[0] if not class_name_mode.empty else "player"
 
         if class_name == "goalkeeper":
-            rows.append(
-                {
-                    "team_id": str(team_id),
-                    "player_id": int(player_id),
-                    "class_name": class_name,
-                    "predicted_role": "POR",
-                    "predicted_role_confidence": 1.0,
-                    "frames_seen": int(len(group)),
-                }
-            )
+            row = {
+                "team_id": str(team_id),
+                "player_id": int(player_id),
+                "class_name": class_name,
+                "predicted_role": "POR",
+                "predicted_role_confidence": 1.0,
+                "frames_seen": int(len(group)),
+            }
+            for prob_col in prob_cols:
+                row[prob_col] = 0.0
+            rows.append(row)
             continue
 
         mean_probs = group[prob_cols].mean(axis=0)
         pred_col = str(mean_probs.idxmax())
         pred_label = pred_col.replace("prob_", "", 1)
-        rows.append(
-            {
-                "team_id": str(team_id),
-                "player_id": int(player_id),
-                "class_name": class_name,
-                "predicted_role": pred_label,
-                "predicted_role_confidence": float(mean_probs.max()),
-                "frames_seen": int(len(group)),
-            }
-        )
+        row = {
+            "team_id": str(team_id),
+            "player_id": int(player_id),
+            "class_name": class_name,
+            "predicted_role": pred_label,
+            "predicted_role_confidence": float(mean_probs.max()),
+            "frames_seen": int(len(group)),
+        }
+        row.update({prob_col: float(mean_probs[prob_col]) for prob_col in prob_cols})
+        rows.append(row)
 
     return pd.DataFrame(rows)
+
+
+def _apply_expected_roles_constraint(
+    player_predictions_df: pd.DataFrame,
+    label_names: Sequence[str],
+    expected_roles_by_team: Mapping[str, Sequence[str]] | None,
+) -> pd.DataFrame:
+    constrained = player_predictions_df.copy()
+    constrained["predicted_role_unconstrained"] = constrained["predicted_role"].astype(str)
+    constrained["predicted_role_confidence_unconstrained"] = pd.to_numeric(
+        constrained["predicted_role_confidence"],
+        errors="coerce",
+    ).astype(np.float32)
+    constrained["expected_role_slot"] = pd.Series(
+        [pd.NA] * len(constrained),
+        dtype="string",
+    )
+    constrained["assignment_method"] = pd.Series(
+        ["unconstrained"] * len(constrained),
+        dtype="string",
+    )
+    constrained["assignment_cost"] = np.nan
+
+    if not expected_roles_by_team:
+        return constrained
+
+    available_team_ids = set(constrained["team_id"].astype(str).unique().tolist())
+    unknown_team_ids = sorted(
+        {str(team_id) for team_id in expected_roles_by_team.keys()}.difference(available_team_ids)
+    )
+    if unknown_team_ids:
+        raise ValueError(
+            f"expected_roles_by_team contiene team_id inexistentes en la inferencia: {unknown_team_ids}"
+        )
+
+    epsilon = 1e-9
+    prob_cols = [f"prob_{label}" for label in label_names]
+    for raw_team_id, expected_roles in expected_roles_by_team.items():
+        team_id = str(raw_team_id)
+        team_mask = constrained["team_id"].astype(str) == team_id
+        team_df = constrained.loc[team_mask].copy()
+        slots = [
+            _resolve_expected_role_slot(role_label=role_label, label_names=label_names)
+            for role_label in expected_roles
+        ]
+
+        goalkeeper_slots = [slot for slot in slots if "POR" in slot.allowed_labels]
+        field_slots = [slot for slot in slots if "POR" not in slot.allowed_labels]
+
+        goalkeeper_df = team_df[team_df["class_name"].astype(str) == "goalkeeper"].copy()
+        field_df = team_df[team_df["class_name"].astype(str) != "goalkeeper"].copy()
+
+        if len(goalkeeper_df) > len(goalkeeper_slots):
+            raise ValueError(
+                f"El equipo {team_id!r} tiene {len(goalkeeper_df)} goalkeeper tracks y "
+                f"{len(goalkeeper_slots)} slots POR esperados."
+            )
+        if goalkeeper_slots:
+            goalkeeper_df = goalkeeper_df.sort_values(
+                ["frames_seen", "player_id"],
+                ascending=[False, True],
+            )
+            for (_, row), slot in zip(goalkeeper_df.iterrows(), goalkeeper_slots):
+                constrained.at[row.name, "predicted_role"] = "POR"
+                constrained.at[row.name, "predicted_role_confidence"] = 1.0
+                constrained.at[row.name, "expected_role_slot"] = slot.slot_label
+                constrained.at[row.name, "assignment_method"] = "hungarian_expected_roles"
+                constrained.at[row.name, "assignment_cost"] = 0.0
+
+        if not field_slots:
+            continue
+
+        field_indices = field_df.index.tolist()
+        cost_matrix = np.zeros((len(field_indices), len(field_slots)), dtype=np.float64)
+        best_labels_per_pair: list[list[tuple[str, float]]] = []
+
+        for row_pos, row_idx in enumerate(field_indices):
+            player_row = field_df.loc[row_idx]
+            row_pairs: list[tuple[str, float]] = []
+            for col_pos, slot in enumerate(field_slots):
+                slot_probs = []
+                for label in slot.allowed_labels:
+                    if label == "POR":
+                        continue
+                    prob_value = float(player_row.get(f"prob_{label}", 0.0))
+                    slot_probs.append((label, prob_value))
+                if not slot_probs:
+                    raise ValueError(
+                        f"El slot {slot.slot_label!r} del equipo {team_id!r} no tiene clases válidas."
+                    )
+                best_label, best_prob = max(slot_probs, key=lambda item: item[1])
+                row_pairs.append((best_label, best_prob))
+                cost_matrix[row_pos, col_pos] = -math.log(max(best_prob, epsilon))
+            best_labels_per_pair.append(row_pairs)
+
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        assigned_row_positions = set(row_ind.tolist())
+        for row_pos, col_pos in zip(row_ind.tolist(), col_ind.tolist()):
+            row_idx = field_indices[row_pos]
+            slot = field_slots[col_pos]
+            best_label, best_prob = best_labels_per_pair[row_pos][col_pos]
+            constrained.at[row_idx, "predicted_role"] = best_label
+            constrained.at[row_idx, "predicted_role_confidence"] = float(best_prob)
+            constrained.at[row_idx, "expected_role_slot"] = slot.slot_label
+            constrained.at[row_idx, "assignment_method"] = "hungarian_expected_roles"
+            constrained.at[row_idx, "assignment_cost"] = float(cost_matrix[row_pos, col_pos])
+
+        fallback_options: list[tuple[str, str]] = []
+        seen_fallback_pairs: set[tuple[str, str]] = set()
+        for slot in field_slots:
+            for label in slot.allowed_labels:
+                if label == "POR":
+                    continue
+                pair = (slot.slot_label, str(label))
+                if pair in seen_fallback_pairs:
+                    continue
+                fallback_options.append(pair)
+                seen_fallback_pairs.add(pair)
+
+        for row_pos, row_idx in enumerate(field_indices):
+            if row_pos in assigned_row_positions:
+                continue
+            player_row = field_df.loc[row_idx]
+            if not fallback_options:
+                constrained.at[row_idx, "assignment_method"] = "expected_roles_unassigned"
+                continue
+
+            best_slot_label = None
+            best_label = None
+            best_prob = -1.0
+            for slot_label, label in fallback_options:
+                prob_value = float(player_row.get(f"prob_{label}", 0.0))
+                if prob_value > best_prob:
+                    best_slot_label = slot_label
+                    best_label = label
+                    best_prob = prob_value
+
+            if best_label is None or best_slot_label is None:
+                constrained.at[row_idx, "assignment_method"] = "expected_roles_unassigned"
+                continue
+
+            constrained.at[row_idx, "predicted_role"] = best_label
+            constrained.at[row_idx, "predicted_role_confidence"] = float(best_prob)
+            constrained.at[row_idx, "expected_role_slot"] = best_slot_label
+            constrained.at[row_idx, "assignment_method"] = "expected_roles_fallback_best_allowed"
+            constrained.at[row_idx, "assignment_cost"] = float(-math.log(max(best_prob, epsilon)))
+
+    keep_cols = [
+        "team_id",
+        "player_id",
+        "class_name",
+        "predicted_role",
+        "predicted_role_confidence",
+        "predicted_role_unconstrained",
+        "predicted_role_confidence_unconstrained",
+        "expected_role_slot",
+        "assignment_method",
+        "assignment_cost",
+        "frames_seen",
+        *prob_cols,
+    ]
+    available_cols = [col for col in keep_cols if col in constrained.columns]
+    return constrained.loc[:, available_cols]
 
 
 def _augment_tracks_with_predictions(
@@ -1150,13 +1384,23 @@ def _augment_tracks_with_predictions(
         )
         for row in frame_predictions_df.itertuples(index=False)
     }
-    player_map = {
-        (str(row.team_id), int(row.player_id)): (
-            str(row.predicted_role),
-            float(row.predicted_role_confidence),
-        )
-        for row in player_predictions_df.itertuples(index=False)
-    }
+    player_map = {}
+    for row in player_predictions_df.itertuples(index=False):
+        stable_payload = {
+            "predicted_role": str(row.predicted_role),
+            "predicted_role_confidence": float(row.predicted_role_confidence),
+        }
+        if hasattr(row, "predicted_role_unconstrained"):
+            stable_payload["predicted_role_unconstrained"] = str(row.predicted_role_unconstrained)
+        if hasattr(row, "predicted_role_confidence_unconstrained"):
+            stable_payload["predicted_role_confidence_unconstrained"] = float(
+                row.predicted_role_confidence_unconstrained
+            )
+        if hasattr(row, "expected_role_slot") and pd.notna(row.expected_role_slot):
+            stable_payload["expected_role_slot"] = str(row.expected_role_slot)
+        if hasattr(row, "assignment_method") and pd.notna(row.assignment_method):
+            stable_payload["assignment_method"] = str(row.assignment_method)
+        player_map[(str(row.team_id), int(row.player_id))] = stable_payload
 
     for class_name in ("player", "goalkeeper"):
         frames = output.get(class_name, [])
@@ -1181,8 +1425,7 @@ def _augment_tracks_with_predictions(
                 stable = player_map.get((team_id, player_id))
                 frame_pred = frame_map.get((int(frame_id), team_id, player_id))
                 if stable is not None:
-                    enriched["predicted_role"] = stable[0]
-                    enriched["predicted_role_confidence"] = stable[1]
+                    enriched.update(stable)
                 if frame_pred is not None:
                     enriched["predicted_role_frame"] = frame_pred[0]
                     enriched["predicted_role_frame_confidence"] = frame_pred[1]
@@ -1197,6 +1440,7 @@ def predict_roles_for_video(
     output_dir: Path | None = None,
     tracks_path: Path | None = None,
     batch_size: int = 1024,
+    expected_roles_by_team: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     project_root = find_project_root(project_root)
     video_path = Path(video_path)
@@ -1264,9 +1508,24 @@ def predict_roles_for_video(
         frame_df=frame_predictions_df,
         label_names=label_names,
     )
+    player_predictions_df = _apply_expected_roles_constraint(
+        player_predictions_df=player_predictions_df,
+        label_names=label_names,
+        expected_roles_by_team=expected_roles_by_team,
+    )
     frame_predictions_df = frame_predictions_df.merge(
         player_predictions_df[
-            ["team_id", "player_id", "predicted_role", "predicted_role_confidence"]
+            [
+                "team_id",
+                "player_id",
+                "predicted_role",
+                "predicted_role_confidence",
+                "predicted_role_unconstrained",
+                "predicted_role_confidence_unconstrained",
+                "expected_role_slot",
+                "assignment_method",
+                "assignment_cost",
+            ]
         ],
         on=["team_id", "player_id"],
         how="left",
@@ -1310,6 +1569,14 @@ def predict_roles_for_video(
         "num_player_predictions": int(len(player_predictions_df)),
         "trained_labels": list(label_names),
         "goalkeeper_heuristic_label": checkpoint.get("heuristics", {}).get("goalkeeper_role", "POR"),
+        "expected_roles_by_team": (
+            {str(team_id): [str(role) for role in roles] for team_id, roles in expected_roles_by_team.items()}
+            if expected_roles_by_team
+            else None
+        ),
+        "stable_assignment_method": (
+            "hungarian_expected_roles" if expected_roles_by_team else "unconstrained_softmax"
+        ),
         "attack_direction_by_team": {
             str(team): int(direction) for team, direction in attack_direction_by_team.items()
         },
