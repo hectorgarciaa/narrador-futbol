@@ -29,7 +29,7 @@ tracker = Tracker(
         "Real Madrid": np.array([255, 127, 127]),
         "Wolfsburgo": np.array([224, 77, 196])
     },
-    ball_min_conf=0.01,
+    ball_min_conf=0.005,
     field_tracking_conf={
         "enabled": True,
         "method": "pnlcalib",

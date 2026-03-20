@@ -94,13 +94,29 @@ class Evaluator:
     # COLOR METRICS
     # ----------------------------------------------
     def get_colors_var(self, tid, id_colors):
-        colors = np.array(id_colors.get(tid, []), dtype=float) if id_colors.get(tid) else None
-
-        if colors is None or len(colors) == 0:
+        raw_colors = id_colors.get(tid, [])
+        if not raw_colors:
             return None, None
 
+        valid_colors = []
+        for color in raw_colors:
+            if color is None:
+                continue
+            color_array = np.asarray(color, dtype=float)
+            if color_array.size == 0:
+                continue
+            valid_colors.append(np.ravel(color_array))
+
+        if not valid_colors:
+            return None, None
+
+        colors = np.vstack(valid_colors)
         color_var = float(np.mean(np.var(colors, axis=0)))
-        color_diff = float(np.mean(np.linalg.norm(np.diff(colors, axis=0), axis=1))) if len(colors) > 1 else 0.0
+        color_diff = (
+            float(np.mean(np.linalg.norm(np.diff(colors, axis=0), axis=1)))
+            if len(colors) > 1
+            else 0.0
+        )
 
         return color_var, color_diff
 
@@ -237,8 +253,14 @@ class Evaluator:
             if m["team_flip_rate_dynamic"][0]["value"] is not None
         ]
         entropy = [m["entropy"][0]["value"] for m in metrics.values()]
-        color_var = [m["color_var"][0]["value"] for m in metrics.values()]
-        color_diff = [m["color_diff"][0]["value"] for m in metrics.values()]
+        color_var = [
+            m["color_var"][0]["value"] for m in metrics.values()
+            if m["color_var"][0]["value"] is not None
+        ]
+        color_diff = [
+            m["color_diff"][0]["value"] for m in metrics.values()
+            if m["color_diff"][0]["value"] is not None
+        ]
 
         bbox_size = [
             m["bbox_size_cv"][0]["value"] for m in metrics.values()

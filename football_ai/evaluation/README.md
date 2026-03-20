@@ -46,6 +46,8 @@ results = evaluator.evaluate(["player", "goalkeeper", "referee", "ball"], tracks
 
 Cada métrica se almacena como lista de **eventos** `{"id", "frame", "value"}` para poder graficarlos temporalmente.
 
+Las métricas de color (`color_var`, `color_diff`) solo son informativas para clases que aportan `shirt_color`, como `player` y `goalkeeper`. En clases como `ball` o `referee`, si no hay color disponible, el evaluador las deja en valor neutro y no falla.
+
 ---
 
 ## `experiment_visualizer.py` — `ExperimentVisualizer`
