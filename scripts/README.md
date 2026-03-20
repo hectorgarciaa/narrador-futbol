@@ -78,7 +78,7 @@ Además, exige un mínimo de muestras por cluster (`--team-bootstrap-min-cluster
 
 **Nota Linux/headless:** si `visualization.show_output=true` pero no hay entorno gráfico (`DISPLAY`/`WAYLAND_DISPLAY`), la ventana en tiempo real se desactiva automáticamente y el script sigue generando el MP4 de salida.
 **Nota anti-ID-switch:** `track.py` aplica gate estadístico (`motion_std_*`) y reglas estrictas de reasignación desde `config.yaml`; con `require_field_position_for_reassign=true` no hay fallback a píxeles en reasignación y con `use_field_position_as_primary_cost=true` el matching base de `player/goalkeeper` se hace por campo.
-**Nota balón:** además del matching normal, `track.py` filtra el balón con restricciones de trayectoria esperada y tamaño (`ball_expected_position_*`, `ball_size_*`) para rechazar detecciones que se teletransportan o cambian de escala sin plausibilidad física.
+**Nota balón:** además del matching normal, `track.py` filtra el balón con restricciones específicas de trayectoria esperada y tamaño (`ball_expected_position_*`, `ball_size_*`) para rechazar detecciones que se teletransportan o cambian de escala sin plausibilidad física, intentando mantener la cobertura original del detector. En el resumen final añade también `ball_coverage`.
 
 Es el script principal del proyecto y sirve como referencia de cómo usar el paquete `football_ai` completo.
 

@@ -860,9 +860,12 @@ if __name__ == "__main__":
         # Evaluation
         logger.info("Evaluating tracks...")
         evaluator = Evaluator()
-        evaluation = evaluator.evaluate(["player"], tracks)
-        summary = evaluation["player"]["summary"]
-        
+        evaluation = evaluator.evaluate(["player", "ball"], tracks)
+        summary = dict(evaluation["player"]["summary"])
+        ball_summary = evaluation.get("ball", {}).get("summary", {})
+        summary["ball_coverage"] = float(ball_summary.get("mean_coverage", 0.0))
+        summary["ball_tracks"] = int(ball_summary.get("num_tracks", 0))
+
         # Save tracks JSON
         save_result(tracks, OUTPUT_PATH_NAMED, logger)
         if OUTPUT_PATH_LEGACY != OUTPUT_PATH_NAMED:

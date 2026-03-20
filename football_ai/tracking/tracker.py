@@ -672,18 +672,6 @@ class Tracker:
         for candidate in candidates:
             bbox = candidate["bbox"]
             confidence = float(candidate["confidence"])
-            motion_ok = True
-            if active_state is not None:
-                motion_ok = self._is_motion_compatible(
-                    active_state,
-                    bbox,
-                    current_frame,
-                    class_name="ball",
-                    new_field_position=None,
-                )
-            if not motion_ok:
-                continue
-
             if not self._is_ball_size_compatible(active_state, bbox, confidence):
                 continue
 
