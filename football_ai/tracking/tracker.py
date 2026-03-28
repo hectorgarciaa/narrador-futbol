@@ -483,6 +483,8 @@ class Tracker:
                 if projected_ground_point is not None
                 else None
             ),
+            "reserved_seed": True,
+            "special_penalty_seed": bool(state.get("special_penalty_seed", False)),
             "synthetic_seed": True,
         }
 
@@ -1439,7 +1441,61 @@ class Tracker:
                 best_id = canonical_id
 
         return best_id
-    
+
+    def _best_special_penalty_seed_id(
+        self,
+        bbox,
+        candidate_ids,
+        canonical_state,
+        detection_class,
+        detection_team,
+        current_frame,
+        field_position=None,
+    ):
+        best_id = None
+        best_output_class = None
+        best_priority = None
+
+        for canonical_id in candidate_ids:
+            candidate_state = canonical_state.get(canonical_id)
+            if not isinstance(candidate_state, dict):
+                continue
+            if not candidate_state.get("special_penalty_seed", False):
+                continue
+
+            output_class_name = self._resolve_candidate_class_for_detection(
+                candidate_state,
+                detection_class,
+                detection_team,
+                bbox,
+                field_position,
+                current_frame,
+            )
+            if output_class_name is None:
+                continue
+
+            distance_sq = self._bbox_distance_sq(
+                candidate_state.get("bbox"),
+                bbox,
+                class_name=output_class_name,
+                field_position_a=candidate_state.get("field_position"),
+                field_position_b=field_position,
+            )
+            if distance_sq is None:
+                continue
+
+            lost_frames = max(
+                0,
+                current_frame - int(candidate_state.get("last_frame", current_frame)),
+            )
+            priority = (distance_sq, lost_frames, canonical_id)
+            if best_priority is None or priority < best_priority:
+                best_priority = priority
+                best_id = canonical_id
+                best_output_class = output_class_name
+
+        return best_id, best_output_class
+
     def get_tracks(self, video, show_kmeans=False, frame_hook=None):
         model_detections = self.model.detect(video)
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [] }
@@ -1645,6 +1701,8 @@ class Tracker:
                         if hasattr(metadata.get("ground_point_image"), "tolist")
                         else metadata.get("ground_point_image")
                     ),
+                    "reserved_seed": False,
+                    "special_penalty_seed": special_penalty_seed,
                 }
 
             for object_detected in sorted_tracked_detections:
@@ -1690,6 +1748,36 @@ class Tracker:
                             n_frame,
                         ) is None:
                             canonical_id = None
+
+                if class_name in {"player", "goalkeeper"}:
+                    special_override_id, special_override_class_name = (
+                        self._best_special_penalty_seed_id(
+                            bbox,
+                            [
+                                candidate_id
+                                for candidate_id in canonical_state.keys()
+                                if candidate_id not in used_canonical_ids_in_frame
+                            ],
+                            canonical_state,
+                            class_name,
+                            detected_team,
+                            n_frame,
+                            field_position=field_position,
+                        )
+                    )
+                    if (
+                        special_override_id is not None
+                        and special_override_class_name is not None
+                        and (
+                            canonical_id is None
+                            or not canonical_state.get(canonical_id, {}).get(
+                                "special_penalty_seed",
+                                False,
+                            )
+                        )
+                    ):
+                        canonical_id = special_override_id
+                        output_class_name = special_override_class_name
 
                 if canonical_id is None:
                     output_class_name = class_name

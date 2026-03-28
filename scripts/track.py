@@ -854,7 +854,39 @@ class OnlineSpecialSeedRoleAssigner:
             )
             self.enabled = False
 
-    def _build_frame_observations(self, tracks, frame_id):
+    @staticmethod
+    def _empty_observations_df():
+        return pd.DataFrame(
+            columns=[
+                "match_id",
+                "frame_id",
+                "team_id",
+                "player_id",
+                "class_name",
+                "x_m",
+                "y_m",
+                "x",
+                "y",
+                "visible",
+                "confidence_tracking",
+                "bbox",
+                "role_label",
+                "vx",
+                "vy",
+            ]
+        )
+
+    def _build_frame_observations(
+        self,
+        tracks,
+        frame_id,
+        *,
+        include_special_ids=False,
+        previous_positions=None,
+    ):
+        previous_positions = (
+            self.prev_positions if previous_positions is None else previous_positions
+        )
         rows = []
         frame_key_positions = {}
         for class_name in ("player", "goalkeeper"):
@@ -867,6 +899,13 @@ class OnlineSpecialSeedRoleAssigner:
             for track_id_raw, track_data in frame_tracks.items():
                 if not isinstance(track_data, dict):
                     continue
+                try:
+                    player_id = int(track_id_raw)
+                except (TypeError, ValueError):
+                    continue
+                is_special_id = int(player_id) in self.special_ids
+                if is_special_id and not include_special_ids:
+                    continue
                 if track_data.get("synthetic_seed"):
                     continue
                 team_id = track_data.get("team")
@@ -875,16 +914,12 @@ class OnlineSpecialSeedRoleAssigner:
                 field_position = _safe_field_position_m(track_data)
                 if field_position is None:
                     continue
-                try:
-                    player_id = int(track_id_raw)
-                except (TypeError, ValueError):
-                    continue
                 x_m, y_m = field_position
                 x = float(np.clip(x_m / 106.0, 0.0, 1.0))
                 y = float(np.clip(y_m / 68.0, 0.0, 1.0))
                 team_id_str = str(team_id)
                 key = (team_id_str, int(player_id))
-                previous = self.prev_positions.get(key)
+                previous = previous_positions.get(key)
                 if previous is not None and frame_id > previous["frame_id"]:
                     dt = float(frame_id - previous["frame_id"])
                     vx = float((x - previous["x"]) / dt)
@@ -917,30 +952,9 @@ class OnlineSpecialSeedRoleAssigner:
                     "frame_id": int(frame_id),
                 }
 
-        for key, value in frame_key_positions.items():
-            self.prev_positions[key] = value
-
         if not rows:
-            return pd.DataFrame(
-                columns=[
-                    "match_id",
-                    "frame_id",
-                    "team_id",
-                    "player_id",
-                    "class_name",
-                    "x_m",
-                    "y_m",
-                    "x",
-                    "y",
-                    "visible",
-                    "confidence_tracking",
-                    "bbox",
-                    "role_label",
-                    "vx",
-                    "vy",
-                ]
-            )
-        return pd.DataFrame(rows)
+            return self._empty_observations_df(), frame_key_positions
+        return pd.DataFrame(rows), frame_key_positions
 
     @staticmethod
     def _set_track_role_payload(track_data, row):
@@ -1067,24 +1081,58 @@ class OnlineSpecialSeedRoleAssigner:
         if not self.enabled or self.role_session is None:
             return
 
-        observations = self._build_frame_observations(tracks, frame_id)
-        frame_predictions_df = pd.DataFrame()
+        previous_positions_snapshot = dict(self.prev_positions)
 
-        if not observations.empty:
-            role_result = self.role_session.predict_frame(observations)
-            frame_predictions_df = role_result["frame_predictions_df"]
-            player_predictions_df = role_result["player_predictions_df"]
-            self.stats["position_role_frame_predictions"] += int(
-                len(frame_predictions_df)
-            )
-            self.stats["position_role_player_predictions"] += int(
-                len(player_predictions_df)
-            )
-            if not frame_predictions_df.empty:
-                self.stats["frames_with_role_predictions"] += 1
-                self._annotate_frame_with_roles(tracks, frame_id, frame_predictions_df)
+        regular_observations, regular_positions = self._build_frame_observations(
+            tracks,
+            frame_id,
+            include_special_ids=False,
+            previous_positions=previous_positions_snapshot,
+        )
+        regular_frame_predictions_df = pd.DataFrame()
 
-        self._assign_special_seed_frame_teams(tracks, frame_id, frame_predictions_df)
+        if not regular_observations.empty:
+            role_result = self.role_session.predict_frame(regular_observations)
+            regular_frame_predictions_df = role_result["frame_predictions_df"]
+
+        self._assign_special_seed_frame_teams(
+            tracks,
+            frame_id,
+            regular_frame_predictions_df,
+        )
+
+        full_observations, full_positions = self._build_frame_observations(
+            tracks,
+            frame_id,
+            include_special_ids=True,
+            previous_positions=previous_positions_snapshot,
+        )
+        final_frame_predictions_df = pd.DataFrame()
+        final_player_predictions_df = pd.DataFrame()
+
+        if not full_observations.empty:
+            final_role_result = self.role_session.predict_frame(full_observations)
+            final_frame_predictions_df = final_role_result["frame_predictions_df"]
+            final_player_predictions_df = final_role_result["player_predictions_df"]
+        elif not regular_observations.empty:
+            fallback_role_result = self.role_session.predict_frame(regular_observations)
+            final_frame_predictions_df = fallback_role_result["frame_predictions_df"]
+            final_player_predictions_df = fallback_role_result["player_predictions_df"]
+            full_positions = regular_positions
+
+        self.stats["position_role_frame_predictions"] += int(
+            len(final_frame_predictions_df)
+        )
+        self.stats["position_role_player_predictions"] += int(
+            len(final_player_predictions_df)
+        )
+        if not final_frame_predictions_df.empty:
+            self.stats["frames_with_role_predictions"] += 1
+            self._annotate_frame_with_roles(tracks, frame_id, final_frame_predictions_df)
+
+        positions_for_update = full_positions or regular_positions
+        for key, value in positions_for_update.items():
+            self.prev_positions[key] = value
 
     def summary(self):
         return dict(self.stats)
