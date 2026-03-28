@@ -1440,7 +1440,7 @@ class Tracker:
 
         return best_id
     
-    def get_tracks(self, video, show_kmeans=False):
+    def get_tracks(self, video, show_kmeans=False, frame_hook=None):
         model_detections = self.model.detect(video)
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [] }
         raw_to_canonical_id = {}
@@ -1811,5 +1811,8 @@ class Tracker:
                     selected_ball["bbox"],
                     n_frame,
                 )
+
+            if callable(frame_hook):
+                frame_hook(tracks, n_frame)
         
         return tracks

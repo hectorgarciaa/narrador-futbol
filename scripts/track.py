@@ -12,6 +12,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pandas as pd
 
 # Permite ejecutar `python scripts/track.py` sin instalar el paquete en editable.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -770,6 +771,325 @@ def apply_special_seed_role_team_assignment(
     return enriched_tracks, role_result
 
 
+class OnlineSpecialSeedRoleAssigner:
+    def __init__(self, config, video_path, logger):
+        self.config = config
+        self.video_path = Path(video_path)
+        self.logger = logger
+        tracking_cfg = config.tracking
+        self.enabled = bool(
+            tracking_cfg.get("special_seed_role_team_assignment_enabled", True)
+        )
+        self.special_ids = tuple(
+            int(track_id)
+            for track_id in tracking_cfg.get(
+                "special_seed_canonical_ids",
+                list(DEFAULT_SPECIAL_SEED_CANONICAL_IDS),
+            )
+        )
+        self.defender_roles = {
+            _normalize_role_token(role)
+            for role in tracking_cfg.get(
+                "special_seed_defender_roles",
+                list(DEFAULT_SPECIAL_SEED_DEFENDER_ROLES),
+            )
+        }
+        self.last_team_by_special_id = {}
+        self.prev_positions = {}
+        self.stats = {
+            "processed_frames": 0,
+            "frames_with_role_predictions": 0,
+            "position_role_frame_predictions": 0,
+            "position_role_player_predictions": 0,
+            "special_seed_assigned_frames": 0,
+            "special_seed_carry_frames": 0,
+            "special_seed_unassigned_frames": 0,
+            "special_ids": [int(track_id) for track_id in self.special_ids],
+        }
+        self.role_session = None
+
+        if not self.enabled:
+            return
+
+        model_path = _resolve_project_relative_path(
+            config.project_root,
+            tracking_cfg.get(
+                "special_seed_role_model_path",
+                DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH,
+            ),
+        )
+        if not model_path.exists():
+            self.logger.warning(
+                "Se desactiva online special-seed role assignment: no existe el checkpoint %s",
+                model_path,
+            )
+            self.enabled = False
+            return
+
+        try:
+            from experiments.positions.set_transformer_pipeline import (
+                OnlineRoleInferenceSession,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Se desactiva online special-seed role assignment: no se pudo importar OnlineRoleInferenceSession (%s)",
+                exc,
+            )
+            self.enabled = False
+            return
+
+        try:
+            self.role_session = OnlineRoleInferenceSession.from_checkpoint(
+                model_path=model_path,
+                project_root=config.project_root,
+            )
+            self.logger.info(
+                "Online position-role session loaded for tracking: %s",
+                model_path,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Se desactiva online special-seed role assignment: no se pudo cargar el checkpoint (%s)",
+                exc,
+            )
+            self.enabled = False
+
+    def _build_frame_observations(self, tracks, frame_id):
+        rows = []
+        frame_key_positions = {}
+        for class_name in ("player", "goalkeeper"):
+            class_frames = tracks.get(class_name, [])
+            if frame_id >= len(class_frames):
+                continue
+            frame_tracks = class_frames[frame_id]
+            if not isinstance(frame_tracks, dict):
+                continue
+            for track_id_raw, track_data in frame_tracks.items():
+                if not isinstance(track_data, dict):
+                    continue
+                if track_data.get("synthetic_seed"):
+                    continue
+                team_id = track_data.get("team")
+                if team_id is None:
+                    continue
+                field_position = _safe_field_position_m(track_data)
+                if field_position is None:
+                    continue
+                try:
+                    player_id = int(track_id_raw)
+                except (TypeError, ValueError):
+                    continue
+                x_m, y_m = field_position
+                x = float(np.clip(x_m / 106.0, 0.0, 1.0))
+                y = float(np.clip(y_m / 68.0, 0.0, 1.0))
+                team_id_str = str(team_id)
+                key = (team_id_str, int(player_id))
+                previous = self.prev_positions.get(key)
+                if previous is not None and frame_id > previous["frame_id"]:
+                    dt = float(frame_id - previous["frame_id"])
+                    vx = float((x - previous["x"]) / dt)
+                    vy = float((y - previous["y"]) / dt)
+                else:
+                    vx = 0.0
+                    vy = 0.0
+                rows.append(
+                    {
+                        "match_id": self.video_path.stem.replace(" ", "_"),
+                        "frame_id": int(frame_id),
+                        "team_id": team_id_str,
+                        "player_id": int(player_id),
+                        "class_name": str(class_name),
+                        "x_m": float(x_m),
+                        "y_m": float(y_m),
+                        "x": x,
+                        "y": y,
+                        "visible": 1,
+                        "confidence_tracking": float(track_data.get("confidence", np.nan)),
+                        "bbox": track_data.get("bbox"),
+                        "role_label": pd.NA,
+                        "vx": vx,
+                        "vy": vy,
+                    }
+                )
+                frame_key_positions[key] = {
+                    "x": x,
+                    "y": y,
+                    "frame_id": int(frame_id),
+                }
+
+        for key, value in frame_key_positions.items():
+            self.prev_positions[key] = value
+
+        if not rows:
+            return pd.DataFrame(
+                columns=[
+                    "match_id",
+                    "frame_id",
+                    "team_id",
+                    "player_id",
+                    "class_name",
+                    "x_m",
+                    "y_m",
+                    "x",
+                    "y",
+                    "visible",
+                    "confidence_tracking",
+                    "bbox",
+                    "role_label",
+                    "vx",
+                    "vy",
+                ]
+            )
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _set_track_role_payload(track_data, row):
+        track_data["predicted_role_frame"] = str(row.predicted_role_frame)
+        track_data["predicted_role_frame_confidence"] = float(
+            row.predicted_role_frame_confidence
+        )
+        if hasattr(row, "predicted_role") and pd.notna(row.predicted_role):
+            track_data["predicted_role"] = str(row.predicted_role)
+        if hasattr(row, "predicted_role_confidence") and pd.notna(
+            row.predicted_role_confidence
+        ):
+            track_data["predicted_role_confidence"] = float(
+                row.predicted_role_confidence
+            )
+
+    def _annotate_frame_with_roles(self, tracks, frame_id, frame_predictions_df):
+        if frame_predictions_df.empty:
+            return
+        role_map = {}
+        for row in frame_predictions_df.itertuples(index=False):
+            role_map[(str(row.team_id), int(row.player_id))] = row
+
+        for class_name in ("player", "goalkeeper"):
+            class_frames = tracks.get(class_name, [])
+            if frame_id >= len(class_frames):
+                continue
+            frame_tracks = class_frames[frame_id]
+            if not isinstance(frame_tracks, dict):
+                continue
+            for track_id_raw, track_data in frame_tracks.items():
+                if not isinstance(track_data, dict):
+                    continue
+                team_id = track_data.get("team")
+                if team_id is None:
+                    continue
+                try:
+                    player_id = int(track_id_raw)
+                except (TypeError, ValueError):
+                    continue
+                row = role_map.get((str(team_id), int(player_id)))
+                if row is None:
+                    continue
+                self._set_track_role_payload(track_data, row)
+
+    def _assign_special_seed_frame_teams(self, tracks, frame_id, frame_predictions_df):
+        defender_candidates = []
+        if not frame_predictions_df.empty:
+            for row in frame_predictions_df.itertuples(index=False):
+                predicted_role = (
+                    getattr(row, "predicted_role", None)
+                    or getattr(row, "predicted_role_frame", None)
+                )
+                if _normalize_role_token(predicted_role) not in self.defender_roles:
+                    continue
+                if pd.isna(getattr(row, "x_m", np.nan)) or pd.isna(
+                    getattr(row, "y_m", np.nan)
+                ):
+                    continue
+                defender_candidates.append(
+                    {
+                        "track_id": int(row.player_id),
+                        "team": str(row.team_id),
+                        "position": (float(row.x_m), float(row.y_m)),
+                    }
+                )
+
+        frame_assignment_made = False
+        for class_name in ("player", "goalkeeper"):
+            class_frames = tracks.get(class_name, [])
+            if frame_id >= len(class_frames):
+                continue
+            frame_tracks = class_frames[frame_id]
+            if not isinstance(frame_tracks, dict):
+                continue
+
+            for special_id in self.special_ids:
+                for track_key in _special_seed_frame_track_keys(frame_tracks, special_id):
+                    track_data = frame_tracks.get(track_key)
+                    if not isinstance(track_data, dict):
+                        continue
+                    field_position = _safe_field_position_m(track_data)
+                    if field_position is None:
+                        continue
+
+                    best_candidate = None
+                    best_distance_m = None
+                    for defender in defender_candidates:
+                        distance_m = math.dist(field_position, defender["position"])
+                        if best_distance_m is None or distance_m < best_distance_m:
+                            best_distance_m = distance_m
+                            best_candidate = defender
+
+                    if best_candidate is not None:
+                        resolved_team = str(best_candidate["team"])
+                        track_data["team"] = resolved_team
+                        track_data["special_team_assignment_source"] = "nearest_defender_role"
+                        track_data["special_team_assignment_distance_m"] = float(
+                            best_distance_m
+                        )
+                        track_data["special_team_assignment_track_id"] = int(
+                            best_candidate["track_id"]
+                        )
+                        self.last_team_by_special_id[int(special_id)] = resolved_team
+                        self.stats["special_seed_assigned_frames"] += 1
+                        frame_assignment_made = True
+                    elif int(special_id) in self.last_team_by_special_id:
+                        track_data["team"] = self.last_team_by_special_id[int(special_id)]
+                        track_data["special_team_assignment_source"] = (
+                            "nearest_defender_role_carry"
+                        )
+                        track_data["special_team_assignment_distance_m"] = None
+                        track_data["special_team_assignment_track_id"] = None
+                        self.stats["special_seed_carry_frames"] += 1
+                    else:
+                        track_data["special_team_assignment_source"] = "unassigned"
+                        track_data["special_team_assignment_distance_m"] = None
+                        track_data["special_team_assignment_track_id"] = None
+                        self.stats["special_seed_unassigned_frames"] += 1
+        return frame_assignment_made
+
+    def on_frame(self, tracks, frame_id):
+        self.stats["processed_frames"] += 1
+        if not self.enabled or self.role_session is None:
+            return
+
+        observations = self._build_frame_observations(tracks, frame_id)
+        frame_predictions_df = pd.DataFrame()
+
+        if not observations.empty:
+            role_result = self.role_session.predict_frame(observations)
+            frame_predictions_df = role_result["frame_predictions_df"]
+            player_predictions_df = role_result["player_predictions_df"]
+            self.stats["position_role_frame_predictions"] += int(
+                len(frame_predictions_df)
+            )
+            self.stats["position_role_player_predictions"] += int(
+                len(player_predictions_df)
+            )
+            if not frame_predictions_df.empty:
+                self.stats["frames_with_role_predictions"] += 1
+                self._annotate_frame_with_roles(tracks, frame_id, frame_predictions_df)
+
+        self._assign_special_seed_frame_teams(tracks, frame_id, frame_predictions_df)
+
+    def summary(self):
+        return dict(self.stats)
+
+
 def _read_csv_rows(csv_path):
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
@@ -1090,20 +1410,27 @@ if __name__ == "__main__":
             field_tracking_conf=FIELD_TRACKING_CONF,
             project_root=config.project_root,
         )
-        logger.info("Extracting tracks from video...")
-        tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
-        role_postprocess_result = None
-        tracks, role_postprocess_result = apply_special_seed_role_team_assignment(
-            tracks=tracks,
-            video_path=VIDEO_PATH,
+        online_special_seed_role_assigner = OnlineSpecialSeedRoleAssigner(
             config=config,
+            video_path=VIDEO_PATH,
             logger=logger,
+        )
+        logger.info("Extracting tracks from video...")
+        tracks = tracker.get_tracks(
+            VIDEO_PATH,
+            SHOWKMEANS,
+            frame_hook=online_special_seed_role_assigner.on_frame,
+        )
+        role_postprocess_result = (
+            online_special_seed_role_assigner.summary()
+            if online_special_seed_role_assigner.enabled
+            else None
         )
         if role_postprocess_result is not None:
             logger.info(
-                "Position-role postprocess applied: %s player predictions, %s frame predictions",
-                role_postprocess_result.get("num_player_predictions"),
-                role_postprocess_result.get("num_frame_predictions"),
+                "Online position-role assignment applied: %s player predictions, %s frame predictions",
+                role_postprocess_result.get("position_role_player_predictions"),
+                role_postprocess_result.get("position_role_frame_predictions"),
             )
         
         # Draw tracks
@@ -1122,17 +1449,8 @@ if __name__ == "__main__":
         summary["ball_coverage"] = float(ball_summary.get("mean_coverage", 0.0))
         summary["ball_tracks"] = int(ball_summary.get("num_tracks", 0))
         if role_postprocess_result is not None:
-            summary["position_role_postprocess_applied"] = True
-            summary["position_role_player_predictions"] = int(
-                role_postprocess_result.get("num_player_predictions", 0)
-            )
-            summary["position_role_frame_predictions"] = int(
-                role_postprocess_result.get("num_frame_predictions", 0)
-            )
-            special_seed_assignment = role_postprocess_result.get(
-                "special_seed_team_assignment", {}
-            )
-            for key, value in special_seed_assignment.items():
+            summary["position_role_online_applied"] = True
+            for key, value in role_postprocess_result.items():
                 summary[f"special_seed_{key}"] = value
 
         # Save tracks JSON

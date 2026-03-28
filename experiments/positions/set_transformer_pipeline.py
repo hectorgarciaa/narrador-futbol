@@ -1012,6 +1012,188 @@ def _load_checkpoint(model_path: Path, device: torch.device) -> dict[str, Any]:
     return dict(checkpoint)
 
 
+class OnlineRoleInferenceSession:
+    def __init__(
+        self,
+        *,
+        model: nn.Module,
+        config: TrainingConfig,
+        label_names: Sequence[str],
+        standardizer: FeatureStandardizer,
+        feature_spec: FeatureSpec,
+        device: torch.device,
+        project_root: Path,
+    ) -> None:
+        self.model = model
+        self.config = config
+        self.label_names = tuple(str(label) for label in label_names)
+        self.standardizer = standardizer
+        self.feature_spec = feature_spec
+        self.device = device
+        self.project_root = Path(project_root)
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        model_path: Path,
+        project_root: Path | None = None,
+    ) -> "OnlineRoleInferenceSession":
+        project_root = find_project_root(project_root)
+        device = _select_device()
+        checkpoint = _load_checkpoint(model_path=Path(model_path), device=device)
+        config = TrainingConfig(**checkpoint["training_config"])
+        label_names = tuple(str(label) for label in checkpoint["label_names"])
+        standardizer = FeatureStandardizer.from_state(checkpoint["standardizer"])
+        feature_spec = FeatureSpec(
+            tuple(str(name) for name in checkpoint["objective_feature_names"]),
+            tuple(str(name) for name in checkpoint["teammate_feature_names"]),
+        )
+        model = RoleSetTransformer(
+            objective_dim=int(len(feature_spec.objective_feature_names)),
+            teammate_dim=int(len(feature_spec.teammate_feature_names)),
+            num_classes=int(len(label_names)),
+            config=config,
+        ).to(device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
+        return cls(
+            model=model,
+            config=config,
+            label_names=label_names,
+            standardizer=standardizer,
+            feature_spec=feature_spec,
+            device=device,
+            project_root=project_root,
+        )
+
+    def predict_frame(
+        self,
+        observations: pd.DataFrame,
+        expected_roles_by_team: Mapping[str, Sequence[str]] | None = None,
+        batch_size: int | None = None,
+    ) -> dict[str, Any]:
+        if observations.empty:
+            empty_frame = pd.DataFrame()
+            empty_player = pd.DataFrame()
+            return {
+                "frame_predictions_df": empty_frame,
+                "player_predictions_df": empty_player,
+                "attack_direction_by_team": {},
+                "attack_direction_details": [],
+            }
+
+        obs = observations.copy()
+        if "role_label" not in obs.columns:
+            obs["role_label"] = pd.NA
+        if "vx" not in obs.columns or "vy" not in obs.columns:
+            obs = add_velocity_features(obs)
+
+        attack_direction_by_team, attack_details = infer_attack_direction_by_team(obs)
+        samples_df, teammates_tensor, teammate_mask, feature_spec = build_role_samples(
+            observations_with_roles=obs,
+            attack_direction_by_team=attack_direction_by_team,
+            max_teammates=int(self.config.max_teammates),
+            drop_unlabeled=False,
+        )
+        if samples_df.empty:
+            empty_frame = pd.DataFrame()
+            empty_player = pd.DataFrame()
+            return {
+                "frame_predictions_df": empty_frame,
+                "player_predictions_df": empty_player,
+                "attack_direction_by_team": {
+                    str(team): int(direction)
+                    for team, direction in attack_direction_by_team.items()
+                },
+                "attack_direction_details": attack_details.to_dict(orient="records"),
+            }
+
+        if feature_spec != self.feature_spec:
+            raise ValueError(
+                "FeatureSpec de inferencia online no coincide con el checkpoint."
+            )
+
+        meta_cols = [
+            "match_id",
+            "frame_id",
+            "team_id",
+            "player_id",
+            "class_name",
+            "x_m",
+            "y_m",
+            "confidence_tracking",
+        ]
+        available_meta_cols = [col for col in meta_cols if col in obs.columns]
+        sample_meta = obs.loc[:, available_meta_cols].drop_duplicates(
+            subset=["match_id", "frame_id", "team_id", "player_id"],
+            keep="last",
+        )
+        samples_df = samples_df.merge(
+            sample_meta,
+            on=["match_id", "frame_id", "team_id", "player_id"],
+            how="left",
+        )
+
+        objective = _safe_float_array(
+            samples_df.loc[:, list(self.feature_spec.objective_feature_names)].to_numpy(
+                dtype=np.float32
+            )
+        )
+        teammates = np.asarray(teammates_tensor, dtype=np.float32)
+        teammate_mask = np.asarray(teammate_mask, dtype=bool)
+        objective_scaled, teammates_scaled = self.standardizer.transform(
+            objective=objective,
+            teammates=teammates,
+            teammate_mask=teammate_mask,
+        )
+
+        probs = _predict_probabilities(
+            model=self.model,
+            objective=objective_scaled,
+            teammates=teammates_scaled,
+            teammate_mask=teammate_mask,
+            batch_size=int(batch_size or self.config.batch_size),
+            device=self.device,
+        )
+        pred_idx = probs.argmax(axis=1)
+        pred_conf = probs.max(axis=1)
+
+        frame_predictions_df = samples_df.copy()
+        for idx, label in enumerate(self.label_names):
+            frame_predictions_df[f"prob_{label}"] = probs[:, idx]
+        frame_predictions_df["predicted_role_frame"] = [
+            self.label_names[int(idx)] for idx in pred_idx
+        ]
+        frame_predictions_df["predicted_role_frame_confidence"] = pred_conf.astype(np.float32)
+        if "class_name" in frame_predictions_df.columns:
+            goalkeeper_mask = frame_predictions_df["class_name"].astype(str) == "goalkeeper"
+            frame_predictions_df.loc[goalkeeper_mask, "predicted_role_frame"] = "POR"
+            frame_predictions_df.loc[
+                goalkeeper_mask,
+                "predicted_role_frame_confidence",
+            ] = 1.0
+
+        player_predictions_df = _aggregate_player_predictions(
+            frame_df=frame_predictions_df,
+            label_names=self.label_names,
+        )
+        if expected_roles_by_team:
+            player_predictions_df = _apply_expected_roles_constraint(
+                player_predictions_df=player_predictions_df,
+                label_names=self.label_names,
+                expected_roles_by_team=expected_roles_by_team,
+            )
+
+        return {
+            "frame_predictions_df": frame_predictions_df,
+            "player_predictions_df": player_predictions_df,
+            "attack_direction_by_team": {
+                str(team): int(direction) for team, direction in attack_direction_by_team.items()
+            },
+            "attack_direction_details": attack_details.to_dict(orient="records"),
+        }
+
+
 def _prepare_inference_dataset(
     project_root: Path,
     video_path: Path,
