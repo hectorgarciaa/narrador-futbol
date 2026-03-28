@@ -13,6 +13,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
+from scipy.optimize import linear_sum_assignment
 
 # Permite ejecutar `python scripts/track.py` sin instalar el paquete en editable.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -789,11 +790,11 @@ class OnlineSpecialSeedRoleAssigner:
         )
         self.role_stabilization_window_frames = max(
             1,
-            int(tracking_cfg.get("role_stabilization_window_frames", 30)),
+            int(tracking_cfg.get("role_stabilization_window_frames", 300)),
         )
         self.role_stabilization_min_observations = max(
             1,
-            int(tracking_cfg.get("role_stabilization_min_observations", 8)),
+            int(tracking_cfg.get("role_stabilization_min_observations", 300)),
         )
         self.role_stabilization_vote_ratio = float(
             tracking_cfg.get("role_stabilization_vote_ratio", 0.7)
@@ -997,6 +998,15 @@ class OnlineSpecialSeedRoleAssigner:
                 best_role = str(role_name)
         return best_role
 
+    def _role_labels_for_assignment(self):
+        if self.role_session is None:
+            return tuple()
+        return tuple(
+            str(label)
+            for label in self.role_session.label_names
+            if _normalize_role_token(label) != "POR"
+        )
+
     def _backfill_stable_role(
         self,
         tracks,
@@ -1024,6 +1034,106 @@ class OnlineSpecialSeedRoleAssigner:
                     track_data["role_stabilized"] = True
                     track_data["role_stabilized_at_frame"] = int(frozen_at_frame)
                     track_data["role_stabilization_observations"] = int(observations)
+                    track_data["stable_role_assignment_method"] = "team_unique_hungarian"
+
+    @staticmethod
+    def _state_mean_prob_for_label(state, label_name):
+        prob_sums = state.get("prob_sums", {})
+        observations = max(1, int(state.get("observations", 0)))
+        return float(prob_sums.get(str(label_name), 0.0)) / float(observations)
+
+    def _state_is_ready_to_freeze(self, state):
+        stable_role = self._select_stable_role(
+            state.get("role_counts", {}),
+            state.get("confidence_sums", {}),
+        )
+        stable_count = int(state.get("role_counts", {}).get(stable_role, 0))
+        observations = int(state.get("observations", 0))
+        stable_ratio = float(stable_count) / max(1, observations)
+        if (
+            observations >= self.role_stabilization_min_observations
+            and stable_ratio >= self.role_stabilization_vote_ratio
+        ):
+            return True
+        return observations >= self.role_stabilization_window_frames
+
+    def _freeze_role_state(self, tracks, frame_id, track_id, role_label, confidence):
+        state = self.role_state_by_track_id.get(int(track_id))
+        if not isinstance(state, dict):
+            return
+        state["frozen_role"] = str(role_label)
+        state["frozen_confidence"] = float(confidence)
+        state["frozen_at_frame"] = int(frame_id)
+        self.stats["stable_role_tracks_frozen"] += 1
+        self._backfill_stable_role(
+            tracks,
+            player_id=int(track_id),
+            stable_role=str(role_label),
+            stable_confidence=float(confidence),
+            frozen_at_frame=frame_id,
+            observations=int(state.get("observations", 0)),
+        )
+
+    def _freeze_ready_roles_by_team(self, tracks, frame_id):
+        role_labels = self._role_labels_for_assignment()
+        if not role_labels:
+            return
+
+        frozen_roles_by_team = {}
+        for track_id, state in self.role_state_by_track_id.items():
+            if not isinstance(state, dict):
+                continue
+            team_id = state.get("team_id")
+            frozen_role = state.get("frozen_role")
+            if team_id is None or frozen_role is None:
+                continue
+            frozen_roles_by_team.setdefault(str(team_id), set()).add(str(frozen_role))
+
+        candidates_by_team = {}
+        for track_id, state in self.role_state_by_track_id.items():
+            if not isinstance(state, dict):
+                continue
+            if state.get("frozen_role") is not None:
+                continue
+            if int(track_id) in self.special_ids:
+                continue
+            team_id = state.get("team_id")
+            if team_id is None:
+                continue
+            if not self._state_is_ready_to_freeze(state):
+                continue
+            candidates_by_team.setdefault(str(team_id), []).append((int(track_id), state))
+
+        epsilon = 1e-9
+        for team_id, candidates in candidates_by_team.items():
+            used_roles = frozen_roles_by_team.get(str(team_id), set())
+            available_roles = [
+                role_label for role_label in role_labels if str(role_label) not in used_roles
+            ]
+            if not available_roles:
+                continue
+
+            row_track_ids = [int(track_id) for track_id, _ in candidates]
+            cost_matrix = np.zeros((len(row_track_ids), len(available_roles)), dtype=np.float64)
+
+            for row_pos, (_, state) in enumerate(candidates):
+                for col_pos, role_label in enumerate(available_roles):
+                    mean_prob = self._state_mean_prob_for_label(state, role_label)
+                    cost_matrix[row_pos, col_pos] = -math.log(max(mean_prob, epsilon))
+
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            for row_pos, col_pos in zip(row_ind.tolist(), col_ind.tolist()):
+                track_id = row_track_ids[row_pos]
+                role_label = str(available_roles[col_pos])
+                mean_prob = math.exp(-float(cost_matrix[row_pos, col_pos]))
+                self._freeze_role_state(
+                    tracks,
+                    frame_id=frame_id,
+                    track_id=track_id,
+                    role_label=role_label,
+                    confidence=float(mean_prob),
+                )
+                frozen_roles_by_team.setdefault(str(team_id), set()).add(role_label)
 
     def _update_role_state(self, tracks, frame_id, player_id, row):
         track_key = int(player_id)
@@ -1035,6 +1145,8 @@ class OnlineSpecialSeedRoleAssigner:
                 "observations": 0,
                 "role_counts": {},
                 "confidence_sums": {},
+                "prob_sums": {},
+                "team_id": None,
                 "frozen_role": None,
                 "frozen_confidence": None,
                 "frozen_at_frame": None,
@@ -1045,44 +1157,17 @@ class OnlineSpecialSeedRoleAssigner:
             return state
 
         state["observations"] += 1
+        state["team_id"] = str(getattr(row, "team_id", state.get("team_id")))
         state["role_counts"][label] = int(state["role_counts"].get(label, 0)) + 1
         state["confidence_sums"][label] = float(
             state["confidence_sums"].get(label, 0.0)
         ) + confidence
-
-        stable_role = self._select_stable_role(
-            state["role_counts"],
-            state["confidence_sums"],
-        )
-        stable_count = int(state["role_counts"].get(stable_role, 0))
-        observations = int(state["observations"])
-        stable_ratio = float(stable_count) / max(1, observations)
-        should_freeze = False
-
-        if (
-            observations >= self.role_stabilization_min_observations
-            and stable_ratio >= self.role_stabilization_vote_ratio
-        ):
-            should_freeze = True
-        elif observations >= self.role_stabilization_window_frames:
-            should_freeze = True
-
-        if should_freeze and stable_role is not None:
-            stable_confidence = float(
-                state["confidence_sums"][stable_role]
-            ) / max(1, int(state["role_counts"][stable_role]))
-            state["frozen_role"] = str(stable_role)
-            state["frozen_confidence"] = stable_confidence
-            state["frozen_at_frame"] = int(frame_id)
-            self.stats["stable_role_tracks_frozen"] += 1
-            self._backfill_stable_role(
-                tracks,
-                player_id=track_key,
-                stable_role=stable_role,
-                stable_confidence=stable_confidence,
-                frozen_at_frame=frame_id,
-                observations=observations,
-            )
+        for role_label in self._role_labels_for_assignment():
+            prob_col = f"prob_{role_label}"
+            prob_value = float(getattr(row, prob_col, 0.0))
+            state["prob_sums"][role_label] = float(
+                state["prob_sums"].get(role_label, 0.0)
+            ) + prob_value
 
         return state
 
@@ -1136,6 +1221,7 @@ class OnlineSpecialSeedRoleAssigner:
                     track_data["role_stabilization_observations"] = int(
                         state["observations"]
                     )
+                    track_data["stable_role_assignment_method"] = "team_unique_hungarian"
 
     def _assign_special_seed_frame_teams(self, tracks, frame_id, frame_predictions_df):
         defender_candidates = []
@@ -1234,6 +1320,7 @@ class OnlineSpecialSeedRoleAssigner:
                     track_data["role_stabilized"] = True
                     track_data.setdefault("role_stabilized_at_frame", int(frame_id))
                     track_data.setdefault("role_stabilization_observations", 1)
+                    track_data["stable_role_assignment_method"] = "manual_special_goalkeeper"
 
     def on_frame(self, tracks, frame_id):
         self.stats["processed_frames"] += 1
@@ -1277,6 +1364,7 @@ class OnlineSpecialSeedRoleAssigner:
                 frame_id,
                 regular_frame_predictions_df,
             )
+            self._freeze_ready_roles_by_team(tracks, frame_id)
 
         self._annotate_special_goalkeeper_roles(tracks, frame_id)
 

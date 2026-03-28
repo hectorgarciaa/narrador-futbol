@@ -147,8 +147,8 @@ tracking:
   # Congela un role estable por ID usando sus primeras observaciones visibles.
   # Si una clase domina pronto, se fija antes; si no, se congela al llegar a
   # esta ventana máxima de observaciones del track.
-  role_stabilization_window_frames: 30
-  role_stabilization_min_observations: 8
+  role_stabilization_window_frames: 300
+  role_stabilization_min_observations: 300
   role_stabilization_vote_ratio: 0.7
   # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
   # Si falta field_position, la reasignación se rechaza.
