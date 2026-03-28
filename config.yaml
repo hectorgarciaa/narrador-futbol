@@ -137,6 +137,13 @@ tracking:
   # Distancia máxima en metros desde el punto de penalti para absorber una
   # detección real sobre cada track semilla reservado.
   reserve_penalty_spot_seed_match_distance_m: 12.0
+  # Postproceso especial para los IDs reservados (por defecto 1 y 2):
+  # usa el modelo de roles posicionales para estimar qué jugadores son defensas
+  # y asignar equipo a esos tracks por el defensa más cercano, sin usar color.
+  special_seed_role_team_assignment_enabled: true
+  special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
+  special_seed_canonical_ids: [1, 2]
+  special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
   # Si falta field_position, la reasignación se rechaza.
   require_field_position_for_reassign: true

@@ -370,6 +370,7 @@ class Tracker:
             "step_per_frame_mean": 0.0,
             "step_per_frame_m2": 0.0,
             "reserved_seed": True,
+            "special_penalty_seed": True,
             "reserved_seed_match_distance_m": float(
                 max(0.0, self.reserve_penalty_spot_seed_match_distance_m)
             ),
@@ -1061,6 +1062,21 @@ class Tracker:
             return None
 
         if (
+            candidate_state.get("special_penalty_seed")
+            and candidate_class in {"player", "goalkeeper"}
+            and detection_class in {"player", "goalkeeper"}
+        ):
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
+            ):
+                return None
+            return candidate_class
+
+        if (
             candidate_state.get("reserved_seed")
             and candidate_class == "player"
             and detection_class in {"player", "goalkeeper"}
@@ -1584,11 +1600,14 @@ class Tracker:
                     step_per_frame_count = prev_step_pf_count
                     step_per_frame_mean = prev_step_pf_mean
                     step_per_frame_m2 = prev_step_pf_m2
+                special_penalty_seed = bool(previous_state.get("special_penalty_seed", False))
                 resolved_team = (
                     detected_team
                     if detected_team is not None
                     else previous_state.get("team")
                 )
+                if special_penalty_seed:
+                    resolved_team = None
                 resolved_field_position = (
                     self._field_position_to_tuple(field_position)
                     or previous_state.get("field_position")
@@ -1605,13 +1624,14 @@ class Tracker:
                     "step_per_frame_mean": step_per_frame_mean,
                     "step_per_frame_m2": step_per_frame_m2,
                     "reserved_seed": False,
+                    "special_penalty_seed": special_penalty_seed,
                 }
                 used_canonical_ids_in_frame.add(canonical_id)
 
                 tracks[output_class_name][n_frame][canonical_id] = {
                     "bbox": bbox,
                     "confidence": confidence,
-                    "team": metadata.get("team"),
+                    "team": resolved_team,
                     "distances": metadata.get("distances"),
                     "shirt_color": metadata.get("shirt_color"),
                     "bbox_size": metadata.get("bbox_size"),

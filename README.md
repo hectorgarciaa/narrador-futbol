@@ -307,6 +307,7 @@ También se guarda el resumen por vídeo en `output/tracks_json/tracker/<video_s
 Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `data/posiciones_etiquetadas/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`). Ese resumen incluye también `ball_coverage`, para medir en qué fracción del clip el balón quedó trackeado.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría. Mientras no se absorban, también se escriben en el JSON con `synthetic_seed=true`.
+Si `tracking.special_seed_role_team_assignment_enabled=true`, el tracking principal ejecuta además el modelo de `position_role` sobre los tracks finales y usa a los defensas detectados para asignar equipo a esos IDs reservados por defensa más cercano. Esos IDs no usan color de camiseta para recuperar identidad ni para fijar su equipo.
 Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), así que un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
@@ -536,6 +537,10 @@ tracking:
   strict_person_class_separation: true
   reserve_penalty_spot_seed_players: true
   reserve_penalty_spot_seed_match_distance_m: 12.0
+  special_seed_role_team_assignment_enabled: true
+  special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
+  special_seed_canonical_ids: [1, 2]
+  special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   require_field_position_for_reassign: true
   max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
   motion_std_gate_enabled: true

@@ -1023,6 +1023,21 @@ def _prepare_inference_dataset(
         raise FileNotFoundError(f"No existe tracks JSON para inferencia: {resolved_tracks_path}")
 
     tracks = load_tracks_json(resolved_tracks_path)
+    return (
+        *_prepare_inference_dataset_from_tracks_payload(
+            tracks=tracks,
+            video_path=video_path,
+            max_teammates=max_teammates,
+        ),
+        resolved_tracks_path,
+    )
+
+
+def _prepare_inference_dataset_from_tracks_payload(
+    tracks: Mapping[str, Any],
+    video_path: Path,
+    max_teammates: int = DEFAULT_MAX_TEAMMATES,
+) -> tuple[DatasetBundle, pd.DataFrame, pd.DataFrame, dict[str, int]]:
     observations = build_observations_from_tracks(
         tracks=tracks,
         match_id=video_path.stem.replace(" ", "_"),
@@ -1073,7 +1088,7 @@ def _prepare_inference_dataset(
         feature_spec=feature_spec,
         label_names=tuple(),
     )
-    return bundle, observations, attack_details, attack_direction_by_team, resolved_tracks_path
+    return bundle, observations, attack_details, attack_direction_by_team
 
 
 def _predict_probabilities(
@@ -1593,6 +1608,134 @@ def predict_roles_for_video(
         "meta_path": meta_json_path,
         "frame_predictions_df": frame_predictions_df,
         "player_predictions_df": player_predictions_df,
+    }
+
+
+def predict_roles_for_tracks_payload(
+    model_path: Path,
+    tracks: Mapping[str, Any],
+    video_path: Path,
+    project_root: Path | None = None,
+    batch_size: int = 1024,
+    expected_roles_by_team: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, Any]:
+    project_root = find_project_root(project_root)
+    video_path = Path(video_path)
+    device = _select_device()
+    checkpoint = _load_checkpoint(model_path=model_path, device=device)
+
+    config = TrainingConfig(**checkpoint["training_config"])
+    label_names = tuple(str(label) for label in checkpoint["label_names"])
+    standardizer = FeatureStandardizer.from_state(checkpoint["standardizer"])
+
+    dataset, observations, attack_details, attack_direction_by_team = (
+        _prepare_inference_dataset_from_tracks_payload(
+            tracks=tracks,
+            video_path=video_path,
+            max_teammates=int(config.max_teammates),
+        )
+    )
+
+    if list(dataset.feature_spec.objective_feature_names) != list(checkpoint["objective_feature_names"]):
+        raise ValueError("Las objective_feature_names de inferencia no coinciden con el checkpoint.")
+    if list(dataset.feature_spec.teammate_feature_names) != list(checkpoint["teammate_feature_names"]):
+        raise ValueError("Las teammate_feature_names de inferencia no coinciden con el checkpoint.")
+
+    objective_scaled, teammates_scaled = standardizer.transform(
+        objective=dataset.objective,
+        teammates=dataset.teammates,
+        teammate_mask=dataset.teammate_mask,
+    )
+
+    model = RoleSetTransformer(
+        objective_dim=int(objective_scaled.shape[1]),
+        teammate_dim=int(teammates_scaled.shape[2]),
+        num_classes=int(len(label_names)),
+        config=config,
+    ).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    probs = _predict_probabilities(
+        model=model,
+        objective=objective_scaled,
+        teammates=teammates_scaled,
+        teammate_mask=dataset.teammate_mask,
+        batch_size=int(batch_size),
+        device=device,
+    )
+    pred_idx = probs.argmax(axis=1)
+    pred_conf = probs.max(axis=1)
+
+    frame_predictions_df = dataset.samples_df.copy()
+    for idx, label in enumerate(label_names):
+        frame_predictions_df[f"prob_{label}"] = probs[:, idx]
+    frame_predictions_df["predicted_role_frame"] = [label_names[int(idx)] for idx in pred_idx]
+    frame_predictions_df["predicted_role_frame_confidence"] = pred_conf.astype(np.float32)
+    frame_predictions_df.loc[
+        frame_predictions_df["class_name"].astype(str) == "goalkeeper",
+        "predicted_role_frame",
+    ] = "POR"
+    frame_predictions_df.loc[
+        frame_predictions_df["class_name"].astype(str) == "goalkeeper",
+        "predicted_role_frame_confidence",
+    ] = 1.0
+
+    player_predictions_df = _aggregate_player_predictions(
+        frame_df=frame_predictions_df,
+        label_names=label_names,
+    )
+    player_predictions_df = _apply_expected_roles_constraint(
+        player_predictions_df=player_predictions_df,
+        label_names=label_names,
+        expected_roles_by_team=expected_roles_by_team,
+    )
+    frame_predictions_df = frame_predictions_df.merge(
+        player_predictions_df[
+            [
+                "team_id",
+                "player_id",
+                "predicted_role",
+                "predicted_role_confidence",
+                "predicted_role_unconstrained",
+                "predicted_role_confidence_unconstrained",
+                "expected_role_slot",
+                "assignment_method",
+                "assignment_cost",
+            ]
+        ],
+        on=["team_id", "player_id"],
+        how="left",
+    )
+
+    augmented_tracks = _augment_tracks_with_predictions(
+        tracks=tracks,
+        frame_predictions_df=frame_predictions_df,
+        player_predictions_df=player_predictions_df,
+    )
+
+    return {
+        "device": str(device),
+        "frame_predictions_df": frame_predictions_df,
+        "player_predictions_df": player_predictions_df,
+        "tracks_with_roles": augmented_tracks,
+        "attack_direction_by_team": {
+            str(team): int(direction) for team, direction in attack_direction_by_team.items()
+        },
+        "attack_direction_details": attack_details.to_dict(orient="records"),
+        "trained_labels": list(label_names),
+        "goalkeeper_heuristic_label": checkpoint.get("heuristics", {}).get("goalkeeper_role", "POR"),
+        "num_frame_predictions": int(len(frame_predictions_df)),
+        "num_player_predictions": int(len(player_predictions_df)),
+        "expected_roles_by_team": (
+            {str(team_id): [str(role) for role in roles] for team_id, roles in expected_roles_by_team.items()}
+            if expected_roles_by_team
+            else None
+        ),
+        "stable_assignment_method": (
+            "hungarian_expected_roles" if expected_roles_by_team else "unconstrained_softmax"
+        ),
+        "model_path": str(model_path),
+        "video_path": str(video_path),
     }
 
 

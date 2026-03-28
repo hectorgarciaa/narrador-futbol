@@ -3,6 +3,7 @@ import colorsys
 import csv
 import difflib
 import json
+import math
 import re
 import sys
 import unicodedata
@@ -536,6 +537,239 @@ def save_summary(summary, output_path, logger):
         logger.error(f"Error saving tracking summary to {output_path}: {e}")
 
 
+DEFAULT_SPECIAL_SEED_CANONICAL_IDS = (1, 2)
+DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = (
+    "CD",
+    "CI",
+    "LD",
+    "LI",
+    "DFC_DER",
+    "DFC_IZQ",
+    "DFC_CENT",
+)
+DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH = (
+    "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
+)
+
+
+def _normalize_role_token(value):
+    token = str(value).strip().upper()
+    token = token.replace("-", "_").replace(" ", "_")
+    token = "_".join(part for part in token.split("_") if part)
+    return token
+
+
+def _safe_field_position_m(track_data):
+    field_position = track_data.get("field_position_m")
+    if field_position is None:
+        return None
+    arr = np.asarray(field_position, dtype=np.float32).reshape(-1)
+    if arr.size < 2 or not np.all(np.isfinite(arr[:2])):
+        return None
+    return float(arr[0]), float(arr[1])
+
+
+def _resolve_project_relative_path(project_root, raw_path):
+    path = Path(raw_path)
+    if path.is_absolute():
+        return path
+    return Path(project_root) / path
+
+
+def _special_seed_frame_track_keys(frame_tracks, special_id):
+    keys = []
+    if special_id in frame_tracks:
+        keys.append(special_id)
+    special_id_str = str(int(special_id))
+    if special_id_str in frame_tracks:
+        keys.append(special_id_str)
+    return keys
+
+
+def _assign_special_seed_teams_from_nearest_defender(
+    tracks,
+    special_ids,
+    defender_roles,
+    logger,
+):
+    special_ids = tuple(int(track_id) for track_id in special_ids)
+    defender_roles = {_normalize_role_token(role) for role in defender_roles}
+    last_team_by_special_id = {}
+    assigned_frames = 0
+    carry_frames = 0
+    unassigned_frames = 0
+
+    max_frames = max(
+        len(tracks.get("player", [])),
+        len(tracks.get("goalkeeper", [])),
+    )
+    person_classes = ("player", "goalkeeper")
+
+    for frame_id in range(max_frames):
+        defender_candidates = []
+        for class_name in person_classes:
+            class_frames = tracks.get(class_name, [])
+            if frame_id >= len(class_frames):
+                continue
+            frame_tracks = class_frames[frame_id]
+            if not isinstance(frame_tracks, dict):
+                continue
+            for track_id_raw, track_data in frame_tracks.items():
+                try:
+                    track_id = int(track_id_raw)
+                except (TypeError, ValueError):
+                    continue
+                if track_id in special_ids:
+                    continue
+                team_id = track_data.get("team")
+                if team_id is None:
+                    continue
+                field_position = _safe_field_position_m(track_data)
+                if field_position is None:
+                    continue
+                predicted_role = (
+                    track_data.get("predicted_role")
+                    or track_data.get("predicted_role_frame")
+                )
+                if _normalize_role_token(predicted_role) not in defender_roles:
+                    continue
+                defender_candidates.append(
+                    {
+                        "track_id": track_id,
+                        "team": str(team_id),
+                        "position": field_position,
+                    }
+                )
+
+        for class_name in person_classes:
+            class_frames = tracks.get(class_name, [])
+            if frame_id >= len(class_frames):
+                continue
+            frame_tracks = class_frames[frame_id]
+            if not isinstance(frame_tracks, dict):
+                continue
+
+            for special_id in special_ids:
+                for track_key in _special_seed_frame_track_keys(frame_tracks, special_id):
+                    track_data = frame_tracks.get(track_key)
+                    if not isinstance(track_data, dict):
+                        continue
+                    field_position = _safe_field_position_m(track_data)
+                    if field_position is None:
+                        continue
+
+                    best_candidate = None
+                    best_distance_m = None
+                    for defender in defender_candidates:
+                        distance_m = math.dist(field_position, defender["position"])
+                        if best_distance_m is None or distance_m < best_distance_m:
+                            best_distance_m = distance_m
+                            best_candidate = defender
+
+                    if best_candidate is not None:
+                        resolved_team = str(best_candidate["team"])
+                        track_data["team"] = resolved_team
+                        track_data["special_team_assignment_source"] = "nearest_defender_role"
+                        track_data["special_team_assignment_distance_m"] = float(best_distance_m)
+                        track_data["special_team_assignment_track_id"] = int(best_candidate["track_id"])
+                        last_team_by_special_id[int(special_id)] = resolved_team
+                        assigned_frames += 1
+                    elif int(special_id) in last_team_by_special_id:
+                        track_data["team"] = last_team_by_special_id[int(special_id)]
+                        track_data["special_team_assignment_source"] = "nearest_defender_role_carry"
+                        track_data["special_team_assignment_distance_m"] = None
+                        track_data["special_team_assignment_track_id"] = None
+                        carry_frames += 1
+                    else:
+                        track_data["special_team_assignment_source"] = "unassigned"
+                        track_data["special_team_assignment_distance_m"] = None
+                        track_data["special_team_assignment_track_id"] = None
+                        unassigned_frames += 1
+
+    logger.info(
+        "Special seed team assignment: assigned=%s carry=%s unassigned=%s ids=%s",
+        assigned_frames,
+        carry_frames,
+        unassigned_frames,
+        list(special_ids),
+    )
+    return {
+        "assigned_frames": int(assigned_frames),
+        "carry_frames": int(carry_frames),
+        "unassigned_frames": int(unassigned_frames),
+        "special_ids": [int(track_id) for track_id in special_ids],
+    }
+
+
+def apply_special_seed_role_team_assignment(
+    tracks,
+    video_path,
+    config,
+    logger,
+):
+    tracking_cfg = config.tracking
+    if not tracking_cfg.get("special_seed_role_team_assignment_enabled", True):
+        return tracks, None
+
+    model_path = _resolve_project_relative_path(
+        config.project_root,
+        tracking_cfg.get(
+            "special_seed_role_model_path",
+            DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH,
+        ),
+    )
+    if not model_path.exists():
+        logger.warning(
+            "Se omite special_seed_role_team_assignment: no existe el checkpoint %s",
+            model_path,
+        )
+        return tracks, None
+
+    try:
+        from experiments.positions.set_transformer_pipeline import (
+            predict_roles_for_tracks_payload,
+        )
+    except Exception as exc:
+        logger.warning(
+            "No se pudo importar el pipeline de roles posicionales: %s",
+            exc,
+        )
+        return tracks, None
+
+    logger.info(
+        "Running position-role postprocess for special seeds with checkpoint: %s",
+        model_path,
+    )
+    try:
+        role_result = predict_roles_for_tracks_payload(
+            model_path=model_path,
+            tracks=tracks,
+            video_path=Path(video_path),
+            project_root=config.project_root,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Falló el postproceso de roles posicionales para special seeds: %s",
+            exc,
+        )
+        return tracks, None
+    enriched_tracks = role_result["tracks_with_roles"]
+    assignment_summary = _assign_special_seed_teams_from_nearest_defender(
+        tracks=enriched_tracks,
+        special_ids=tracking_cfg.get(
+            "special_seed_canonical_ids",
+            list(DEFAULT_SPECIAL_SEED_CANONICAL_IDS),
+        ),
+        defender_roles=tracking_cfg.get(
+            "special_seed_defender_roles",
+            list(DEFAULT_SPECIAL_SEED_DEFENDER_ROLES),
+        ),
+        logger=logger,
+    )
+    role_result["special_seed_team_assignment"] = assignment_summary
+    return enriched_tracks, role_result
+
+
 def _read_csv_rows(csv_path):
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
@@ -858,6 +1092,19 @@ if __name__ == "__main__":
         )
         logger.info("Extracting tracks from video...")
         tracks = tracker.get_tracks(VIDEO_PATH, SHOWKMEANS)
+        role_postprocess_result = None
+        tracks, role_postprocess_result = apply_special_seed_role_team_assignment(
+            tracks=tracks,
+            video_path=VIDEO_PATH,
+            config=config,
+            logger=logger,
+        )
+        if role_postprocess_result is not None:
+            logger.info(
+                "Position-role postprocess applied: %s player predictions, %s frame predictions",
+                role_postprocess_result.get("num_player_predictions"),
+                role_postprocess_result.get("num_frame_predictions"),
+            )
         
         # Draw tracks
         colors = config.get_visualization_colors()
@@ -874,6 +1121,19 @@ if __name__ == "__main__":
         ball_summary = evaluation.get("ball", {}).get("summary", {})
         summary["ball_coverage"] = float(ball_summary.get("mean_coverage", 0.0))
         summary["ball_tracks"] = int(ball_summary.get("num_tracks", 0))
+        if role_postprocess_result is not None:
+            summary["position_role_postprocess_applied"] = True
+            summary["position_role_player_predictions"] = int(
+                role_postprocess_result.get("num_player_predictions", 0)
+            )
+            summary["position_role_frame_predictions"] = int(
+                role_postprocess_result.get("num_frame_predictions", 0)
+            )
+            special_seed_assignment = role_postprocess_result.get(
+                "special_seed_team_assignment", {}
+            )
+            for key, value in special_seed_assignment.items():
+                summary[f"special_seed_{key}"] = value
 
         # Save tracks JSON
         save_result(tracks, OUTPUT_PATH_NAMED, logger)
