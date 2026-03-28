@@ -144,6 +144,12 @@ tracking:
   special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
+  # Congela un role estable por ID usando sus primeras observaciones visibles.
+  # Si una clase domina pronto, se fija antes; si no, se congela al llegar a
+  # esta ventana máxima de observaciones del track.
+  role_stabilization_window_frames: 30
+  role_stabilization_min_observations: 8
+  role_stabilization_vote_ratio: 0.7
   # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
   # Si falta field_position, la reasignación se rechaza.
   require_field_position_for_reassign: true

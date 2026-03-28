@@ -1454,6 +1454,7 @@ class Tracker:
     ):
         best_id = None
         best_output_class = None
+        best_distance_sq = None
         best_priority = None
 
         for canonical_id in candidate_ids:
@@ -1493,8 +1494,9 @@ class Tracker:
                 best_priority = priority
                 best_id = canonical_id
                 best_output_class = output_class_name
+                best_distance_sq = distance_sq
 
-        return best_id, best_output_class
+        return best_id, best_output_class, best_distance_sq
 
     def get_tracks(self, video, show_kmeans=False, frame_hook=None):
         model_detections = self.model.detect(video)
@@ -1750,7 +1752,11 @@ class Tracker:
                             canonical_id = None
 
                 if class_name in {"player", "goalkeeper"}:
-                    special_override_id, special_override_class_name = (
+                    (
+                        special_override_id,
+                        special_override_class_name,
+                        special_override_distance_sq,
+                    ) = (
                         self._best_special_penalty_seed_id(
                             bbox,
                             [
@@ -1765,17 +1771,43 @@ class Tracker:
                             field_position=field_position,
                         )
                     )
-                    if (
+                    should_apply_special_override = (
                         special_override_id is not None
                         and special_override_class_name is not None
-                        and (
-                            canonical_id is None
-                            or not canonical_state.get(canonical_id, {}).get(
-                                "special_penalty_seed",
-                                False,
-                            )
+                    )
+                    if (
+                        should_apply_special_override
+                        and canonical_id is not None
+                        and not canonical_state.get(canonical_id, {}).get(
+                            "special_penalty_seed",
+                            False,
                         )
                     ):
+                        current_state = canonical_state.get(canonical_id)
+                        current_lost_frames = max(
+                            0,
+                            n_frame - int(current_state.get("last_frame", n_frame)),
+                        ) if isinstance(current_state, dict) else 0
+                        current_distance_sq = self._bbox_distance_sq(
+                            current_state.get("bbox") if isinstance(current_state, dict) else None,
+                            bbox,
+                            class_name=output_class_name,
+                            field_position_a=(
+                                current_state.get("field_position")
+                                if isinstance(current_state, dict)
+                                else None
+                            ),
+                            field_position_b=field_position,
+                        )
+                        should_apply_special_override = (
+                            current_lost_frames > 1
+                            and special_override_distance_sq is not None
+                            and (
+                                current_distance_sq is None
+                                or special_override_distance_sq < current_distance_sq
+                            )
+                        )
+                    if should_apply_special_override:
                         canonical_id = special_override_id
                         output_class_name = special_override_class_name
 

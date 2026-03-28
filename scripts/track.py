@@ -787,6 +787,17 @@ class OnlineSpecialSeedRoleAssigner:
                 list(DEFAULT_SPECIAL_SEED_CANONICAL_IDS),
             )
         )
+        self.role_stabilization_window_frames = max(
+            1,
+            int(tracking_cfg.get("role_stabilization_window_frames", 30)),
+        )
+        self.role_stabilization_min_observations = max(
+            1,
+            int(tracking_cfg.get("role_stabilization_min_observations", 8)),
+        )
+        self.role_stabilization_vote_ratio = float(
+            tracking_cfg.get("role_stabilization_vote_ratio", 0.7)
+        )
         self.defender_roles = {
             _normalize_role_token(role)
             for role in tracking_cfg.get(
@@ -796,6 +807,7 @@ class OnlineSpecialSeedRoleAssigner:
         }
         self.last_team_by_special_id = {}
         self.prev_positions = {}
+        self.role_state_by_track_id = {}
         self.stats = {
             "processed_frames": 0,
             "frames_with_role_predictions": 0,
@@ -804,6 +816,7 @@ class OnlineSpecialSeedRoleAssigner:
             "special_seed_assigned_frames": 0,
             "special_seed_carry_frames": 0,
             "special_seed_unassigned_frames": 0,
+            "stable_role_tracks_frozen": 0,
             "special_ids": [int(track_id) for track_id in self.special_ids],
         }
         self.role_session = None
@@ -971,6 +984,108 @@ class OnlineSpecialSeedRoleAssigner:
                 row.predicted_role_confidence
             )
 
+    @staticmethod
+    def _select_stable_role(role_counts, confidence_sums):
+        best_role = None
+        best_priority = None
+        for role_name, count in role_counts.items():
+            confidence_sum = float(confidence_sums.get(role_name, 0.0))
+            mean_confidence = confidence_sum / max(1, int(count))
+            priority = (int(count), mean_confidence, str(role_name))
+            if best_priority is None or priority > best_priority:
+                best_priority = priority
+                best_role = str(role_name)
+        return best_role
+
+    def _backfill_stable_role(
+        self,
+        tracks,
+        player_id,
+        stable_role,
+        stable_confidence,
+        frozen_at_frame,
+        observations,
+    ):
+        stable_role = str(stable_role)
+        stable_confidence = float(stable_confidence)
+        for class_name in ("player", "goalkeeper"):
+            class_frames = tracks.get(class_name, [])
+            for frame_tracks in class_frames[: int(frozen_at_frame) + 1]:
+                if not isinstance(frame_tracks, dict):
+                    continue
+                for track_key in _special_seed_frame_track_keys(frame_tracks, int(player_id)):
+                    track_data = frame_tracks.get(track_key)
+                    if not isinstance(track_data, dict):
+                        continue
+                    track_data["predicted_role_frame"] = stable_role
+                    track_data["predicted_role_frame_confidence"] = stable_confidence
+                    track_data["predicted_role"] = stable_role
+                    track_data["predicted_role_confidence"] = stable_confidence
+                    track_data["role_stabilized"] = True
+                    track_data["role_stabilized_at_frame"] = int(frozen_at_frame)
+                    track_data["role_stabilization_observations"] = int(observations)
+
+    def _update_role_state(self, tracks, frame_id, player_id, row):
+        track_key = int(player_id)
+        label = str(row.predicted_role_frame)
+        confidence = float(row.predicted_role_frame_confidence)
+        state = self.role_state_by_track_id.setdefault(
+            track_key,
+            {
+                "observations": 0,
+                "role_counts": {},
+                "confidence_sums": {},
+                "frozen_role": None,
+                "frozen_confidence": None,
+                "frozen_at_frame": None,
+            },
+        )
+
+        if state["frozen_role"] is not None:
+            return state
+
+        state["observations"] += 1
+        state["role_counts"][label] = int(state["role_counts"].get(label, 0)) + 1
+        state["confidence_sums"][label] = float(
+            state["confidence_sums"].get(label, 0.0)
+        ) + confidence
+
+        stable_role = self._select_stable_role(
+            state["role_counts"],
+            state["confidence_sums"],
+        )
+        stable_count = int(state["role_counts"].get(stable_role, 0))
+        observations = int(state["observations"])
+        stable_ratio = float(stable_count) / max(1, observations)
+        should_freeze = False
+
+        if (
+            observations >= self.role_stabilization_min_observations
+            and stable_ratio >= self.role_stabilization_vote_ratio
+        ):
+            should_freeze = True
+        elif observations >= self.role_stabilization_window_frames:
+            should_freeze = True
+
+        if should_freeze and stable_role is not None:
+            stable_confidence = float(
+                state["confidence_sums"][stable_role]
+            ) / max(1, int(state["role_counts"][stable_role]))
+            state["frozen_role"] = str(stable_role)
+            state["frozen_confidence"] = stable_confidence
+            state["frozen_at_frame"] = int(frame_id)
+            self.stats["stable_role_tracks_frozen"] += 1
+            self._backfill_stable_role(
+                tracks,
+                player_id=track_key,
+                stable_role=stable_role,
+                stable_confidence=stable_confidence,
+                frozen_at_frame=frame_id,
+                observations=observations,
+            )
+
+        return state
+
     def _annotate_frame_with_roles(self, tracks, frame_id, frame_predictions_df):
         if frame_predictions_df.empty:
             return
@@ -999,6 +1114,28 @@ class OnlineSpecialSeedRoleAssigner:
                 if row is None:
                     continue
                 self._set_track_role_payload(track_data, row)
+                state = self._update_role_state(
+                    tracks,
+                    frame_id=frame_id,
+                    player_id=player_id,
+                    row=row,
+                )
+                if state.get("frozen_role") is not None:
+                    track_data["predicted_role_frame"] = str(state["frozen_role"])
+                    track_data["predicted_role_frame_confidence"] = float(
+                        state["frozen_confidence"]
+                    )
+                    track_data["predicted_role"] = str(state["frozen_role"])
+                    track_data["predicted_role_confidence"] = float(
+                        state["frozen_confidence"]
+                    )
+                    track_data["role_stabilized"] = True
+                    track_data["role_stabilized_at_frame"] = int(
+                        state["frozen_at_frame"]
+                    )
+                    track_data["role_stabilization_observations"] = int(
+                        state["observations"]
+                    )
 
     def _assign_special_seed_frame_teams(self, tracks, frame_id, frame_predictions_df):
         defender_candidates = []
@@ -1076,6 +1213,28 @@ class OnlineSpecialSeedRoleAssigner:
                         self.stats["special_seed_unassigned_frames"] += 1
         return frame_assignment_made
 
+    def _annotate_special_goalkeeper_roles(self, tracks, frame_id):
+        for class_name in ("player", "goalkeeper"):
+            class_frames = tracks.get(class_name, [])
+            if frame_id >= len(class_frames):
+                continue
+            frame_tracks = class_frames[frame_id]
+            if not isinstance(frame_tracks, dict):
+                continue
+
+            for special_id in self.special_ids:
+                for track_key in _special_seed_frame_track_keys(frame_tracks, special_id):
+                    track_data = frame_tracks.get(track_key)
+                    if not isinstance(track_data, dict):
+                        continue
+                    track_data["predicted_role_frame"] = "POR"
+                    track_data["predicted_role_frame_confidence"] = 1.0
+                    track_data["predicted_role"] = "POR"
+                    track_data["predicted_role_confidence"] = 1.0
+                    track_data["role_stabilized"] = True
+                    track_data.setdefault("role_stabilized_at_frame", int(frame_id))
+                    track_data.setdefault("role_stabilization_observations", 1)
+
     def on_frame(self, tracks, frame_id):
         self.stats["processed_frames"] += 1
         if not self.enabled or self.role_session is None:
@@ -1101,37 +1260,27 @@ class OnlineSpecialSeedRoleAssigner:
             regular_frame_predictions_df,
         )
 
-        full_observations, full_positions = self._build_frame_observations(
-            tracks,
-            frame_id,
-            include_special_ids=True,
-            previous_positions=previous_positions_snapshot,
-        )
-        final_frame_predictions_df = pd.DataFrame()
-        final_player_predictions_df = pd.DataFrame()
-
-        if not full_observations.empty:
-            final_role_result = self.role_session.predict_frame(full_observations)
-            final_frame_predictions_df = final_role_result["frame_predictions_df"]
-            final_player_predictions_df = final_role_result["player_predictions_df"]
-        elif not regular_observations.empty:
-            fallback_role_result = self.role_session.predict_frame(regular_observations)
-            final_frame_predictions_df = fallback_role_result["frame_predictions_df"]
-            final_player_predictions_df = fallback_role_result["player_predictions_df"]
-            full_positions = regular_positions
-
         self.stats["position_role_frame_predictions"] += int(
-            len(final_frame_predictions_df)
+            len(regular_frame_predictions_df)
         )
         self.stats["position_role_player_predictions"] += int(
-            len(final_player_predictions_df)
+            regular_frame_predictions_df[
+                ["team_id", "player_id"]
+            ].drop_duplicates().shape[0]
+            if not regular_frame_predictions_df.empty
+            else 0
         )
-        if not final_frame_predictions_df.empty:
+        if not regular_frame_predictions_df.empty:
             self.stats["frames_with_role_predictions"] += 1
-            self._annotate_frame_with_roles(tracks, frame_id, final_frame_predictions_df)
+            self._annotate_frame_with_roles(
+                tracks,
+                frame_id,
+                regular_frame_predictions_df,
+            )
 
-        positions_for_update = full_positions or regular_positions
-        for key, value in positions_for_update.items():
+        self._annotate_special_goalkeeper_roles(tracks, frame_id)
+
+        for key, value in regular_positions.items():
             self.prev_positions[key] = value
 
     def summary(self):
