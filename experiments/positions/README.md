@@ -44,6 +44,7 @@ python -m experiments.positions.set_transformer_pipeline predict \
 Si usas el notebook `experiments/set_transformer.ipynb`, puedes pasar además `EXPECTED_ROLES_BY_TEAM` para imponer el once esperado de cada equipo con Hungarian sobre las probabilidades agregadas por jugador.
 Ese mismo formato de listas ya puede definirse también en `config.yaml` bajo `tracking.expected_roles_by_team`.
 En el tracking principal, ese ajuste no cambia la etiqueta de cada frame: se usa solo cuando un track alcanza la ventana de estabilización y entonces congela una plaza estable por equipo a partir de la evidencia acumulada del jugador.
+Para depurar esa diferencia, `track.py` exporta también `output/tracks_json/tracker/<video>_frame_role_predictions.csv` con la predicción cruda frame a frame antes del congelado estable, `output/tracks_json/tracker/<video>_player_role_summary.csv` con el resumen estable final y `output/tracks_json/tracker/<video>_greedy_role_diagnostics.csv` con las métricas usadas en cada paso del greedy.
 El notebook permite elegir entre reutilizar un checkpoint ya entrenado o reentrenar el modelo antes de inferir.
 La celda inicial recarga `set_transformer_pipeline.py`, así que cambios recientes del pipeline no requieren reiniciar el kernel para que se apliquen.
 Además, tras la inferencia, puede renderizar automáticamente el MP4 anotado usando el `tracks_with_predicted_roles.json`.
