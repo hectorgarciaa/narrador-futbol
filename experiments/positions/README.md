@@ -43,6 +43,7 @@ python -m experiments.positions.set_transformer_pipeline predict \
 
 Si usas el notebook `experiments/set_transformer.ipynb`, puedes pasar además `EXPECTED_ROLES_BY_TEAM` para imponer el once esperado de cada equipo con Hungarian sobre las probabilidades agregadas por jugador.
 Ese mismo formato de listas ya puede definirse también en `config.yaml` bajo `tracking.expected_roles_by_team`, y el tracking principal lo aplica online frame a frame.
+Además, la restricción del once esperado ya no permite cruces laterales entre bandas opuestas: `CI/LI/MI/EI` solo pueden resolverse dentro de esa familia izquierda y `CD/LD/MD/ED` solo dentro de la derecha.
 El notebook permite elegir entre reutilizar un checkpoint ya entrenado o reentrenar el modelo antes de inferir.
 La celda inicial recarga `set_transformer_pipeline.py`, así que cambios recientes del pipeline no requieren reiniciar el kernel para que se apliquen.
 Además, tras la inferencia, puede renderizar automáticamente el MP4 anotado usando el `tracks_with_predicted_roles.json`.

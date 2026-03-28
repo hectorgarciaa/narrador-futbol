@@ -1341,12 +1341,51 @@ ROLE_SLOT_ALIASES: dict[str, tuple[str, ...]] = {
     "STRIKER": ("DC",),
 }
 
+LATERAL_ROLE_FAMILIES: dict[str, tuple[str, ...]] = {
+    "LEFT": ("CI", "LI", "MI", "EI"),
+    "RIGHT": ("CD", "LD", "MD", "ED"),
+}
+ROLE_TO_LATERAL_FAMILY: dict[str, str] = {
+    role_label: family_name
+    for family_name, role_labels in LATERAL_ROLE_FAMILIES.items()
+    for role_label in role_labels
+}
+
 
 def _normalize_role_token(value: Any) -> str:
     token = str(value).strip().upper()
     token = token.replace("-", "_").replace(" ", "_")
     token = "_".join(part for part in token.split("_") if part)
     return token
+
+
+def _allowed_labels_for_expected_slot(
+    slot_label: str,
+    known_labels: set[str],
+    base_allowed: Sequence[str],
+) -> tuple[str, ...]:
+    if slot_label == "POR":
+        return ("POR",)
+
+    family_name = ROLE_TO_LATERAL_FAMILY.get(slot_label)
+    if family_name is None:
+        for label in base_allowed:
+            family_name = ROLE_TO_LATERAL_FAMILY.get(str(label))
+            if family_name is not None:
+                break
+
+    if family_name is not None:
+        family_allowed = tuple(
+            role_label
+            for role_label in LATERAL_ROLE_FAMILIES[family_name]
+            if role_label in known_labels
+        )
+        if family_allowed:
+            return family_allowed
+
+    return tuple(
+        label for label in base_allowed if label == "POR" or str(label) in known_labels
+    )
 
 
 def _resolve_expected_role_slot(
@@ -1357,10 +1396,15 @@ def _resolve_expected_role_slot(
     known_labels = {str(label) for label in label_names}
 
     if slot_label in known_labels or slot_label == "POR":
+        allowed_labels = _allowed_labels_for_expected_slot(
+            slot_label=slot_label,
+            known_labels=known_labels,
+            base_allowed=(slot_label,),
+        )
         return ExpectedRoleSlot(
             input_label=str(role_label),
             slot_label=slot_label,
-            allowed_labels=(slot_label,),
+            allowed_labels=allowed_labels,
         )
 
     allowed = ROLE_SLOT_ALIASES.get(slot_label)
@@ -1371,7 +1415,11 @@ def _resolve_expected_role_slot(
             f"Usa labels del modelo o aliases soportados: {supported}"
         )
 
-    filtered = tuple(label for label in allowed if label == "POR" or label in known_labels)
+    filtered = _allowed_labels_for_expected_slot(
+        slot_label=slot_label,
+        known_labels=known_labels,
+        base_allowed=allowed,
+    )
     if not filtered:
         raise ValueError(
             f"El rol esperado {role_label!r} no es compatible con las clases del checkpoint."
