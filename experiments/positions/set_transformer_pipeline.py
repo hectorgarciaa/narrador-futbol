@@ -1183,6 +1183,26 @@ class OnlineRoleInferenceSession:
                 label_names=self.label_names,
                 expected_roles_by_team=expected_roles_by_team,
             )
+        merge_cols = [
+            "team_id",
+            "player_id",
+            "predicted_role",
+            "predicted_role_confidence",
+            "predicted_role_unconstrained",
+            "predicted_role_confidence_unconstrained",
+            "expected_role_slot",
+            "assignment_method",
+            "assignment_cost",
+        ]
+        available_merge_cols = [
+            col for col in merge_cols if col in player_predictions_df.columns
+        ]
+        if available_merge_cols:
+            frame_predictions_df = frame_predictions_df.merge(
+                player_predictions_df[available_merge_cols],
+                on=["team_id", "player_id"],
+                how="left",
+            )
 
         return {
             "frame_predictions_df": frame_predictions_df,
@@ -1566,6 +1586,19 @@ def _apply_expected_roles_constraint(
     ]
     available_cols = [col for col in keep_cols if col in constrained.columns]
     return constrained.loc[:, available_cols]
+
+
+def constrain_player_predictions_with_expected_roles(
+    player_predictions_df: pd.DataFrame,
+    label_names: Sequence[str],
+    expected_roles_by_team: Mapping[str, Sequence[str]] | None,
+) -> pd.DataFrame:
+    """Public wrapper used by online tracking and notebooks."""
+    return _apply_expected_roles_constraint(
+        player_predictions_df=player_predictions_df,
+        label_names=label_names,
+        expected_roles_by_team=expected_roles_by_team,
+    )
 
 
 def _augment_tracks_with_predictions(

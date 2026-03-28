@@ -7,6 +7,7 @@ import math
 import re
 import sys
 import unicodedata
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -552,6 +553,34 @@ DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = (
 DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH = (
     "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
 )
+DEFAULT_EXPECTED_ROLES_BY_TEAM = {
+    "Real Madrid": [
+        "POR",
+        "CD",
+        "CI",
+        "DFC_DER",
+        "DFC_IZQ",
+        "DFC_CENT",
+        "MC",
+        "MI",
+        "MD",
+        "DC",
+        "DC",
+    ],
+    "Wolfsburgo": [
+        "POR",
+        "CD",
+        "CI",
+        "DFC_DER",
+        "DFC_IZQ",
+        "DFC_CENT",
+        "MC",
+        "MI",
+        "MD",
+        "DC",
+        "DC",
+    ],
+}
 
 
 def _normalize_role_token(value):
@@ -559,6 +588,42 @@ def _normalize_role_token(value):
     token = token.replace("-", "_").replace(" ", "_")
     token = "_".join(part for part in token.split("_") if part)
     return token
+
+
+def _normalize_expected_roles_mapping(raw_mapping):
+    if not isinstance(raw_mapping, dict):
+        return None
+
+    normalized = {}
+    for team_id, raw_roles in raw_mapping.items():
+        if raw_roles is None:
+            continue
+        if not isinstance(raw_roles, (list, tuple)):
+            raise ValueError(
+                f"tracking.expected_roles_by_team[{team_id!r}] debe ser lista/tupla, no {type(raw_roles).__name__}."
+            )
+        roles = [str(role).strip() for role in raw_roles if str(role).strip()]
+        if roles:
+            normalized[str(team_id)] = roles
+    return normalized or None
+
+
+def _resolve_expected_roles_by_team_from_config(config):
+    tracking_cfg = config.tracking
+    configured = _normalize_expected_roles_mapping(
+        tracking_cfg.get("expected_roles_by_team")
+    )
+    if configured:
+        return configured
+
+    configured_team_names = {str(team_name) for team_name in config.get_team_names()}
+    default_team_names = set(DEFAULT_EXPECTED_ROLES_BY_TEAM.keys())
+    if default_team_names.issubset(configured_team_names):
+        return {
+            str(team_id): [str(role) for role in roles]
+            for team_id, roles in DEFAULT_EXPECTED_ROLES_BY_TEAM.items()
+        }
+    return None
 
 
 def _safe_field_position_m(track_data):
@@ -806,6 +871,7 @@ class OnlineSpecialSeedRoleAssigner:
                 list(DEFAULT_SPECIAL_SEED_DEFENDER_ROLES),
             )
         }
+        self.expected_roles_by_team = _resolve_expected_roles_by_team_from_config(config)
         self.last_team_by_special_id = {}
         self.prev_positions = {}
         self.role_state_by_track_id = {}
@@ -821,6 +887,7 @@ class OnlineSpecialSeedRoleAssigner:
             "special_ids": [int(track_id) for track_id in self.special_ids],
         }
         self.role_session = None
+        self.constrain_player_predictions_with_expected_roles = None
 
         if not self.enabled:
             return
@@ -843,6 +910,7 @@ class OnlineSpecialSeedRoleAssigner:
         try:
             from experiments.positions.set_transformer_pipeline import (
                 OnlineRoleInferenceSession,
+                constrain_player_predictions_with_expected_roles,
             )
         except Exception as exc:
             self.logger.warning(
@@ -857,10 +925,18 @@ class OnlineSpecialSeedRoleAssigner:
                 model_path=model_path,
                 project_root=config.project_root,
             )
+            self.constrain_player_predictions_with_expected_roles = (
+                constrain_player_predictions_with_expected_roles
+            )
             self.logger.info(
                 "Online position-role session loaded for tracking: %s",
                 model_path,
             )
+            if self.expected_roles_by_team:
+                self.logger.info(
+                    "Online position-role expected_roles_by_team activado: %s",
+                    self.expected_roles_by_team,
+                )
         except Exception as exc:
             self.logger.warning(
                 "Se desactiva online special-seed role assignment: no se pudo cargar el checkpoint (%s)",
@@ -984,6 +1060,24 @@ class OnlineSpecialSeedRoleAssigner:
             track_data["predicted_role_confidence"] = float(
                 row.predicted_role_confidence
             )
+        if hasattr(row, "predicted_role_unconstrained") and pd.notna(
+            row.predicted_role_unconstrained
+        ):
+            track_data["predicted_role_unconstrained"] = str(
+                row.predicted_role_unconstrained
+            )
+        if hasattr(row, "predicted_role_confidence_unconstrained") and pd.notna(
+            row.predicted_role_confidence_unconstrained
+        ):
+            track_data["predicted_role_confidence_unconstrained"] = float(
+                row.predicted_role_confidence_unconstrained
+            )
+        if hasattr(row, "expected_role_slot") and pd.notna(row.expected_role_slot):
+            track_data["expected_role_slot"] = str(row.expected_role_slot)
+        if hasattr(row, "assignment_method") and pd.notna(row.assignment_method):
+            track_data["assignment_method"] = str(row.assignment_method)
+        if hasattr(row, "assignment_cost") and pd.notna(row.assignment_cost):
+            track_data["assignment_cost"] = float(row.assignment_cost)
 
     @staticmethod
     def _select_stable_role(role_counts, confidence_sums):
@@ -1015,6 +1109,8 @@ class OnlineSpecialSeedRoleAssigner:
         stable_confidence,
         frozen_at_frame,
         observations,
+        expected_role_slot=None,
+        assignment_method=None,
     ):
         stable_role = str(stable_role)
         stable_confidence = float(stable_confidence)
@@ -1034,7 +1130,17 @@ class OnlineSpecialSeedRoleAssigner:
                     track_data["role_stabilized"] = True
                     track_data["role_stabilized_at_frame"] = int(frozen_at_frame)
                     track_data["role_stabilization_observations"] = int(observations)
-                    track_data["stable_role_assignment_method"] = "team_unique_hungarian"
+                    if expected_role_slot is not None:
+                        track_data["expected_role_slot"] = str(expected_role_slot)
+                    if assignment_method is not None:
+                        track_data["assignment_method"] = str(assignment_method)
+                        track_data["stable_role_assignment_method"] = str(
+                            assignment_method
+                        )
+                    else:
+                        track_data["stable_role_assignment_method"] = (
+                            "team_unique_hungarian"
+                        )
 
     @staticmethod
     def _state_mean_prob_for_label(state, label_name):
@@ -1057,13 +1163,28 @@ class OnlineSpecialSeedRoleAssigner:
             return True
         return observations >= self.role_stabilization_window_frames
 
-    def _freeze_role_state(self, tracks, frame_id, track_id, role_label, confidence):
+    def _freeze_role_state(
+        self,
+        tracks,
+        frame_id,
+        track_id,
+        role_label,
+        confidence,
+        expected_role_slot=None,
+        assignment_method=None,
+    ):
         state = self.role_state_by_track_id.get(int(track_id))
         if not isinstance(state, dict):
             return
         state["frozen_role"] = str(role_label)
         state["frozen_confidence"] = float(confidence)
         state["frozen_at_frame"] = int(frame_id)
+        state["expected_role_slot"] = (
+            None if expected_role_slot is None else str(expected_role_slot)
+        )
+        state["assignment_method"] = (
+            None if assignment_method is None else str(assignment_method)
+        )
         self.stats["stable_role_tracks_frozen"] += 1
         self._backfill_stable_role(
             tracks,
@@ -1072,22 +1193,14 @@ class OnlineSpecialSeedRoleAssigner:
             stable_confidence=float(confidence),
             frozen_at_frame=frame_id,
             observations=int(state.get("observations", 0)),
+            expected_role_slot=expected_role_slot,
+            assignment_method=assignment_method,
         )
 
     def _freeze_ready_roles_by_team(self, tracks, frame_id):
         role_labels = self._role_labels_for_assignment()
         if not role_labels:
             return
-
-        frozen_roles_by_team = {}
-        for track_id, state in self.role_state_by_track_id.items():
-            if not isinstance(state, dict):
-                continue
-            team_id = state.get("team_id")
-            frozen_role = state.get("frozen_role")
-            if team_id is None or frozen_role is None:
-                continue
-            frozen_roles_by_team.setdefault(str(team_id), set()).add(str(frozen_role))
 
         candidates_by_team = {}
         for track_id, state in self.role_state_by_track_id.items():
@@ -1104,8 +1217,31 @@ class OnlineSpecialSeedRoleAssigner:
                 continue
             candidates_by_team.setdefault(str(team_id), []).append((int(track_id), state))
 
+        handled_team_ids = set()
+        if (
+            self.expected_roles_by_team
+            and self.constrain_player_predictions_with_expected_roles is not None
+        ):
+            handled_team_ids = self._freeze_ready_roles_by_expected_roles(
+                tracks=tracks,
+                frame_id=frame_id,
+                candidates_by_team=candidates_by_team,
+            )
+
+        frozen_roles_by_team = {}
+        for track_id, state in self.role_state_by_track_id.items():
+            if not isinstance(state, dict):
+                continue
+            team_id = state.get("team_id")
+            frozen_role = state.get("frozen_role")
+            if team_id is None or frozen_role is None:
+                continue
+            frozen_roles_by_team.setdefault(str(team_id), set()).add(str(frozen_role))
+
         epsilon = 1e-9
         for team_id, candidates in candidates_by_team.items():
+            if str(team_id) in handled_team_ids:
+                continue
             used_roles = frozen_roles_by_team.get(str(team_id), set())
             available_roles = [
                 role_label for role_label in role_labels if str(role_label) not in used_roles
@@ -1135,10 +1271,129 @@ class OnlineSpecialSeedRoleAssigner:
                 )
                 frozen_roles_by_team.setdefault(str(team_id), set()).add(role_label)
 
+    def _remaining_expected_roles_for_team(self, team_id):
+        if not self.expected_roles_by_team:
+            return None
+        expected_roles = self.expected_roles_by_team.get(str(team_id))
+        if not expected_roles:
+            return None
+
+        used_slots = Counter()
+        for state in self.role_state_by_track_id.values():
+            if not isinstance(state, dict):
+                continue
+            if str(state.get("team_id")) != str(team_id):
+                continue
+            if state.get("frozen_role") is None:
+                continue
+            slot_label = state.get("expected_role_slot") or state.get("frozen_role")
+            if slot_label is None:
+                continue
+            used_slots[_normalize_role_token(slot_label)] += 1
+
+        remaining_roles = []
+        for raw_role in expected_roles:
+            normalized_role = _normalize_role_token(raw_role)
+            if used_slots.get(normalized_role, 0) > 0:
+                used_slots[normalized_role] -= 1
+                continue
+            remaining_roles.append(str(raw_role))
+        return remaining_roles
+
+    def _build_ready_role_predictions_df(self, candidates):
+        if not candidates:
+            return pd.DataFrame()
+
+        role_labels = tuple(str(label) for label in self.role_session.label_names)
+        rows = []
+        for track_id, state in candidates:
+            observations = max(1, int(state.get("observations", 0)))
+            best_label = None
+            best_prob = -1.0
+            row = {
+                "team_id": str(state.get("team_id")),
+                "player_id": int(track_id),
+                "class_name": "player",
+                "frames_seen": observations,
+            }
+            for role_label in role_labels:
+                mean_prob = self._state_mean_prob_for_label(state, role_label)
+                row[f"prob_{role_label}"] = float(mean_prob)
+                if role_label != "POR" and mean_prob > best_prob:
+                    best_label = str(role_label)
+                    best_prob = float(mean_prob)
+
+            if best_label is None:
+                continue
+            row["predicted_role"] = best_label
+            row["predicted_role_confidence"] = float(best_prob)
+            rows.append(row)
+
+        return pd.DataFrame(rows)
+
+    def _freeze_ready_roles_by_expected_roles(
+        self,
+        tracks,
+        frame_id,
+        candidates_by_team,
+    ):
+        handled_team_ids = set()
+        if not candidates_by_team:
+            return handled_team_ids
+
+        role_labels = tuple(str(label) for label in self.role_session.label_names)
+        for team_id, candidates in candidates_by_team.items():
+            remaining_roles = self._remaining_expected_roles_for_team(team_id)
+            if not remaining_roles:
+                continue
+            handled_team_ids.add(str(team_id))
+
+            ready_df = self._build_ready_role_predictions_df(candidates)
+            if ready_df.empty:
+                continue
+
+            constrained_df = self.constrain_player_predictions_with_expected_roles(
+                player_predictions_df=ready_df,
+                label_names=role_labels,
+                expected_roles_by_team={str(team_id): list(remaining_roles)},
+            )
+
+            for row in constrained_df.itertuples(index=False):
+                self._freeze_role_state(
+                    tracks=tracks,
+                    frame_id=frame_id,
+                    track_id=int(row.player_id),
+                    role_label=str(row.predicted_role),
+                    confidence=float(row.predicted_role_confidence),
+                    expected_role_slot=(
+                        None
+                        if not hasattr(row, "expected_role_slot")
+                        or pd.isna(row.expected_role_slot)
+                        else str(row.expected_role_slot)
+                    ),
+                    assignment_method=(
+                        None
+                        if not hasattr(row, "assignment_method")
+                        or pd.isna(row.assignment_method)
+                        else str(row.assignment_method)
+                    ),
+                )
+        return handled_team_ids
+
     def _update_role_state(self, tracks, frame_id, player_id, row):
         track_key = int(player_id)
-        label = str(row.predicted_role_frame)
-        confidence = float(row.predicted_role_frame_confidence)
+        if hasattr(row, "predicted_role") and pd.notna(row.predicted_role):
+            label = str(row.predicted_role)
+            confidence = float(
+                getattr(
+                    row,
+                    "predicted_role_confidence",
+                    row.predicted_role_frame_confidence,
+                )
+            )
+        else:
+            label = str(row.predicted_role_frame)
+            confidence = float(row.predicted_role_frame_confidence)
         state = self.role_state_by_track_id.setdefault(
             track_key,
             {
@@ -1150,6 +1405,8 @@ class OnlineSpecialSeedRoleAssigner:
                 "frozen_role": None,
                 "frozen_confidence": None,
                 "frozen_at_frame": None,
+                "expected_role_slot": None,
+                "assignment_method": None,
             },
         )
 
@@ -1221,7 +1478,21 @@ class OnlineSpecialSeedRoleAssigner:
                     track_data["role_stabilization_observations"] = int(
                         state["observations"]
                     )
-                    track_data["stable_role_assignment_method"] = "team_unique_hungarian"
+                    if state.get("expected_role_slot") is not None:
+                        track_data["expected_role_slot"] = str(
+                            state["expected_role_slot"]
+                        )
+                    if state.get("assignment_method") is not None:
+                        track_data["assignment_method"] = str(
+                            state["assignment_method"]
+                        )
+                        track_data["stable_role_assignment_method"] = str(
+                            state["assignment_method"]
+                        )
+                    else:
+                        track_data["stable_role_assignment_method"] = (
+                            "team_unique_hungarian"
+                        )
 
     def _assign_special_seed_frame_teams(self, tracks, frame_id, frame_predictions_df):
         defender_candidates = []
@@ -1338,7 +1609,10 @@ class OnlineSpecialSeedRoleAssigner:
         regular_frame_predictions_df = pd.DataFrame()
 
         if not regular_observations.empty:
-            role_result = self.role_session.predict_frame(regular_observations)
+            role_result = self.role_session.predict_frame(
+                regular_observations,
+                expected_roles_by_team=self.expected_roles_by_team,
+            )
             regular_frame_predictions_df = role_result["frame_predictions_df"]
 
         self._assign_special_seed_frame_teams(

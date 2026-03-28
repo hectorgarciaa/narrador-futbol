@@ -144,6 +144,12 @@ tracking:
   special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
+  # Once esperado por equipo para la inferencia posicional durante el tracking.
+  # Si se define, el Set Transformer ajusta la asignación estable a estas plazas
+  # usando Hungarian, igual que en experiments/set_transformer.ipynb.
+  expected_roles_by_team:
+    Real Madrid: ["POR", "CD", "CI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Wolfsburgo: ["POR", "CD", "CI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
   # Congela un role estable por ID usando sus primeras observaciones visibles.
   # Si una clase domina pronto, se fija antes; si no, se congela al llegar a
   # esta ventana máxima de observaciones del track.
