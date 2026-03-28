@@ -53,7 +53,7 @@ Por cada frame del vídeo:
 4. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional y, para `player`/`goalkeeper`, incorpora distancia en el campo 2D al coste de asociación.
 5. **Seeds canónicos opcionales en punto de penalti**: si `reserve_penalty_spot_seed_players=true`, el tracker crea dos tracks semilla sintéticos de clase `player` en los puntos de penalti. No pasan por `TeamDetector`, así que no contaminan el clustering de colores ni tienen equipo asignado. Sí participan en la reasignación canónica por posición de campo, reservando dos IDs para jugadores no visibles al inicio. Mientras no absorban una detección real, también se escriben en el JSON final con `synthetic_seed=true`.
 6. **Lógica especial para los IDs reservados**: esos dos IDs no exigen coincidencia `player/goalkeeper` para recuperar una detección real y no fijan equipo por color durante el tracking. Su equipo se asigna frame a frame durante el propio tracking con el modelo de roles posicionales y el defensa más cercano. Como ya se consideran porteros conocidos, no entran al Set Transformer y se etiquetan manualmente como `POR`. Si una detección reaparece con un `raw_tracker_id` ya arrastrando otro canónico, los IDs especiales solo pueden reclamarla si ese canónico no estaba realmente activo y además la geometría favorece al ID especial. Para todos los IDs visibles, el `role` se congela usando sus primeras observaciones configurables y la posición estable se fija con una asignación única por equipo mediante Hungarian, evitando duplicados de `predicted_role`.
-7. **Reasignación canónica coherente con ByteTrack**: para `player/goalkeeper` con `field_position_m`, la segunda capa de IDs canónicos usa el mismo gate geométrico que ByteTrack (`field_position_match_distance_*`). Así no puede reusar un ID final con un salto de campo mayor que el permitido por la capa base.
+7. **Reasignación canónica coherente con ByteTrack**: para `player/goalkeeper` con `field_position_m`, la segunda capa de IDs canónicos usa exactamente el mismo gate geométrico que ByteTrack (`field_position_match_distance_*`). No añade un suelo extra ni expansión por velocidad en esa capa, así que no puede reusar un ID final con un salto de campo mayor que el permitido por la capa base.
 8. **Selección robusta del balón**: las candidatas de balón, tanto las devueltas por ByteTrack como las detecciones YOLO crudas, pasan por un gate específico de continuidad. A diferencia de `player/goalkeeper`, aquí no se aplica además el gate genérico de reasignación: se usa solo la lógica propia del balón para no perder cobertura. Se valida que el balón:
    - no salte a una posición incompatible con su trayectoria reciente;
    - no cambie de tamaño de forma abrupta entre frames;
@@ -179,7 +179,7 @@ Parámetros en `config.yaml`:
 
 Para reducir ID switches en clips largos, conviene combinar este gate con límites de reasignación más estrictos:
 - `reassign_min_distance` (imagen, píxeles; útil en clases sin campo)
-- `reassign_min_field_distance_m` (campo 2D, metros)
+- `field_position_match_distance_*` (si el problema está en `player/goalkeeper` con homografía)
 
 Además, se implementa un mecanismo de **tolerancia a cambios temporales de equipo**:
 - Si el equipo asignado cambia en un frame, no se actualiza inmediatamente.

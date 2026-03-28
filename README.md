@@ -308,7 +308,7 @@ Y se actualiza automáticamente un dataset acumulado de métricas de tracking en
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría. Mientras no se absorban, también se escriben en el JSON con `synthetic_seed=true`.
 Si `tracking.special_seed_role_team_assignment_enabled=true`, el tracking principal ejecuta además el modelo de `position_role` frame a frame durante el tracking para los jugadores normales y usa a los defensas detectados en ese frame para asignar equipo a los IDs reservados `1-2` por defensa más cercano. Esos dos IDs no entran al Set Transformer: se etiquetan manualmente como `POR`. Además, se congela un `role` estable por ID usando sus primeras observaciones visibles (`tracking.role_stabilization_*`) y la asignación estable final se resuelve por equipo con Hungarian para que no queden dos jugadores con la misma posición estable. Esos IDs no usan color de camiseta para recuperar identidad ni para fijar su equipo.
-Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), así que un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
+Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa exactamente el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), sin suelo extra ni expansión por velocidad en la capa 2. Así un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
 En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida.
@@ -618,7 +618,7 @@ Si sigues viendo cambios de ID en clips largos, ajusta en este orden:
 1. Activa `strict_person_class_separation`.
 2. Activa `require_field_position_for_reassign` para `player/goalkeeper`.
 3. Baja `motion_std_factor` (por ejemplo: `6 -> 5 -> 4`).
-4. Baja `reassign_min_distance` (píxeles, para clases sin campo) y `reassign_min_field_distance_m` (metros).
+4. Baja `reassign_min_distance` (píxeles, para clases sin campo) o endurece `field_position_match_distance_*` si el problema está en `player/goalkeeper`.
 5. Baja `motion_std_min_samples` para que el gate estadístico actúe antes.
 6. Solo si quieres cortar reapariciones tardías, fija `max_reassign_lost_frames` (>0).
 

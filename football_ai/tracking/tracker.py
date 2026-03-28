@@ -617,16 +617,16 @@ class Tracker:
             previous_field_position,
         )
 
-        if not reserved_seed:
+        if not reserved_seed and not uses_field_position:
             max_lost_frames = self._max_lost_frames_for_class(effective_class)
             if max_lost_frames is not None and lost_frames > max_lost_frames:
                 return False
 
         if uses_field_position:
-            max_allowed_jump = max(
-                self.reassign_min_field_distance_m,
-                self._field_distance_gate_for_lost_frames(lost_frames),
-            )
+            # Mirror ByteTrack's field-space gate exactly for player/goalkeeper
+            # tracks with homography, without widening or narrowing it using
+            # extra motion heuristics from the canonical reassignment layer.
+            max_allowed_jump = self._field_distance_gate_for_lost_frames(lost_frames)
         else:
             max_allowed_jump = self.reassign_min_distance
 
