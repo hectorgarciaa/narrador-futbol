@@ -43,7 +43,7 @@ python -m experiments.positions.set_transformer_pipeline predict \
 
 Si usas el notebook `experiments/set_transformer.ipynb`, puedes pasar además `EXPECTED_ROLES_BY_TEAM` para imponer el once esperado de cada equipo con Hungarian sobre las probabilidades agregadas por jugador.
 Ese mismo formato de listas ya puede definirse también en `config.yaml` bajo `tracking.expected_roles_by_team`, y el tracking principal lo aplica online frame a frame.
-Además, la restricción del once esperado ya no permite cruces laterales entre bandas opuestas: `CI/LI/MI/EI` solo pueden resolverse dentro de esa familia izquierda y `CD/LD/MD/ED` solo dentro de la derecha.
+Cuando esa restricción está activa, `predicted_role` pasa a representar la plaza táctica asignada del once esperado, mientras que `predicted_role_unconstrained` y `matched_model_role` conservan la señal libre del modelo.
 El notebook permite elegir entre reutilizar un checkpoint ya entrenado o reentrenar el modelo antes de inferir.
 La celda inicial recarga `set_transformer_pipeline.py`, así que cambios recientes del pipeline no requieren reiniciar el kernel para que se apliquen.
 Además, tras la inferencia, puede renderizar automáticamente el MP4 anotado usando el `tracks_with_predicted_roles.json`.
@@ -54,7 +54,7 @@ Salidas:
 - resumen estable por jugador en `output/predictions/positions/partido_ajustado_<timestamp>/player_role_summary.csv`
 - tracks enriquecidos con `predicted_role` en `output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json`
 
-Cuando activas esa restricción, el `player_role_summary.csv` conserva tanto la predicción libre (`predicted_role_unconstrained`) como la restringida (`predicted_role`), además del slot esperado asignado (`expected_role_slot`).
+Cuando activas esa restricción, el `player_role_summary.csv` conserva tanto la predicción libre (`predicted_role_unconstrained`) como la restringida (`predicted_role`), además del label del modelo que sustentó esa plaza (`matched_model_role`) y del slot esperado asignado (`expected_role_slot`).
 Si sobran jugadores detectados respecto a las plazas esperadas, esos jugadores no fallan: reciben igualmente la mejor posición permitida dentro del once esperado y quedan marcados con `assignment_method = expected_roles_fallback_best_allowed`.
 En ese modo, el vídeo anotado enseña el `predicted_role` estable restringido y no el `predicted_role_frame` libre.
 

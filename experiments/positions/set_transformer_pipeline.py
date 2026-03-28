@@ -1190,6 +1190,7 @@ class OnlineRoleInferenceSession:
             "predicted_role_confidence",
             "predicted_role_unconstrained",
             "predicted_role_confidence_unconstrained",
+            "matched_model_role",
             "expected_role_slot",
             "assignment_method",
             "assignment_cost",
@@ -1345,11 +1346,32 @@ LATERAL_ROLE_FAMILIES: dict[str, tuple[str, ...]] = {
     "LEFT": ("CI", "LI", "MI", "EI"),
     "RIGHT": ("CD", "LD", "MD", "ED"),
 }
+
 ROLE_TO_LATERAL_FAMILY: dict[str, str] = {
     role_label: family_name
     for family_name, role_labels in LATERAL_ROLE_FAMILIES.items()
     for role_label in role_labels
 }
+
+ROLE_SLOT_ANCHORS: dict[str, tuple[float, float]] = {
+    "CI": (0.40, 0.12),
+    "LI": (0.26, 0.12),
+    "DFC_IZQ": (0.18, 0.34),
+    "DFC_CENT": (0.16, 0.50),
+    "DFC_DER": (0.18, 0.66),
+    "LD": (0.26, 0.88),
+    "CD": (0.40, 0.88),
+    "MC": (0.52, 0.50),
+    "MI": (0.60, 0.22),
+    "MD": (0.60, 0.78),
+    "EI": (0.80, 0.12),
+    "ED": (0.80, 0.88),
+    "DC": (0.84, 0.50),
+}
+
+SLOT_GEOMETRY_WEIGHT = 1.35
+SLOT_LABEL_COMPAT_WEIGHT = 1.10
+ANCHOR_DY_WEIGHT = 1.20
 
 
 def _normalize_role_token(value: Any) -> str:
@@ -1359,21 +1381,11 @@ def _normalize_role_token(value: Any) -> str:
     return token
 
 
-def _allowed_labels_for_expected_slot(
+def _expected_slot_allowed_labels(
     slot_label: str,
     known_labels: set[str],
-    base_allowed: Sequence[str],
 ) -> tuple[str, ...]:
-    if slot_label == "POR":
-        return ("POR",)
-
     family_name = ROLE_TO_LATERAL_FAMILY.get(slot_label)
-    if family_name is None:
-        for label in base_allowed:
-            family_name = ROLE_TO_LATERAL_FAMILY.get(str(label))
-            if family_name is not None:
-                break
-
     if family_name is not None:
         family_allowed = tuple(
             role_label
@@ -1382,10 +1394,91 @@ def _allowed_labels_for_expected_slot(
         )
         if family_allowed:
             return family_allowed
+    return (slot_label,)
 
-    return tuple(
-        label for label in base_allowed if label == "POR" or str(label) in known_labels
+
+def _weighted_anchor_distance(
+    point_a: tuple[float, float],
+    point_b: tuple[float, float],
+) -> float:
+    dx = float(point_a[0]) - float(point_b[0])
+    dy = float(point_a[1]) - float(point_b[1])
+    return float(np.sqrt((dx * dx) + ((dy * ANCHOR_DY_WEIGHT) ** 2)))
+
+
+def _slot_label_compatibility_penalty(
+    slot_label: str,
+    candidate_label: str,
+) -> float:
+    if str(slot_label) == str(candidate_label):
+        return 0.0
+
+    slot_family = ROLE_TO_LATERAL_FAMILY.get(str(slot_label))
+    candidate_family = ROLE_TO_LATERAL_FAMILY.get(str(candidate_label))
+    if slot_family is not None and candidate_family is not None:
+        if slot_family != candidate_family:
+            return 1_000.0
+        slot_anchor = ROLE_SLOT_ANCHORS.get(str(slot_label))
+        candidate_anchor = ROLE_SLOT_ANCHORS.get(str(candidate_label))
+        if slot_anchor is None or candidate_anchor is None:
+            return 0.35
+        return SLOT_LABEL_COMPAT_WEIGHT * _weighted_anchor_distance(
+            slot_anchor,
+            candidate_anchor,
+        )
+
+    return 0.0
+
+
+def _slot_geometry_penalty(
+    player_row: pd.Series,
+    slot_label: str,
+) -> float:
+    slot_anchor = ROLE_SLOT_ANCHORS.get(str(slot_label))
+    if slot_anchor is None:
+        return 0.0
+
+    player_x = pd.to_numeric(player_row.get("x", np.nan), errors="coerce")
+    player_y = pd.to_numeric(player_row.get("y", np.nan), errors="coerce")
+    if pd.isna(player_x) or pd.isna(player_y):
+        return 0.0
+
+    return SLOT_GEOMETRY_WEIGHT * _weighted_anchor_distance(
+        (float(player_x), float(player_y)),
+        slot_anchor,
     )
+
+
+def _best_label_for_slot(
+    player_row: pd.Series,
+    slot: ExpectedRoleSlot,
+    epsilon: float,
+) -> tuple[str, float, float]:
+    geometry_penalty = _slot_geometry_penalty(player_row=player_row, slot_label=slot.slot_label)
+    best_label = None
+    best_prob = 0.0
+    best_cost = None
+
+    for label in slot.allowed_labels:
+        if label == "POR":
+            continue
+        prob_value = float(player_row.get(f"prob_{label}", 0.0))
+        base_cost = -math.log(max(prob_value, epsilon))
+        compat_penalty = _slot_label_compatibility_penalty(
+            slot_label=slot.slot_label,
+            candidate_label=str(label),
+        )
+        total_cost = base_cost + compat_penalty + geometry_penalty
+        if best_cost is None or total_cost < best_cost:
+            best_label = str(label)
+            best_prob = float(prob_value)
+            best_cost = float(total_cost)
+
+    if best_label is None or best_cost is None:
+        raise ValueError(
+            f"El slot {slot.slot_label!r} no tiene labels válidos para la fila actual."
+        )
+    return best_label, best_prob, float(best_cost)
 
 
 def _resolve_expected_role_slot(
@@ -1396,15 +1489,13 @@ def _resolve_expected_role_slot(
     known_labels = {str(label) for label in label_names}
 
     if slot_label in known_labels or slot_label == "POR":
-        allowed_labels = _allowed_labels_for_expected_slot(
-            slot_label=slot_label,
-            known_labels=known_labels,
-            base_allowed=(slot_label,),
-        )
         return ExpectedRoleSlot(
             input_label=str(role_label),
             slot_label=slot_label,
-            allowed_labels=allowed_labels,
+            allowed_labels=_expected_slot_allowed_labels(
+                slot_label=slot_label,
+                known_labels=known_labels,
+            ),
         )
 
     allowed = ROLE_SLOT_ALIASES.get(slot_label)
@@ -1415,11 +1506,7 @@ def _resolve_expected_role_slot(
             f"Usa labels del modelo o aliases soportados: {supported}"
         )
 
-    filtered = _allowed_labels_for_expected_slot(
-        slot_label=slot_label,
-        known_labels=known_labels,
-        base_allowed=allowed,
-    )
+    filtered = tuple(label for label in allowed if label == "POR" or label in known_labels)
     if not filtered:
         raise ValueError(
             f"El rol esperado {role_label!r} no es compatible con las clases del checkpoint."
@@ -1451,6 +1538,9 @@ def _aggregate_player_predictions(
                 "predicted_role_confidence": 1.0,
                 "frames_seen": int(len(group)),
             }
+            for coord_col in ("x", "y", "x_m", "y_m"):
+                if coord_col in group.columns:
+                    row[coord_col] = float(pd.to_numeric(group[coord_col], errors="coerce").mean())
             for prob_col in prob_cols:
                 row[prob_col] = 0.0
             rows.append(row)
@@ -1467,6 +1557,9 @@ def _aggregate_player_predictions(
             "predicted_role_confidence": float(mean_probs.max()),
             "frames_seen": int(len(group)),
         }
+        for coord_col in ("x", "y", "x_m", "y_m"):
+            if coord_col in group.columns:
+                row[coord_col] = float(pd.to_numeric(group[coord_col], errors="coerce").mean())
         row.update({prob_col: float(mean_probs[prob_col]) for prob_col in prob_cols})
         rows.append(row)
 
@@ -1493,6 +1586,10 @@ def _apply_expected_roles_constraint(
         dtype="string",
     )
     constrained["assignment_cost"] = np.nan
+    constrained["matched_model_role"] = pd.Series(
+        [pd.NA] * len(constrained),
+        dtype="string",
+    )
 
     if not expected_roles_by_team:
         return constrained
@@ -1551,19 +1648,13 @@ def _apply_expected_roles_constraint(
             player_row = field_df.loc[row_idx]
             row_pairs: list[tuple[str, float]] = []
             for col_pos, slot in enumerate(field_slots):
-                slot_probs = []
-                for label in slot.allowed_labels:
-                    if label == "POR":
-                        continue
-                    prob_value = float(player_row.get(f"prob_{label}", 0.0))
-                    slot_probs.append((label, prob_value))
-                if not slot_probs:
-                    raise ValueError(
-                        f"El slot {slot.slot_label!r} del equipo {team_id!r} no tiene clases válidas."
-                    )
-                best_label, best_prob = max(slot_probs, key=lambda item: item[1])
+                best_label, best_prob, total_cost = _best_label_for_slot(
+                    player_row=player_row,
+                    slot=slot,
+                    epsilon=epsilon,
+                )
                 row_pairs.append((best_label, best_prob))
-                cost_matrix[row_pos, col_pos] = -math.log(max(best_prob, epsilon))
+                cost_matrix[row_pos, col_pos] = float(total_cost)
             best_labels_per_pair.append(row_pairs)
 
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
@@ -1572,11 +1663,12 @@ def _apply_expected_roles_constraint(
             row_idx = field_indices[row_pos]
             slot = field_slots[col_pos]
             best_label, best_prob = best_labels_per_pair[row_pos][col_pos]
-            constrained.at[row_idx, "predicted_role"] = best_label
+            constrained.at[row_idx, "predicted_role"] = slot.slot_label
             constrained.at[row_idx, "predicted_role_confidence"] = float(best_prob)
             constrained.at[row_idx, "expected_role_slot"] = slot.slot_label
             constrained.at[row_idx, "assignment_method"] = "hungarian_expected_roles"
             constrained.at[row_idx, "assignment_cost"] = float(cost_matrix[row_pos, col_pos])
+            constrained.at[row_idx, "matched_model_role"] = str(best_label)
 
         fallback_options: list[tuple[str, str]] = []
         seen_fallback_pairs: set[tuple[str, str]] = set()
@@ -1601,22 +1693,42 @@ def _apply_expected_roles_constraint(
             best_slot_label = None
             best_label = None
             best_prob = -1.0
+            best_cost = None
             for slot_label, label in fallback_options:
                 prob_value = float(player_row.get(f"prob_{label}", 0.0))
-                if prob_value > best_prob:
+                compat_penalty = _slot_label_compatibility_penalty(
+                    slot_label=slot_label,
+                    candidate_label=label,
+                )
+                geometry_penalty = _slot_geometry_penalty(
+                    player_row=player_row,
+                    slot_label=slot_label,
+                )
+                total_cost = (
+                    -math.log(max(prob_value, epsilon))
+                    + compat_penalty
+                    + geometry_penalty
+                )
+                if best_cost is None or total_cost < best_cost:
                     best_slot_label = slot_label
                     best_label = label
                     best_prob = prob_value
+                    best_cost = float(total_cost)
 
             if best_label is None or best_slot_label is None:
                 constrained.at[row_idx, "assignment_method"] = "expected_roles_unassigned"
                 continue
 
-            constrained.at[row_idx, "predicted_role"] = best_label
+            constrained.at[row_idx, "predicted_role"] = best_slot_label
             constrained.at[row_idx, "predicted_role_confidence"] = float(best_prob)
             constrained.at[row_idx, "expected_role_slot"] = best_slot_label
             constrained.at[row_idx, "assignment_method"] = "expected_roles_fallback_best_allowed"
-            constrained.at[row_idx, "assignment_cost"] = float(-math.log(max(best_prob, epsilon)))
+            constrained.at[row_idx, "assignment_cost"] = (
+                float(best_cost)
+                if best_cost is not None
+                else float(-math.log(max(best_prob, epsilon)))
+            )
+            constrained.at[row_idx, "matched_model_role"] = str(best_label)
 
     keep_cols = [
         "team_id",
@@ -1626,10 +1738,15 @@ def _apply_expected_roles_constraint(
         "predicted_role_confidence",
         "predicted_role_unconstrained",
         "predicted_role_confidence_unconstrained",
+        "matched_model_role",
         "expected_role_slot",
         "assignment_method",
         "assignment_cost",
         "frames_seen",
+        "x",
+        "y",
+        "x_m",
+        "y_m",
         *prob_cols,
     ]
     available_cols = [col for col in keep_cols if col in constrained.columns]
@@ -1674,6 +1791,8 @@ def _augment_tracks_with_predictions(
             stable_payload["predicted_role_confidence_unconstrained"] = float(
                 row.predicted_role_confidence_unconstrained
             )
+        if hasattr(row, "matched_model_role") and pd.notna(row.matched_model_role):
+            stable_payload["matched_model_role"] = str(row.matched_model_role)
         if hasattr(row, "expected_role_slot") and pd.notna(row.expected_role_slot):
             stable_payload["expected_role_slot"] = str(row.expected_role_slot)
         if hasattr(row, "assignment_method") and pd.notna(row.assignment_method):
@@ -1800,6 +1919,7 @@ def predict_roles_for_video(
                 "predicted_role_confidence",
                 "predicted_role_unconstrained",
                 "predicted_role_confidence_unconstrained",
+                "matched_model_role",
                 "expected_role_slot",
                 "assignment_method",
                 "assignment_cost",
@@ -1961,6 +2081,7 @@ def predict_roles_for_tracks_payload(
                 "predicted_role_confidence",
                 "predicted_role_unconstrained",
                 "predicted_role_confidence_unconstrained",
+                "matched_model_role",
                 "expected_role_slot",
                 "assignment_method",
                 "assignment_cost",

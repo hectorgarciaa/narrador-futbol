@@ -1072,6 +1072,8 @@ class OnlineSpecialSeedRoleAssigner:
             track_data["predicted_role_confidence_unconstrained"] = float(
                 row.predicted_role_confidence_unconstrained
             )
+        if hasattr(row, "matched_model_role") and pd.notna(row.matched_model_role):
+            track_data["matched_model_role"] = str(row.matched_model_role)
         if hasattr(row, "expected_role_slot") and pd.notna(row.expected_role_slot):
             track_data["expected_role_slot"] = str(row.expected_role_slot)
         if hasattr(row, "assignment_method") and pd.notna(row.assignment_method):
@@ -1315,6 +1317,8 @@ class OnlineSpecialSeedRoleAssigner:
                 "player_id": int(track_id),
                 "class_name": "player",
                 "frames_seen": observations,
+                "x": float(state.get("x_sum", 0.0)) / float(observations),
+                "y": float(state.get("y_sum", 0.0)) / float(observations),
             }
             for role_label in role_labels:
                 mean_prob = self._state_mean_prob_for_label(state, role_label)
@@ -1407,6 +1411,8 @@ class OnlineSpecialSeedRoleAssigner:
                 "frozen_at_frame": None,
                 "expected_role_slot": None,
                 "assignment_method": None,
+                "x_sum": 0.0,
+                "y_sum": 0.0,
             },
         )
 
@@ -1419,6 +1425,16 @@ class OnlineSpecialSeedRoleAssigner:
         state["confidence_sums"][label] = float(
             state["confidence_sums"].get(label, 0.0)
         ) + confidence
+        state["x_sum"] = float(state.get("x_sum", 0.0)) + float(
+            pd.to_numeric(getattr(row, "x", np.nan), errors="coerce")
+            if not pd.isna(pd.to_numeric(getattr(row, "x", np.nan), errors="coerce"))
+            else 0.0
+        )
+        state["y_sum"] = float(state.get("y_sum", 0.0)) + float(
+            pd.to_numeric(getattr(row, "y", np.nan), errors="coerce")
+            if not pd.isna(pd.to_numeric(getattr(row, "y", np.nan), errors="coerce"))
+            else 0.0
+        )
         for role_label in self._role_labels_for_assignment():
             prob_col = f"prob_{role_label}"
             prob_value = float(getattr(row, prob_col, 0.0))
