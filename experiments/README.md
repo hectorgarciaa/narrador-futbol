@@ -63,7 +63,8 @@ La heurística combina:
 - cambios de velocidad o dirección del balón para detectar toque/control;
 - confirmación temporal antes de aceptar muchos cambios rivales;
 - estabilización corta de lagunas/segmentos para evitar parpadeos en el vídeo;
-- continuidad temporal de la posesión para cubrir pases en tránsito dentro del mismo equipo.
+- continuidad temporal de la posesión para cubrir pases en tránsito dentro del mismo equipo;
+- persistencia del último equipo que tocó el balón, sin liberar la posesión a `unknown` salvo antes del primer toque detectado.
 
 Entrada típica:
 - vídeo en `data/partidoPrueba/`

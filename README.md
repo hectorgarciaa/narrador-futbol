@@ -306,6 +306,7 @@ El JSON de tracks se guarda en `output/tracks_json/tracker/<video_sanitizado>_tr
 También se guarda el resumen por vídeo en `output/tracks_json/tracker/<video_sanitizado>_summary.json`.
 Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `data/posiciones_etiquetadas/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`). Ese resumen incluye también `ball_coverage`, para medir en qué fracción del clip el balón quedó trackeado.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
+Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
 En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida.
@@ -452,7 +453,7 @@ La heurística actual:
 - confirma toque/control cuando la proximidad coincide con una caída de velocidad, un cambio de dirección, un control del mismo jugador o una recuperación clara del rival;
 - añade histéresis temporal para no cambiar de equipo con una única observación rival dudosa;
 - rellena lagunas cortas y elimina segmentos mínimos espurios para estabilizar la posesión mostrada;
-- mantiene la posesión del equipo entre toques para cubrir pases en tránsito.
+- mantiene siempre la posesión del último equipo que tocó el balón entre toques y solo cambia de equipo si el balón muestra señal de toque real en velocidad y/o dirección.
 
 Ejecución:
 
@@ -531,6 +532,8 @@ tracking:
   field_position_match_distance_lost_exponent: 0.5
   field_position_match_distance_decay_per_frame: 0.5
   strict_person_class_separation: true
+  reserve_penalty_spot_seed_players: true
+  reserve_penalty_spot_seed_match_distance_m: 12.0
   require_field_position_for_reassign: true
   max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
   motion_std_gate_enabled: true

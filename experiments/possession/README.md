@@ -19,8 +19,8 @@ Heuristica implementada:
   - o robo claro del rival;
 - exige confirmacion temporal para muchos cambios de equipo rivales, para evitar saltos de un solo frame;
 - rellena lagunas cortas y suprime segmentos muy breves de posesion para estabilizar la salida visual;
-- mantiene la posesion del equipo entre toques, para cubrir pases en transito dentro del mismo equipo;
-- libera la posesion si el balon desaparece durante demasiados frames o si pasa mucho tiempo sin un toque confirmado.
+- mantiene siempre la posesion del ultimo equipo que toco el balon, para cubrir pases en transito y balones fuera de vision;
+- solo cambia de equipo cuando hay contacto plausible y senal en la velocidad y/o direccion del balon.
 
 Salidas:
 - `output/predictions/possession/<video>_<timestamp>/frame_possession.csv`

@@ -5988,16 +5988,722 @@
         {},
         {},
         {},
+        {},
+        {},
+        {},
+        {},
+        {},
         {
             "0": {
                 "bbox": [
-                    1730.767822265625,
-                    652.6109619140625,
-                    1755.13330078125,
-                    677.3904418945312
+                    1902.37841796875,
+                    690.049560546875,
+                    1917.321044921875,
+                    708.9820556640625
                 ],
-                "bbox_size": 603.7638870924711,
-                "confidence": 0.018659807741642,
+                "bbox_size": 282.9012118279934,
+                "confidence": 0.2928229570388794,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1890.0238037109375,
+                    685.88818359375,
+                    1912.237060546875,
+                    711.0569458007812
+                ],
+                "bbox_size": 559.0801791474223,
+                "confidence": 0.04677315428853035,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1884.33544921875,
+                    681.2725830078125,
+                    1907.115234375,
+                    714.3111572265625
+                ],
+                "bbox_size": 752.6116225719452,
+                "confidence": 0.037590283900499344,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1880.1778564453125,
+                    672.3170166015625,
+                    1897.3092041015625,
+                    698.9774169921875
+                ],
+                "bbox_size": 456.7285877466202,
+                "confidence": 0.047448258846998215,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1872.5458984375,
+                    669.016845703125,
+                    1888.451171875,
+                    686.9620971679688
+                ],
+                "bbox_size": 285.42413145303726,
+                "confidence": 0.4288833439350128,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {
+            "0": {
+                "bbox": [
+                    1858.4915771484375,
+                    659.7501220703125,
+                    1872.30908203125,
+                    676.5888061523438
+                ],
+                "bbox_size": 232.66859952360392,
+                "confidence": 0.41923758387565613,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1850.4539794921875,
+                    654.8322143554688,
+                    1865.5147705078125,
+                    673.8665771484375
+                ],
+                "bbox_size": 286.67256014049053,
+                "confidence": 0.4180183410644531,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1842.7998046875,
+                    651.473388671875,
+                    1856.7509765625,
+                    671.015869140625
+                ],
+                "bbox_size": 272.6405038833618,
+                "confidence": 0.47505873441696167,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1837.387939453125,
+                    650.24853515625,
+                    1851.087158203125,
+                    669.6732177734375
+                ],
+                "bbox_size": 266.1029763221741,
+                "confidence": 0.39298659563064575,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1828.3890380859375,
+                    647.6259765625,
+                    1844.2716064453125,
+                    667.73828125
+                ],
+                "bbox_size": 319.435054063797,
+                "confidence": 0.010956920683383942,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1819.335205078125,
+                    648.3824462890625,
+                    1837.9423828125,
+                    675.312744140625
+                ],
+                "bbox_size": 501.09683856368065,
+                "confidence": 0.016520211473107338,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1811.023681640625,
+                    648.7622680664062,
+                    1829.091064453125,
+                    675.7897338867188
+                ],
+                "bbox_size": 488.3155714273453,
+                "confidence": 0.011473938822746277,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1807.283447265625,
+                    649.5673828125,
+                    1823.12890625,
+                    674.2322387695312
+                ],
+                "bbox_size": 390.82596342265606,
+                "confidence": 0.043694090098142624,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1802.200927734375,
+                    652.1417236328125,
+                    1816.9775390625,
+                    673.7939453125
+                ],
+                "bbox_size": 319.946464151144,
+                "confidence": 0.1652594804763794,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1794.499755859375,
+                    652.5734252929688,
+                    1809.376220703125,
+                    672.8292846679688
+                ],
+                "bbox_size": 301.33557987213135,
+                "confidence": 0.4896965026855469,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1789.1700439453125,
+                    653.8965454101562,
+                    1804.2088623046875,
+                    674.2366333007812
+                ],
+                "bbox_size": 305.89088720083237,
+                "confidence": 0.3253801763057709,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1784.6748046875,
+                    658.6873779296875,
+                    1796.87548828125,
+                    675.155029296875
+                ],
+                "bbox_size": 200.9166038632393,
+                "confidence": 0.5414770245552063,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1778.17041015625,
+                    659.4431762695312,
+                    1792.788330078125,
+                    678.64697265625
+                ],
+                "bbox_size": 280.71955777704716,
+                "confidence": 0.5305655002593994,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {
+            "0": {
+                "bbox": [
+                    1759.44873046875,
+                    653.3629150390625,
+                    1783.806884765625,
+                    676.46875
+                ],
+                "bbox_size": 562.8154931366444,
+                "confidence": 0.012870500795543194,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1760.176025390625,
+                    649.3888549804688,
+                    1777.20263671875,
+                    675.6170654296875
+                ],
+                "bbox_size": 446.57754515111446,
+                "confidence": 0.07879681885242462,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1754.638916015625,
+                    648.719482421875,
+                    1772.07275390625,
+                    675.575927734375
+                ],
+                "bbox_size": 468.21091389656067,
+                "confidence": 0.026420552283525467,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1748.4605712890625,
+                    641.7135009765625,
+                    1764.4383544921875,
+                    664.4498901367188
+                ],
+                "bbox_size": 363.27709682285786,
+                "confidence": 0.12054795026779175,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1742.2734375,
+                    642.824951171875,
+                    1760.4261474609375,
+                    663.318115234375
+                ],
+                "bbox_size": 372.00646340847015,
+                "confidence": 0.1218031719326973,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1736.5616455078125,
+                    641.591064453125,
+                    1754.488037109375,
+                    664.2894287109375
+                ],
+                "bbox_size": 406.89976640045643,
+                "confidence": 0.07995613664388657,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1731.3482666015625,
+                    640.6396484375,
+                    1746.1322021484375,
+                    662.0433349609375
+                ],
+                "bbox_size": 316.43072202801704,
+                "confidence": 0.12798826396465302,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1728.4697265625,
+                    643.3316650390625,
+                    1742.77490234375,
+                    662.0338134765625
+                ],
+                "bbox_size": 267.53752088546753,
+                "confidence": 0.04488053545355797,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    1690.9859619140625,
+                    566.23779296875,
+                    1705.7098388671875,
+                    584.1595458984375
+                ],
+                "bbox_size": 263.87768492102623,
+                "confidence": 0.010863322764635086,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1691.2327880859375,
+                    561.03515625,
+                    1702.6640625,
+                    578.2987060546875
+                ],
+                "bbox_size": 197.3443751782179,
+                "confidence": 0.04701846465468407,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1690.190673828125,
+                    558.2552490234375,
+                    1701.6279296875,
+                    578.20458984375
+                ],
+                "bbox_size": 228.165715187788,
+                "confidence": 0.10528475791215897,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1688.1507568359375,
+                    555.1512451171875,
+                    1700.7315673828125,
+                    578.4801635742188
+                ],
+                "bbox_size": 293.4967033714056,
+                "confidence": 0.08859478682279587,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1687.0279541015625,
+                    548.82666015625,
+                    1697.9688720703125,
+                    562.7437744140625
+                ],
+                "bbox_size": 152.2660054564476,
+                "confidence": 0.20820865035057068,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1686.2427978515625,
+                    545.1016845703125,
+                    1695.9613037109375,
+                    558.2155151367188
+                ],
+                "bbox_size": 127.44683919847012,
+                "confidence": 0.2649571895599365,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1683.5570068359375,
+                    538.3848876953125,
+                    1693.6072998046875,
+                    555.1427001953125
+                ],
+                "bbox_size": 168.42092514038086,
+                "confidence": 0.21966786682605743,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1681.4366455078125,
+                    535.521728515625,
+                    1693.0968017578125,
+                    554.2431030273438
+                ],
+                "bbox_size": 218.29415202140808,
+                "confidence": 0.03709317371249199,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    1667.159912109375,
+                    514.23046875,
+                    1678.7142333984375,
+                    531.2728271484375
+                ],
+                "bbox_size": 196.9128844588995,
+                "confidence": 0.05599093809723854,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1666.3546142578125,
+                    512.39697265625,
+                    1676.4180908203125,
+                    531.31103515625
+                ],
+                "bbox_size": 190.34122467041016,
+                "confidence": 0.15867488086223602,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1663.664794921875,
+                    510.77490234375,
+                    1675.329345703125,
+                    530.9581298828125
+                ],
+                "bbox_size": 235.428282558918,
+                "confidence": 0.058011770248413086,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1662.152587890625,
+                    507.2505798339844,
+                    1673.8544921875,
+                    531.7696533203125
+                ],
+                "bbox_size": 286.919851385057,
+                "confidence": 0.10939658433198929,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1660.4366455078125,
+                    502.8825988769531,
+                    1671.7789306640625,
+                    532.621337890625
+                ],
+                "bbox_size": 337.3052580803633,
+                "confidence": 0.013485273346304893,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1659.4912109375,
+                    499.4530334472656,
+                    1669.43603515625,
+                    515.4351806640625
+                ],
+                "bbox_size": 158.93964470922947,
+                "confidence": 0.39366745948791504,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1658.786865234375,
+                    497.7518005371094,
+                    1669.16015625,
+                    514.5488891601562
+                ],
+                "bbox_size": 174.24108850210905,
+                "confidence": 0.045110348612070084,
                 "distances": null,
                 "field_position_m": null,
                 "ground_point_image": null,
@@ -6012,13 +6718,13 @@
         {
             "0": {
                 "bbox": [
-                    1498.31298828125,
-                    641.7324829101562,
-                    1522.912841796875,
-                    670.6100463867188
+                    1642.8017578125,
+                    487.6351318359375,
+                    1654.594482421875,
+                    507.514892578125
                 ],
-                "bbox_size": 710.3838314116001,
-                "confidence": 0.02359352633357048,
+                "bbox_size": 234.43654373288155,
+                "confidence": 0.02345346100628376,
                 "distances": null,
                 "field_position_m": null,
                 "ground_point_image": null,
@@ -6026,6 +6732,63 @@
                 "team": null
             }
         },
+        {
+            "0": {
+                "bbox": [
+                    1639.1927490234375,
+                    484.989990234375,
+                    1650.9686279296875,
+                    506.32708740234375
+                ],
+                "bbox_size": 251.26307246088982,
+                "confidence": 0.057173795998096466,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1637.16064453125,
+                    484.87701416015625,
+                    1647.034423828125,
+                    506.71197509765625
+                ],
+                "bbox_size": 215.59358525276184,
+                "confidence": 0.03542420268058777,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1634.5125732421875,
+                    478.86492919921875,
+                    1645.2462158203125,
+                    499.2711181640625
+                ],
+                "bbox_size": 219.0327387303114,
+                "confidence": 0.011097694747149944,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
         {},
         {},
         {},
@@ -6033,13 +6796,30 @@
         {
             "0": {
                 "bbox": [
-                    1162.85546875,
-                    509.2497253417969,
-                    1176.669921875,
-                    531.2117919921875
+                    1212.5577392578125,
+                    411.98858642578125,
+                    1226.75146484375,
+                    435.04156494140625
                 ],
-                "bbox_size": 303.39394026994705,
-                "confidence": 0.020907163619995117,
+                "bbox_size": 327.20765098929405,
+                "confidence": 0.045979928225278854,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1213.689697265625,
+                    411.34100341796875,
+                    1226.0460205078125,
+                    430.21954345703125
+                ],
+                "bbox_size": 233.26934306323528,
+                "confidence": 0.03391117602586746,
                 "distances": null,
                 "field_position_m": null,
                 "ground_point_image": null,
@@ -6055,13 +6835,308 @@
         {
             "0": {
                 "bbox": [
-                    579.9047241210938,
-                    259.6939697265625,
-                    589.74462890625,
-                    280.82952880859375
+                    1342.451416015625,
+                    429.8257141113281,
+                    1358.20654296875,
+                    447.3498229980469
                 ],
-                "bbox_size": 207.97188894823194,
-                "confidence": 0.025020157918334007,
+                "bbox_size": 276.0945602506399,
+                "confidence": 0.02695631794631481,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1318.9288330078125,
+                    426.9482116699219,
+                    1334.4517822265625,
+                    443.8576354980469
+                ],
+                "bbox_size": 262.4841274023056,
+                "confidence": 0.14802584052085876,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1295.126953125,
+                    426.46185302734375,
+                    1310.142333984375,
+                    443.9005126953125
+                ],
+                "bbox_size": 261.84811659157276,
+                "confidence": 0.04834269732236862,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1270.91845703125,
+                    427.22845458984375,
+                    1286.31396484375,
+                    443.51385498046875
+                ],
+                "bbox_size": 250.72200894355774,
+                "confidence": 0.020711567252874374,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1247.908203125,
+                    426.89056396484375,
+                    1262.89501953125,
+                    443.4490966796875
+                ],
+                "bbox_size": 248.15968975424767,
+                "confidence": 0.08531785011291504,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1223.7978515625,
+                    425.9308776855469,
+                    1238.4722900390625,
+                    441.6589050292969
+                ],
+                "bbox_size": 230.7999696135521,
+                "confidence": 0.04507185146212578,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    1201.373046875,
+                    419.8105773925781,
+                    1216.429931640625,
+                    443.62939453125
+                ],
+                "bbox_size": 358.6371849104762,
+                "confidence": 0.5008320808410645,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    976.7503051757812,
+                    454.47894287109375,
+                    990.468017578125,
+                    473.65924072265625
+                ],
+                "bbox_size": 263.1098097190261,
+                "confidence": 0.31043699383735657,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {
+            "0": {
+                "bbox": [
+                    936.1646728515625,
+                    470.0019836425781,
+                    951.4974365234375,
+                    485.5989074707031
+                ],
+                "bbox_size": 239.14394706487656,
+                "confidence": 0.0631544217467308,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    915.926513671875,
+                    474.92816162109375,
+                    929.6912841796875,
+                    492.8023681640625
+                ],
+                "bbox_size": 246.03435107320547,
+                "confidence": 0.4041258990764618,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    896.0256958007812,
+                    477.90966796875,
+                    910.7671508789062,
+                    499.58770751953125
+                ],
+                "bbox_size": 319.56584621965885,
+                "confidence": 0.04763944074511528,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    867.6317138671875,
+                    510.90966796875,
+                    879.4617919921875,
+                    529.84130859375
+                ],
+                "bbox_size": 223.96278762817383,
+                "confidence": 0.11321462690830231,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    870.1777954101562,
+                    511.8406677246094,
+                    880.7689819335938,
+                    530.2388916015625
+                ],
+                "bbox_size": 194.85902078077197,
+                "confidence": 0.18202120065689087,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    873.3267822265625,
+                    515.98779296875,
+                    884.5003662109375,
+                    532.9144287109375
+                ],
+                "bbox_size": 189.1311860382557,
+                "confidence": 0.29241156578063965,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    872.3519897460938,
+                    521.043701171875,
+                    884.1069946289062,
+                    534.1773681640625
+                ],
+                "bbox_size": 154.38631962239742,
+                "confidence": 0.04349662736058235,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    887.2432250976562,
+                    516.427490234375,
+                    900.5597534179688,
+                    534.644775390625
+                ],
+                "bbox_size": 242.59099370241165,
+                "confidence": 0.03934444859623909,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    881.39501953125,
+                    517.0739135742188,
+                    900.872314453125,
+                    534.5277099609375
+                ],
+                "bbox_size": 339.95273973047733,
+                "confidence": 0.13594922423362732,
                 "distances": null,
                 "field_position_m": null,
                 "ground_point_image": null,
@@ -6093,186 +7168,567 @@
         {},
         {},
         {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {},
-        {}
+        {
+            "0": {
+                "bbox": [
+                    781.5305786132812,
+                    550.5589599609375,
+                    800.754638671875,
+                    578.3538208007812
+                ],
+                "bbox_size": 534.3300741054118,
+                "confidence": 0.05661354959011078,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    783.139404296875,
+                    556.0863037109375,
+                    799.4049072265625,
+                    582.1971435546875
+                ],
+                "bbox_size": 424.70594197511673,
+                "confidence": 0.21182844042778015,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    786.5106811523438,
+                    556.921142578125,
+                    802.4789428710938,
+                    582.7113647460938
+                ],
+                "bbox_size": 411.825017362833,
+                "confidence": 0.2879122793674469,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    788.5927734375,
+                    551.6198120117188,
+                    819.116455078125,
+                    579.9546508789062
+                ],
+                "bbox_size": 864.8836009204388,
+                "confidence": 0.16615508496761322,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    796.6358642578125,
+                    561.4617919921875,
+                    813.2949829101562,
+                    583.6027221679688
+                ],
+                "bbox_size": 368.848382871598,
+                "confidence": 0.2917943298816681,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    799.6248779296875,
+                    567.948486328125,
+                    810.7247314453125,
+                    582.2283325195312
+                ],
+                "bbox_size": 158.50420095026493,
+                "confidence": 0.37040528655052185,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    992.886962890625,
+                    574.6796264648438,
+                    1004.679443359375,
+                    598.7561645507812
+                ],
+                "bbox_size": 283.9221051335335,
+                "confidence": 0.038315121084451675,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    994.400390625,
+                    578.6375732421875,
+                    1007.5257568359375,
+                    603.5750732421875
+                ],
+                "bbox_size": 327.3138198852539,
+                "confidence": 0.132637619972229,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    1012.7374877929688,
+                    605.6954345703125,
+                    1026.6513671875,
+                    626.680419921875
+                ],
+                "bbox_size": 291.9825552776456,
+                "confidence": 0.060580067336559296,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    993.1435546875,
+                    603.597412109375,
+                    1010.466796875,
+                    627.2958984375
+                ],
+                "bbox_size": 410.53461813926697,
+                "confidence": 0.01383240520954132,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {},
+        {
+            "0": {
+                "bbox": [
+                    942.9703369140625,
+                    613.1353759765625,
+                    956.585205078125,
+                    628.4403076171875
+                ],
+                "bbox_size": 208.37462654709816,
+                "confidence": 0.5103418231010437,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    925.2464599609375,
+                    609.1757202148438,
+                    941.58203125,
+                    634.6722412109375
+                ],
+                "bbox_size": 416.5002363547683,
+                "confidence": 0.04032111167907715,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {
+            "0": {
+                "bbox": [
+                    887.054443359375,
+                    621.447998046875,
+                    903.31201171875,
+                    640.8732299804688
+                ],
+                "bbox_size": 315.8070360571146,
+                "confidence": 0.04927723854780197,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    869.9672241210938,
+                    630.0579223632812,
+                    884.3607788085938,
+                    650.2979125976562
+                ],
+                "bbox_size": 291.3254063129425,
+                "confidence": 0.050387684255838394,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {
+            "0": {
+                "bbox": [
+                    839.2945556640625,
+                    631.3129272460938,
+                    852.9295654296875,
+                    652.7194213867188
+                ],
+                "bbox_size": 291.8777566552162,
+                "confidence": 0.06779838353395462,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    822.7498168945312,
+                    633.0617065429688,
+                    836.8159790039062,
+                    650.7734985351562
+                ],
+                "bbox_size": 249.13693740963936,
+                "confidence": 0.038191039115190506,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    802.5682373046875,
+                    631.2980346679688,
+                    826.8128662109375,
+                    651.9827270507812
+                ],
+                "bbox_size": 501.4926908612251,
+                "confidence": 0.03495726361870766,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    794.029541015625,
+                    636.6820068359375,
+                    805.6043701171875,
+                    650.6864013671875
+                ],
+                "bbox_size": 162.09847337007523,
+                "confidence": 0.12566722929477692,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    776.172119140625,
+                    639.2999877929688,
+                    788.450439453125,
+                    652.0557250976562
+                ],
+                "bbox_size": 156.61902844905853,
+                "confidence": 0.3634273409843445,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {
+            "0": {
+                "bbox": [
+                    739.8094482421875,
+                    640.312744140625,
+                    759.4151000976562,
+                    668.6527099609375
+                ],
+                "bbox_size": 555.6235034689307,
+                "confidence": 0.02627645432949066,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    730.4426879882812,
+                    647.2820434570312,
+                    744.7399291992188,
+                    675.9893188476562
+                ],
+                "bbox_size": 410.43484076857567,
+                "confidence": 0.023966943845152855,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    718.9077758789062,
+                    645.9281616210938,
+                    733.9282836914062,
+                    663.60498046875
+                ],
+                "bbox_size": 265.51479560136795,
+                "confidence": 0.07579462230205536,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    706.3941650390625,
+                    646.5531616210938,
+                    718.921142578125,
+                    661.81005859375
+                ],
+                "bbox_size": 191.1228056922555,
+                "confidence": 0.22170092165470123,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    692.828369140625,
+                    641.630615234375,
+                    705.4840698242188,
+                    662.656982421875
+                ],
+                "bbox_size": 266.10340958833694,
+                "confidence": 0.5509186387062073,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    680.7572021484375,
+                    646.2353515625,
+                    693.1248779296875,
+                    665.6175537109375
+                ],
+                "bbox_size": 239.7127920985222,
+                "confidence": 0.16469860076904297,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {},
+        {
+            "0": {
+                "bbox": [
+                    657.593017578125,
+                    652.4400024414062,
+                    669.1824951171875,
+                    673.7452392578125
+                ],
+                "bbox_size": 246.91656354814768,
+                "confidence": 0.13228636980056763,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    645.8733520507812,
+                    651.810546875,
+                    658.1063842773438,
+                    671.7867431640625
+                ],
+                "bbox_size": 244.36945296823978,
+                "confidence": 0.4995166063308716,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    637.0662231445312,
+                    651.3131103515625,
+                    649.7193603515625,
+                    671.861083984375
+                ],
+                "bbox_size": 259.9963297024369,
+                "confidence": 0.378877192735672,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    625.2862548828125,
+                    654.2575073242188,
+                    638.4092407226562,
+                    673.9523315429688
+                ],
+                "bbox_size": 258.454899340868,
+                "confidence": 0.11630852520465851,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    610.5658569335938,
+                    655.425537109375,
+                    628.1490478515625,
+                    674.508056640625
+                ],
+                "bbox_size": 335.5315841138363,
+                "confidence": 0.011397188529372215,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        },
+        {
+            "0": {
+                "bbox": [
+                    608.1512451171875,
+                    655.142822265625,
+                    618.0042724609375,
+                    673.4200439453125
+                ],
+                "bbox_size": 180.08596497774124,
+                "confidence": 0.06682739406824112,
+                "distances": null,
+                "field_position_m": null,
+                "ground_point_image": null,
+                "shirt_color": null,
+                "team": null
+            }
+        }
     ],
     "goalkeeper": [
         {},

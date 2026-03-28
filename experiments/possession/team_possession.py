@@ -359,6 +359,27 @@ def _fill_short_unknown_gaps(
     return result
 
 
+def _fill_from_last_known_team(values: Sequence[str | None]) -> list[str | None]:
+    result = list(values)
+    last_team: str | None = None
+    for idx, team_id in enumerate(result):
+        if team_id is not None:
+            last_team = team_id
+            continue
+        if last_team is not None:
+            result[idx] = last_team
+
+    first_known = next((team_id for team_id in result if team_id is not None), None)
+    if first_known is None:
+        return result
+
+    for idx, team_id in enumerate(result):
+        if team_id is not None:
+            break
+        result[idx] = first_known
+    return result
+
+
 def _suppress_short_team_segments(
     values: Sequence[str | None],
     min_segment_frames: int,
@@ -412,6 +433,7 @@ def _stabilize_possession_df(
         stable_team_values,
         max_gap_frames=config.fill_unknown_gap_frames,
     )
+    stable_team_values = _fill_from_last_known_team(stable_team_values)
 
     stable_reasons: list[str] = []
     stable_players: list[str | None] = []
@@ -427,6 +449,10 @@ def _stabilize_possession_df(
             continue
         if stable_team is None:
             stable_reasons.append("stabilized_unknown")
+            stable_players.append(None)
+            continue
+        if raw_team is None:
+            stable_reasons.append("filled_from_last_touch_team")
             stable_players.append(None)
             continue
         stable_reasons.append("stabilized_team_segment")
@@ -492,7 +518,7 @@ def infer_team_possession(
 
         touch_candidate: Candidate | None = None
         touch_reason: str | None = None
-        possession_reason = "carry"
+        possession_reason = "last_touch_hold" if current_team is not None else "unknown"
         ball_speed = ball_speeds[frame_id]
         previous_speed = ball_speeds[frame_id - 1] if frame_id > 0 else None
         direction_change = direction_changes[frame_id]
@@ -529,8 +555,11 @@ def infer_team_possession(
                 and best.team_id != current_team
                 and strict_contact
                 and separation >= config.opponent_takeover_margin_px
+                and motion_touch
             )
-            start_touch = current_team is None and strict_contact
+            start_touch = current_team is None and strict_contact and (
+                motion_touch or best.inside_bbox
+            )
             same_player_control = (
                 current_player == best.track_id
                 and loose_contact
@@ -541,7 +570,6 @@ def infer_team_possession(
             )
             immediate_opponent_switch = opponent_takeover_candidate and (
                 best.inside_bbox
-                or motion_touch
                 or best.distance_px <= config.immediate_opponent_switch_distance_px
             )
             confirmed_pending_switch = False
@@ -594,17 +622,10 @@ def infer_team_possession(
             pending_switch_player = None
             pending_switch_count = 0
         else:
-            if current_team is not None:
-                if ball_center is None and (frame_id - last_ball_frame) > config.ball_missing_release_frames:
-                    current_team = None
-                    current_player = None
-                    possession_reason = "ball_missing_timeout"
-                elif ball_center is not None and (frame_id - last_touch_frame) > config.touch_timeout_frames:
-                    current_team = None
-                    current_player = None
-                    possession_reason = "touch_timeout"
             if current_team is None:
                 possession_reason = "unknown"
+            else:
+                possession_reason = "last_touch_hold"
 
         row = {
             "frame_id": int(frame_id),

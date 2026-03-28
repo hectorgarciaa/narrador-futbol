@@ -676,6 +676,12 @@ if __name__ == "__main__":
             "strict_person_class_separation": tracking_cfg.get(
                 "strict_person_class_separation", True
             ),
+            "reserve_penalty_spot_seed_players": tracking_cfg.get(
+                "reserve_penalty_spot_seed_players", False
+            ),
+            "reserve_penalty_spot_seed_match_distance_m": tracking_cfg.get(
+                "reserve_penalty_spot_seed_match_distance_m", 12.0
+            ),
             "require_field_position_for_reassign": tracking_cfg.get(
                 "require_field_position_for_reassign", True
             ),

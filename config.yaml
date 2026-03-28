@@ -125,6 +125,13 @@ tracking:
   lost_time_penalty_max_frames: 10
   # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
   strict_person_class_separation: true
+  # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos
+  # de penalti. No participan en TeamDetector y quedan disponibles hasta que
+  # una detección real compatible por geometría herede ese track.
+  reserve_penalty_spot_seed_players: true
+  # Distancia máxima en metros desde el punto de penalti para absorber una
+  # detección real sobre cada track semilla reservado.
+  reserve_penalty_spot_seed_match_distance_m: 12.0
   # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
   # Si falta field_position, la reasignación se rechaza.
   require_field_position_for_reassign: true

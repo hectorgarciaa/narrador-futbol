@@ -48,6 +48,12 @@ class Tracker:
         self.max_total_tracks = int(
             tracker_conf.get("max_total_tracks", sum(max_tracks_per_class.values()))
         )
+        self.reserve_penalty_spot_seed_players = bool(
+            tracker_conf.get("reserve_penalty_spot_seed_players", False)
+        )
+        self.reserve_penalty_spot_seed_match_distance_m = float(
+            tracker_conf.get("reserve_penalty_spot_seed_match_distance_m", 12.0)
+        )
         self.enforce_internal_class_limits = bool(
             tracker_conf.get("enforce_internal_class_limits", False)
         )
@@ -293,6 +299,54 @@ class Tracker:
                 return canonical_id
         return None
 
+    def _reserved_penalty_spot_field_positions(self):
+        if (
+            not self.reserve_penalty_spot_seed_players
+            or not self.use_field_positions
+            or self.field_projector is None
+        ):
+            return []
+
+        geometry = getattr(self.field_projector, "geometry", None)
+        if geometry is None:
+            return []
+
+        center_y_m = float(getattr(geometry, "center_y_m", geometry.field_width_m / 2.0))
+        penalty_mark_distance_m = float(getattr(geometry, "penalty_mark_distance_m", 11.0))
+        field_length_m = float(getattr(geometry, "field_length_m", 106.0))
+        return [
+            (penalty_mark_distance_m, center_y_m),
+            (field_length_m - penalty_mark_distance_m, center_y_m),
+        ]
+
+    def _build_reserved_penalty_spot_state(self, field_position):
+        return {
+            "bbox": None,
+            "class_name": "player",
+            "last_frame": 0,
+            "team": None,
+            "field_position": tuple(float(v) for v in field_position),
+            "movement_samples": 0,
+            "mean_step_distance": 0.0,
+            "step_per_frame_count": 0,
+            "step_per_frame_mean": 0.0,
+            "step_per_frame_m2": 0.0,
+            "reserved_seed": True,
+            "reserved_seed_match_distance_m": float(
+                max(0.0, self.reserve_penalty_spot_seed_match_distance_m)
+            ),
+            "reserved_seed_origin": "penalty_spot",
+        }
+
+    def _initialize_reserved_penalty_spot_players(self, canonical_state):
+        for field_position in self._reserved_penalty_spot_field_positions():
+            next_free_id = self._next_free_canonical_id(canonical_state)
+            if next_free_id is None:
+                break
+            canonical_state[next_free_id] = self._build_reserved_penalty_spot_state(
+                field_position
+            )
+
     def _is_compatible_class(self, previous_class, new_class):
         if previous_class is None or new_class is None:
             return previous_class == new_class
@@ -374,16 +428,26 @@ class Tracker:
             1,
             current_frame - int(previous_state.get("last_frame", current_frame)),
         )
-        max_lost_frames = self._max_lost_frames_for_class(effective_class)
-        if max_lost_frames is not None and lost_frames > max_lost_frames:
-            return False
         samples = int(previous_state.get("movement_samples", 0))
         mean_step_distance = float(previous_state.get("mean_step_distance", 0.0))
+        reserved_seed = bool(previous_state.get("reserved_seed", False))
+
+        if not reserved_seed:
+            max_lost_frames = self._max_lost_frames_for_class(effective_class)
+            if max_lost_frames is not None and lost_frames > max_lost_frames:
+                return False
 
         if self._use_field_position_for_class(effective_class, previous_field_position):
             max_allowed_jump = self.reassign_min_field_distance_m
         else:
             max_allowed_jump = self.reassign_min_distance
+
+        if reserved_seed:
+            max_allowed_jump = max(
+                max_allowed_jump,
+                float(previous_state.get("reserved_seed_match_distance_m", 0.0)),
+            )
+
         if samples >= self.reassign_min_samples:
             expected_jump = mean_step_distance * lost_frames
             max_allowed_jump = max(
@@ -811,6 +875,21 @@ class Tracker:
         if candidate_class is None:
             return None
 
+        if (
+            candidate_state.get("reserved_seed")
+            and candidate_class == "player"
+            and detection_class in {"player", "goalkeeper"}
+        ):
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=detection_class,
+                new_field_position=detection_field_position,
+            ):
+                return None
+            return detection_class
+
         if self._is_compatible_class(candidate_class, detection_class):
             if not self._is_team_compatible(
                 candidate_state.get("team"),
@@ -883,6 +962,7 @@ class Tracker:
         sorted_candidate_ids = sorted(
             available_ids,
             key=lambda canonical_id: (
+                0 if canonical_state[canonical_id].get("reserved_seed") else 1,
                 max(
                     0,
                     current_frame
@@ -1030,6 +1110,7 @@ class Tracker:
             1
             for state in canonical_state.values()
             if state.get("class_name") == class_name
+            and not state.get("reserved_seed", False)
         )
 
     def _nearest_id_same_class(
@@ -1164,6 +1245,7 @@ class Tracker:
         raw_to_canonical_id = {}
         canonical_to_raw_id = {}
         canonical_state = {}
+        self._initialize_reserved_penalty_spot_players(canonical_state)
         ball_state = None
         for n_frame, detections in enumerate(model_detections):
             detections_sv = sv.Detections.from_ultralytics(detections)
@@ -1331,6 +1413,7 @@ class Tracker:
                     "step_per_frame_count": step_per_frame_count,
                     "step_per_frame_mean": step_per_frame_mean,
                     "step_per_frame_m2": step_per_frame_m2,
+                    "reserved_seed": False,
                 }
                 used_canonical_ids_in_frame.add(canonical_id)
 
