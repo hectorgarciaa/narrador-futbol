@@ -15,6 +15,8 @@ class Evaluator:
     def init_dicts(self, frames, id_frames, id_teams, id_colors, id_bboxes, id_conf, id_bbox_sizes):
         for t, frame_dict in enumerate(frames):
             for tid, info in frame_dict.items():
+                if info.get("synthetic_seed"):
+                    continue
                 id_frames[tid].append(t)
                 id_teams[tid].append(info['team'])
                 id_colors[tid].append(info['shirt_color'])
@@ -30,8 +32,10 @@ class Evaluator:
         speed_values = []
         speed_frames = []    # list of (frame_prev, frame_curr)
 
+        if not frames_seen_sorted:
+            return 0, 0.0, 0.0, 0.0, speed_values, speed_frames
+
         prev = frames_seen_sorted[0]
-        bbox_prev = id_bboxes[tid][0]
 
         for n_frame, f in enumerate(frames_seen_sorted[1:]):
             frame_gap = f - prev - 1
@@ -40,7 +44,16 @@ class Evaluator:
 
             # n_frame starts at 0 for the second observed frame, so we need +1
             # to align with frames_seen_sorted[1:].
+            bbox_prev = id_bboxes[tid][n_frame]
             bbox_current = id_bboxes[tid][n_frame + 1]
+            if (
+                not isinstance(bbox_prev, (list, tuple))
+                or len(bbox_prev) < 4
+                or not isinstance(bbox_current, (list, tuple))
+                or len(bbox_current) < 4
+            ):
+                prev = f
+                continue
             x1, y1, _, _ = bbox_current
             x1_prev, y1_prev, _, _ = bbox_prev
 
@@ -53,7 +66,6 @@ class Evaluator:
             speed_frames.append((prev, f))
 
             prev = f
-            bbox_prev = bbox_current
         
         speeds_np = np.array(speed_values) if len(speed_values) > 0 else np.array([])
 
@@ -153,7 +165,11 @@ class Evaluator:
 
         sizes, size_cv = self.get_bbox_size(tid, id_bbox_sizes)
 
-        mean_conf = float(np.mean(id_conf[tid])) if id_conf.get(tid) else None
+        valid_conf = [
+            value for value in id_conf.get(tid, [])
+            if value is not None
+        ]
+        mean_conf = float(np.mean(valid_conf)) if valid_conf else None
 
         # -------- metric_events as LISTS of events per metric --------
         metrics_events = {}

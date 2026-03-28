@@ -306,7 +306,8 @@ El JSON de tracks se guarda en `output/tracks_json/tracker/<video_sanitizado>_tr
 También se guarda el resumen por vídeo en `output/tracks_json/tracker/<video_sanitizado>_summary.json`.
 Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `data/posiciones_etiquetadas/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`). Ese resumen incluye también `ball_coverage`, para medir en qué fracción del clip el balón quedó trackeado.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
-Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría.
+Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría. Mientras no se absorban, también se escriben en el JSON con `synthetic_seed=true`.
+Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), así que un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
 En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida.
@@ -531,6 +532,7 @@ tracking:
   field_position_match_distance_growth_mode: linear_decay
   field_position_match_distance_lost_exponent: 0.5
   field_position_match_distance_decay_per_frame: 0.5
+  reassign_motion_growth_cap_frames: 12
   strict_person_class_separation: true
   reserve_penalty_spot_seed_players: true
   reserve_penalty_spot_seed_match_distance_m: 12.0
@@ -583,6 +585,7 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `reassign_motion_factor`
 - `reassign_min_distance`
 - `reassign_min_samples`
+- `reassign_motion_growth_cap_frames` (solo aplica a clases sin homografía)
 - `use_field_position_as_primary_cost`
 - `use_bbox_center_for_matching`
 - `bbox_center_distance_weight`

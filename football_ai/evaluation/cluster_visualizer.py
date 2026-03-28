@@ -72,16 +72,21 @@ class ClusterVisualizer:
         for class_name, class_info in tracks.items():
             for n_frame, frame_tracks in enumerate(class_info):
                 for tracker_id, player_dict in frame_tracks.items():
+                    if player_dict.get("synthetic_seed"):
+                        continue
                     if player_dict.get("distances") is None or player_dict.get("shirt_color") is None:
+                        continue
+                    bbox = player_dict.get("bbox")
+                    if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
                         continue
                     row = {
                         'class_name': class_name,
                         'frame': n_frame,
                         'tracker_id': tracker_id,
-                        "x1": player_dict["bbox"][0],
-                        "y1": player_dict["bbox"][1],
-                        "w": player_dict["bbox"][2] - player_dict["bbox"][0],
-                        "h": player_dict["bbox"][3] - player_dict["bbox"][1],
+                        "x1": bbox[0],
+                        "y1": bbox[1],
+                        "w": bbox[2] - bbox[0],
+                        "h": bbox[3] - bbox[1],
                         "bbox_size": player_dict["bbox_size"],
                         "confidence": player_dict["confidence"],
                         "L": player_dict["shirt_color"][0],

@@ -78,6 +78,10 @@ class Drawer:
     
     def draw_detection(self, frame, class_name, data, color, track_id):
         """Draws a single detection on the frame."""
+        if data.get("synthetic_seed"):
+            return
+        if not isinstance(data.get("bbox"), (list, tuple)) or len(data["bbox"]) < 4:
+            return
         x1, y1, x2, y2 = map(int, data["bbox"])
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         label = f"{class_name} #{track_id}"

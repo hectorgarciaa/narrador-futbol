@@ -112,6 +112,10 @@ tracking:
   reassign_motion_factor: 0.75
   reassign_min_distance: 10.0
   reassign_min_samples: 3
+  # Máximo número de frames perdidos que se usa para extrapolar movimiento
+  # en la reasignación canónica. Evita que un ID ausente durante mucho tiempo
+  # vuelva a ser válido por permitir saltos demasiado grandes.
+  reassign_motion_growth_cap_frames: 12
   # Matching de ByteTrack para player/goalkeeper:
   # - false: combina IoU + penalización por distancia en campo (recomendado si
   #   quieres usar señal visual y geométrica a la vez).
@@ -127,7 +131,8 @@ tracking:
   strict_person_class_separation: true
   # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos
   # de penalti. No participan en TeamDetector y quedan disponibles hasta que
-  # una detección real compatible por geometría herede ese track.
+  # una detección real compatible por geometría herede ese track. Mientras eso
+  # no ocurra, se escriben también en el JSON de salida como seeds sintéticas.
   reserve_penalty_spot_seed_players: true
   # Distancia máxima en metros desde el punto de penalti para absorber una
   # detección real sobre cada track semilla reservado.

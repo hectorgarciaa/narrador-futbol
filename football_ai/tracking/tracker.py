@@ -151,6 +151,9 @@ class Tracker:
         self.reassign_min_samples = int(
             tracker_conf.get("reassign_min_samples", 3)
         )
+        self.reassign_motion_growth_cap_frames = self._normalize_optional_positive_int(
+            tracker_conf.get("reassign_motion_growth_cap_frames", 12)
+        )
         self.motion_std_gate_enabled = bool(
             tracker_conf.get("motion_std_gate_enabled", True)
         )
@@ -182,6 +185,41 @@ class Tracker:
         self.reassign_min_field_distance_m = float(
             field_tracking_conf.get("reassign_min_field_distance_m", 4.0)
         )
+        self.field_distance_gate_m = float(
+            field_tracking_conf.get("match_distance_gate_m", 8.0)
+        )
+        self.field_distance_gate_max_lost_frames = self._normalize_optional_positive_int(
+            field_tracking_conf.get("match_distance_max_lost_frames")
+        )
+        raw_field_distance_gate_cap_m = field_tracking_conf.get("match_distance_cap_m")
+        if raw_field_distance_gate_cap_m is None:
+            self.field_distance_gate_cap_m = None
+        else:
+            gate_cap = float(raw_field_distance_gate_cap_m)
+            self.field_distance_gate_cap_m = (
+                gate_cap if np.isfinite(gate_cap) and gate_cap > 0.0 else None
+            )
+        self.field_distance_growth_mode = str(
+            field_tracking_conf.get("match_distance_growth_mode", "power") or "power"
+        ).strip().lower()
+        if self.field_distance_growth_mode not in {"power", "linear_decay"}:
+            self.field_distance_growth_mode = "power"
+        self.field_distance_lost_exponent = float(
+            field_tracking_conf.get("match_distance_lost_exponent", 1.0)
+        )
+        if (
+            not np.isfinite(self.field_distance_lost_exponent)
+            or self.field_distance_lost_exponent <= 0.0
+        ):
+            self.field_distance_lost_exponent = 1.0
+        self.field_distance_decay_per_frame = float(
+            field_tracking_conf.get("match_distance_decay_per_frame", 0.0)
+        )
+        if (
+            not np.isfinite(self.field_distance_decay_per_frame)
+            or self.field_distance_decay_per_frame < 0.0
+        ):
+            self.field_distance_decay_per_frame = 0.0
         self.strict_person_class_separation = bool(
             tracker_conf.get("strict_person_class_separation", True)
         )
@@ -338,6 +376,115 @@ class Tracker:
             "reserved_seed_origin": "penalty_spot",
         }
 
+    @staticmethod
+    def _project_homography_point(point_xy, homography):
+        if point_xy is None or homography is None:
+            return None
+        point = np.asarray(point_xy, dtype=np.float32).reshape(-1)
+        if point.size < 2 or not np.all(np.isfinite(point[:2])):
+            return None
+        try:
+            inverse_homography = np.linalg.inv(np.asarray(homography, dtype=np.float32))
+        except np.linalg.LinAlgError:
+            return None
+
+        homogeneous_point = np.array([point[0], point[1], 1.0], dtype=np.float32)
+        image_point = inverse_homography @ homogeneous_point
+        if not np.all(np.isfinite(image_point)) or abs(float(image_point[2])) < 1e-6:
+            return None
+        return (
+            float(image_point[0] / image_point[2]),
+            float(image_point[1] / image_point[2]),
+        )
+
+    @staticmethod
+    def _scale_point(point_xy, source_shape_hw, target_shape_hw):
+        if point_xy is None:
+            return None
+        source_height, source_width = source_shape_hw
+        target_height, target_width = target_shape_hw
+        if (
+            source_height <= 0
+            or source_width <= 0
+            or target_height <= 0
+            or target_width <= 0
+        ):
+            return None
+        scale_x = float(target_width) / float(source_width)
+        scale_y = float(target_height) / float(source_height)
+        return (float(point_xy[0]) * scale_x, float(point_xy[1]) * scale_y)
+
+    @staticmethod
+    def _seed_bbox_from_ground_point(image_point_original, frame_shape_original):
+        if image_point_original is None or frame_shape_original is None:
+            return None
+        frame_height, frame_width = frame_shape_original
+        if frame_height <= 0 or frame_width <= 0:
+            return None
+
+        x_coord = float(image_point_original[0])
+        y_coord = float(image_point_original[1])
+        if (
+            not np.isfinite(x_coord)
+            or not np.isfinite(y_coord)
+            or x_coord < 0.0
+            or x_coord > float(frame_width)
+            or y_coord < 0.0
+            or y_coord > float(frame_height)
+        ):
+            return None
+
+        bbox_width = max(8.0, min(float(frame_width) * 0.012, 24.0))
+        bbox_height = max(18.0, min(float(frame_height) * 0.05, 48.0))
+        x1 = max(0.0, x_coord - (bbox_width / 2.0))
+        x2 = min(float(frame_width - 1), x_coord + (bbox_width / 2.0))
+        y2 = min(float(frame_height - 1), y_coord)
+        y1 = max(0.0, y2 - bbox_height)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return [x1, y1, x2, y2]
+
+    def _build_reserved_seed_track_payload(self, state, field_projection):
+        field_position = self._field_position_to_tuple(state.get("field_position"))
+        projected_ground_point = None
+        original_ground_point = None
+        frame_shape_original = None
+        if field_projection is not None:
+            projected_ground_point = self._project_homography_point(
+                field_position,
+                field_projection.homography_image_to_field,
+            )
+            frame_shape_original = getattr(field_projection, "frame_shape_original", None)
+            frame_shape_projected = getattr(field_projection, "frame_shape_projected", None)
+            if (
+                projected_ground_point is not None
+                and frame_shape_original is not None
+                and frame_shape_projected is not None
+            ):
+                original_ground_point = self._scale_point(
+                    projected_ground_point,
+                    frame_shape_projected,
+                    frame_shape_original,
+                )
+
+        bbox = self._seed_bbox_from_ground_point(original_ground_point, frame_shape_original)
+        bbox_size = float(self._bbox_area(bbox)) if bbox is not None else 0.0
+        return {
+            "bbox": bbox,
+            "confidence": 0.0,
+            "team": None,
+            "distances": None,
+            "shirt_color": None,
+            "bbox_size": bbox_size,
+            "field_position_m": list(field_position) if field_position is not None else None,
+            "ground_point_image": (
+                [float(projected_ground_point[0]), float(projected_ground_point[1])]
+                if projected_ground_point is not None
+                else None
+            ),
+            "synthetic_seed": True,
+        }
+
     def _initialize_reserved_penalty_spot_players(self, canonical_state):
         for field_position in self._reserved_penalty_spot_field_positions():
             next_free_id = self._next_free_canonical_id(canonical_state)
@@ -395,6 +542,31 @@ class Tracker:
         nx, ny = self._bbox_center(new_bbox)
         return float(((nx - px) ** 2 + (ny - py) ** 2) ** 0.5)
 
+    def _field_distance_gate_for_lost_frames(self, lost_frames):
+        gate_lost_frames = max(1, int(lost_frames))
+        if self.field_distance_gate_max_lost_frames is not None:
+            gate_lost_frames = min(
+                gate_lost_frames,
+                self.field_distance_gate_max_lost_frames,
+            )
+        if self.field_distance_growth_mode == "linear_decay":
+            step_base = self.field_distance_gate_m
+            decay = self.field_distance_decay_per_frame
+            gate = 0.0
+            for step_idx in range(gate_lost_frames):
+                step = step_base - (decay * step_idx)
+                if step <= 0.0:
+                    break
+                gate += step
+            gate = max(step_base, gate)
+        else:
+            growth = float(gate_lost_frames) ** self.field_distance_lost_exponent
+            gate = self.field_distance_gate_m * growth
+
+        if self.field_distance_gate_cap_m is not None:
+            gate = min(gate, self.field_distance_gate_cap_m)
+        return float(gate)
+
     def _is_motion_compatible(
         self,
         previous_state,
@@ -428,17 +600,30 @@ class Tracker:
             1,
             current_frame - int(previous_state.get("last_frame", current_frame)),
         )
+        motion_growth_frames = lost_frames
+        if self.reassign_motion_growth_cap_frames is not None:
+            motion_growth_frames = min(
+                lost_frames,
+                self.reassign_motion_growth_cap_frames,
+            )
         samples = int(previous_state.get("movement_samples", 0))
         mean_step_distance = float(previous_state.get("mean_step_distance", 0.0))
         reserved_seed = bool(previous_state.get("reserved_seed", False))
+        uses_field_position = self._use_field_position_for_class(
+            effective_class,
+            previous_field_position,
+        )
 
         if not reserved_seed:
             max_lost_frames = self._max_lost_frames_for_class(effective_class)
             if max_lost_frames is not None and lost_frames > max_lost_frames:
                 return False
 
-        if self._use_field_position_for_class(effective_class, previous_field_position):
-            max_allowed_jump = self.reassign_min_field_distance_m
+        if uses_field_position:
+            max_allowed_jump = max(
+                self.reassign_min_field_distance_m,
+                self._field_distance_gate_for_lost_frames(lost_frames),
+            )
         else:
             max_allowed_jump = self.reassign_min_distance
 
@@ -448,8 +633,8 @@ class Tracker:
                 float(previous_state.get("reserved_seed_match_distance_m", 0.0)),
             )
 
-        if samples >= self.reassign_min_samples:
-            expected_jump = mean_step_distance * lost_frames
+        if not uses_field_position and samples >= self.reassign_min_samples:
+            expected_jump = mean_step_distance * motion_growth_frames
             max_allowed_jump = max(
                 max_allowed_jump,
                 expected_jump * self.reassign_motion_factor,
@@ -457,7 +642,7 @@ class Tracker:
 
         # Gate estadístico por velocidad (distancia por frame):
         # bloquea saltos extremos respecto al histórico del propio track.
-        if self.motion_std_gate_enabled:
+        if self.motion_std_gate_enabled and not uses_field_position:
             limits_per_frame = []
 
             track_stats_count = int(previous_state.get("step_per_frame_count", 0))
@@ -487,12 +672,12 @@ class Tracker:
 
             if limits_per_frame:
                 max_per_frame = min(limits_per_frame)
-                stats_jump_limit = max_per_frame * lost_frames
+                stats_jump_limit = max_per_frame * motion_growth_frames
                 # Allow statistical gate to be stricter than base min jump.
                 # Keep only a small numerical floor to avoid over-constraining.
                 stats_jump_limit = max(
                     stats_jump_limit,
-                    self.motion_std_floor * lost_frames,
+                    self.motion_std_floor * motion_growth_frames,
                 )
                 max_allowed_jump = min(max_allowed_jump, stats_jump_limit)
 
@@ -1324,6 +1509,12 @@ class Tracker:
                 metadata,
             ):
                 previous_owner_raw_id = canonical_to_raw_id.get(canonical_id)
+                previous_canonical_id = raw_to_canonical_id.get(raw_tracker_id)
+                if (
+                    previous_canonical_id is not None
+                    and previous_canonical_id != canonical_id
+                ):
+                    canonical_to_raw_id.pop(previous_canonical_id, None)
                 if (
                     previous_owner_raw_id is not None
                     and previous_owner_raw_id != raw_tracker_id
@@ -1546,6 +1737,16 @@ class Tracker:
                     pending["detected_team"],
                     pending.get("field_position"),
                     pending["metadata"],
+                )
+
+            for canonical_id, state in canonical_state.items():
+                if canonical_id in used_canonical_ids_in_frame:
+                    continue
+                if not state.get("reserved_seed", False):
+                    continue
+                tracks["player"][n_frame][canonical_id] = self._build_reserved_seed_track_payload(
+                    state,
+                    field_projection,
                 )
 
             if detections.boxes is not None and len(detections.boxes) > 0:
