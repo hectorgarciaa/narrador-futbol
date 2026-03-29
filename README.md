@@ -55,6 +55,7 @@ narrador-futbol/
 ├── football_ai/            # Paquete principal (toda la lógica de negocio)
 │   ├── core/               # Configuración, logging, serialización
 │   ├── detection/          # Wrapper YOLO + cabeza DetectR8 para balón
+│   ├── positions/          # Lógica de roles posicionales y estabilización online
 │   ├── tracking/           # Tracker (orquestador) + ByteTrack extendido
 │   ├── identification/     # ShirtDetector (KMeans LAB) + TeamDetector
 │   ├── evaluation/         # Métricas por track y comparador de experimentos

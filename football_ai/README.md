@@ -9,6 +9,7 @@ football_ai/
 ├── __init__.py
 ├── core/           # Configuración global, logging centralizado, serialización
 ├── detection/      # Inferencia YOLO (jugadores, árbitros, balón)
+├── positions/      # Roles posicionales online, estabilización y artefactos CSV/PNG
 ├── reference_points/ # Calibración del campo y proyección a coordenadas 2D reales
 ├── tracking/       # Pipeline completo de tracking multi-objeto con ByteTrack
 ├── identification/ # Identificación de equipo por color de camiseta (KMeans)
@@ -22,6 +23,7 @@ football_ai/
 |---|---|---|
 | [`core`](core/README.md) | Carga de `config.yaml`, logging, conversión a JSON | `Config`, `Logger`, `convert_to_serializable` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
+| [`positions`](positions/README.md) | Inferencia online de roles, estabilización táctica y exportes/plots de posiciones | `OnlineSpecialSeedRoleAssigner` |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
 | [`tracking`](tracking/README.md) | Orquestación detección → equipo → proyección 2D → ByteTrack → tracks | `Tracker`, `ByteTrack` |
 | [`identification`](identification/README.md) | Extracción de color de camiseta y asignación de equipo | `ShirtDetector`, `TeamDetector` |
