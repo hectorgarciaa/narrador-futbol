@@ -181,6 +181,16 @@ python scripts/data/download_models.py
 python scripts/data/download_datasets.py
 ```
 
+### Paso 8: Descargar dataset sintético SoccerSynth (SpiideoSynLoc)
+Para obtener un modelo YOLO más robusto, se recomienda pre-entrenarlo con el dataset sintético SoccerSynth. Su descarga es manual:
+1. Regístrate en [research.spiideo.com](https://research.spiideo.com/).
+2. Accede al apartado del dataset **Spiideo SoccerNet SynLoc**.
+3. Acepta los términos y descarga manualmente los siguientes archivos `.zip` en la sección **FullHD Images**:
+   - `train.zip`, `val.zip`, `test.zip`
+   - `annotations.zip` (desde la sección Annotations)
+4. Crea la carpeta `data/detection/SoccerSynth/SpiideoSynLoc` en este repositorio.
+5. Mueve los `.zip` descargados a esa carpeta y descomprímelos todos ahí.
+
 ### Seleccionar intérprete en VS Code
 1. **Ctrl+Shift+P** → **Python: Select Interpreter**
 2. Si no aparece `.venv`, selecciona **"Enter interpreter path..."**

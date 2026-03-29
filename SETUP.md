@@ -36,11 +36,18 @@ python scripts/data/download_models.py
 ```
 
 ## 4. Descarga de Datasets (Opcional - Para entrenamiento)
-Si necesitas re-entrenar los modelos de detección:
+Si necesitas re-entrenar los modelos de detección, el proyecto usa el dataset de DFL Bundesliga en Roboflow por defecto:
 
 ```powershell
 python scripts/data/download_datasets.py
 ```
+
+**Dataset sintético (SoccerSynth/SpiideoSynLoc)** (altamente recomendado para pre-entrenamiento):
+Al requerir aceptación de licencia, la descarga se hace manualmente:
+1. Crea una cuenta en [research.spiideo.com](https://research.spiideo.com/).
+2. Ve a la página del dataset *Spiideo SoccerNet SynLoc*.
+3. Descarga `annotations.zip` y los zips de **FullHD Images** (`train.zip`, `val.zip`, `test.zip`).
+4. Descomprímelos todos dentro de la nueva carpeta: `data/detection/SoccerSynth/SpiideoSynLoc`.
 
 ## 5. Ejecución del Pipeline de Tracking (Inferencia)
 Para procesar un vídeo de prueba, realizar el tracking y generar el output anotado:
