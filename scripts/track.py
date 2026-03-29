@@ -1950,7 +1950,7 @@ if __name__ == "__main__":
     
     try:
         # Get paths and parameters from config
-        MODEL_PATH = str(config.get_path('paths', 'models', 'finetuned_player'))
+        MODEL_PATH = str(config.get_path('paths', 'models', 'modelo_base'))
         VIDEO_PATH, video_source = resolve_video_path(config, args.video_shortcut)
         OUTPUT = build_output_video_path(config, VIDEO_PATH)
         OUTPUT_PATH_NAMED, OUTPUT_PATH_LEGACY = build_tracks_output_paths(
