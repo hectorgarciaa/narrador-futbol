@@ -1841,6 +1841,8 @@ def predict_roles_for_video(
 ) -> dict[str, Any]:
     project_root = find_project_root(project_root)
     video_path = Path(video_path)
+    if expected_roles_by_team is None:
+        expected_roles_by_team = _expected_roles_by_team_from_config(project_root)
     device = _select_device()
     checkpoint = _load_checkpoint(model_path=model_path, device=device)
 
@@ -2004,6 +2006,8 @@ def predict_roles_for_tracks_payload(
 ) -> dict[str, Any]:
     project_root = find_project_root(project_root)
     video_path = Path(video_path)
+    if expected_roles_by_team is None:
+        expected_roles_by_team = _expected_roles_by_team_from_config(project_root)
     device = _select_device()
     checkpoint = _load_checkpoint(model_path=model_path, device=device)
 
@@ -2121,6 +2125,22 @@ def predict_roles_for_tracks_payload(
         "model_path": str(model_path),
         "video_path": str(video_path),
     }
+
+
+def _expected_roles_by_team_from_config(
+    project_root: Path,
+) -> dict[str, list[str]] | None:
+    config = Config.from_yaml(project_root / "config.yaml")
+    raw_mapping = config.get("tracking", "expected_roles_by_team", default=None)
+    if not isinstance(raw_mapping, dict):
+        return None
+
+    normalized: dict[str, list[str]] = {}
+    for team_id, roles in raw_mapping.items():
+        if not isinstance(roles, (list, tuple)):
+            continue
+        normalized[str(team_id)] = [str(role) for role in roles]
+    return normalized or None
 
 
 def _visualization_colors_from_config(project_root: Path) -> dict[str, tuple[int, int, int]]:

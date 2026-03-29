@@ -160,8 +160,8 @@ tracking:
   # Si se define, el Set Transformer ajusta la asignación estable a estas plazas
   # usando Hungarian, igual que en experiments/set_transformer.ipynb.
   expected_roles_by_team:
-    Real Madrid: ["POR", "CD", "CI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
-    Wolfsburgo: ["POR", "CD", "CI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
   # Congela un role estable por ID usando sus primeras observaciones visibles.
   # Si una clase domina pronto, se fija antes; si no, se congela al llegar a
   # esta ventana máxima de observaciones del track.

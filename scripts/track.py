@@ -581,8 +581,8 @@ DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH = (
 DEFAULT_EXPECTED_ROLES_BY_TEAM = {
     "Real Madrid": [
         "POR",
-        "CD",
-        "CI",
+        "LD",
+        "LI",
         "DFC_DER",
         "DFC_IZQ",
         "DFC_CENT",
@@ -594,8 +594,8 @@ DEFAULT_EXPECTED_ROLES_BY_TEAM = {
     ],
     "Wolfsburgo": [
         "POR",
-        "CD",
-        "CI",
+        "LD",
+        "LI",
         "DFC_DER",
         "DFC_IZQ",
         "DFC_CENT",

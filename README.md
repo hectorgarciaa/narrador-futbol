@@ -553,8 +553,8 @@ tracking:
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   expected_roles_by_team:
-    Real Madrid: ["POR", "CD", "CI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
-    Wolfsburgo: ["POR", "CD", "CI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
   require_field_position_for_reassign: true
   max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
   motion_std_gate_enabled: true
