@@ -65,6 +65,7 @@ paths:
     base: "output"
     videos: "output/videos"
     tracks_json: "output/tracks_json"
+    role_artifacts: "output/tracker"
     prueba_tracker: "output/pruebaTracker"
     prueba_deteccion_yolo: "output/pruebaDeteccionYolo"
     prueba_finetuning: "output/pruebaFinetuning"
@@ -161,13 +162,26 @@ tracking:
   # Si se define, el Set Transformer ajusta la asignación estable a estas plazas
   # usando Hungarian, igual que en experiments/set_transformer.ipynb.
   expected_roles_by_team:
-    Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
   # Congela un role estable por ID usando sus primeras observaciones visibles.
   # Si una clase domina pronto, se fija antes; si no, se congela al llegar a
   # esta ventana máxima de observaciones del track.
-  role_stabilization_window_frames: 400
-  role_stabilization_min_observations: 400
+  # Estrategia para asignar las plazas de expected_roles_by_team cuando varios
+  # jugadores están listos para congelarse a la vez:
+  # - hungarian: optimiza el conjunto completo por probabilidad media
+  # - greedy: asigna plaza a plaza por prioridad local
+  # - ratio_priority: hace una foto global al llegar a role_stabilization_window_frames,
+  #   transfiere roles no válidos y plazas válidas ya ocupadas a la siguiente
+  #   plaza válida libre del ranking y asigna iterativamente por ratio acumulado
+  #   y exige un ratio mínimo también en la plaza final elegida. Si aún quedan
+  #   plazas libres, resuelve los descartes restantes con una asignación óptima.
+  role_stabilization_expected_roles_assignment: "ratio_priority"
+  role_stabilization_expected_roles_min_ratio: 0.60
+  role_stabilization_expected_roles_min_final_ratio: 0.20
+  role_stabilization_expected_roles_min_count: 300
+  role_stabilization_window_frames: 600
+  role_stabilization_min_observations: 600
   role_stabilization_vote_ratio: 0.7
   # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
   # Si falta field_position, la reasignación se rechaza.

@@ -5,6 +5,14 @@ import cv2
 
 logger = logging.getLogger(__name__)
 
+
+def _format_role_overlay_label(value):
+    token = str(value).strip().upper().replace("-", "_").replace(" ", "_")
+    token = "_".join(part for part in token.split("_") if part)
+    if token in {"MC_IZQ", "MC_DCHO", "DC_IZQ", "DC_DCHO"}:
+        return token
+    return str(value)
+
 class Drawer:
     def __init__(self, colors, default_color=(255, 255, 255)):
         self.colors = colors
@@ -100,9 +108,14 @@ class Drawer:
         predicted_role = data.get("predicted_role")
         assignment_method = data.get("assignment_method")
         expected_role_slot = data.get("expected_role_slot")
-        constrained_expected_role = bool(assignment_method) or bool(expected_role_slot)
+        display_role_slot = data.get("display_role_slot")
+        constrained_expected_role = (
+            bool(assignment_method) or bool(expected_role_slot) or bool(display_role_slot)
+        )
 
-        if constrained_expected_role and predicted_role:
+        if constrained_expected_role and display_role_slot:
+            info_lines.append(f"role: {_format_role_overlay_label(display_role_slot)}")
+        elif constrained_expected_role and predicted_role:
             info_lines.append(f"role: {predicted_role}")
         elif predicted_role_frame and predicted_role:
             if str(predicted_role_frame) == str(predicted_role):
