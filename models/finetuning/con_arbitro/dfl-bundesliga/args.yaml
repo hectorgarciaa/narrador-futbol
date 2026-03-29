@@ -1,7 +1,7 @@
 task: detect
 mode: train
-model: ../../models/yolo/v11/yolov11m.pt
-data: ../../data/detection/FootBall-Detection-2/data.yaml
+model: /home/hegarc04/narrador-futbol/models/yolo/v11/yolo11m.pt
+data: data/detection/DFL-Bundesliga,-soccer,-football-1/data.yaml
 epochs: 50
 time: null
 patience: 100
@@ -10,11 +10,11 @@ imgsz: 640
 save: true
 save_period: -1
 cache: false
-device: cpu
+device: null
 workers: 8
-project: ../../models/finetuning/v11/finetuningv11m
-name: finetuning
-exist_ok: false
+project: models/finetuning
+name: dfl-bundesliga
+exist_ok: true
 pretrained: true
 optimizer: auto
 verbose: true
@@ -29,7 +29,7 @@ amp: true
 fraction: 1.0
 profile: false
 freeze: null
-multi_scale: false
+multi_scale: 0.0
 compile: false
 overlap_mask: true
 mask_ratio: 4
@@ -43,6 +43,7 @@ max_det: 300
 half: false
 dnn: false
 plots: true
+end2end: null
 source: null
 vid_stride: 1
 stream_buffer: false
@@ -82,6 +83,8 @@ cls: 0.5
 dfl: 1.5
 pose: 12.0
 kobj: 1.0
+rle: 1.0
+angle: 1.0
 nbs: 64
 hsv_h: 0.015
 hsv_s: 0.7
@@ -103,4 +106,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: C:\Users\hecto\UNI\4\TFG\narrador-futbol\models\finetuning\v11\finetuningv11m\finetuning
+save_dir: /home/hegarc04/narrador-futbol/runs/detect/models/finetuning/dfl-bundesliga

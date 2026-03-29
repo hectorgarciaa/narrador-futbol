@@ -4,13 +4,18 @@
 paths:
   # Modelos YOLO
   models:
-    yolo_base: "models/yolo/v11/yolov11m.pt"
+    yolo_base: "models/yolo/v11/yolo11m.pt"
+    
     yolo_v8_m: "models/yolo/v8/yolov8m.pt"
+    yolo_v8_l: "models/yolo/v8/yolov8l.pt"
     yolo_v8_x: "models/yolo/v8/yolov8x.pt"
-    yolo_v11_m: "models/yolo/v11/yolov11m.pt"
-    yolo_v11_x: "models/yolo/v11/yolov11x.pt"
-    finetuned_player: "models/finetuning/yolov11m/weights/best.pt"
-    finetuned_ball: "models/finetuning-balon/v11/yolov11m/weights/best.pt"
+    
+    yolo_v11_m: "models/yolo/v11/yolo11m.pt"
+    yolo_v11_l: "models/yolo/v11/yolo11l.pt"
+    yolo_v11_x: "models/yolo/v11/yolo11x.pt"
+
+    finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
+    finetuned_ball: "models/finetuning-balon/v11/yolo11m/weights/best.pt"
   
   # Datos
   data:
@@ -21,6 +26,7 @@ paths:
 
     video_08fd33: "data/partidoPrueba/08fd33_4.mp4"
     video_08fd33_medio: "data/partidoPrueba/08fd33_4_medio.mp4"
+
     # Clips para dataset de posiciones (data/partidosPosiciones)
     video_test_1: "data/partidosPosiciones/test (1).mp4"
     video_test_2: "data/partidosPosiciones/test (2).mp4"
@@ -36,16 +42,22 @@ paths:
     video_test_26: "data/partidosPosiciones/test (26).mp4"
     video_test_27: "data/partidosPosiciones/test (27).mp4"
     video_test_29: "data/partidosPosiciones/test (29).mp4"
+
     dataset_football_ai: "data/detection/football-ai-2/data.yaml"
     dataset_football_detection: "data/detection/FootBall-Detection-2/data.yaml"
+    dataset_soccersynth: "data/detection/SoccerSynth/data.yaml"
+    dataset_football_dfl: "data/detection/DFL-Bundesliga,-soccer,-football-1/data.yaml"
+    dataset_football_dfl_2clases: "data/detection/DFL-Bundesliga-2clases/data.yaml"
+    dataset_soccersynth_2clases: "data/detection/SoccerSynth_YOLO_2clases/data.yaml"
+
     download_detection_output: "data/detection"
   
   # Modelos descargados
   models_download:
     base_dir: "models/yolo"
     versions:
-      v8: ["yolov8m", "yolov8l", "yolov8x"]
-      v11: ["yolov11m", "yolov11l", "yolov11x"]
+      v8: ["yolov8m"]
+      v11: ["yolo11m"]
 
   # Salidas
   output:
@@ -258,14 +270,25 @@ visualization:
   # Tamaño de fuente para etiquetas
   font_scale: 0.5
 
-# Configuración de fine-tuning
+# Configuración de fine-tuning (Pipeline secuencial)
 finetuning:
-  # Número de épocas para entrenamiento
-  epochs: 50
-  # Tamaño de batch
-  batch: 16
-  # Tamaño de imagen
-  imgsz: 640
+  phases:
+    - name: "sinteticos"
+      enabled: true
+      dataset: "data/detection/SoccerSynth_YOLO_2clases/data.yaml"
+      epochs: 40
+      batch: 8
+      imgsz: 1280
+      output_name: "sin_arbitro/sinteticos"
+      
+    - name: "dfl-bundesliga"
+      enabled: true
+      dataset: "data/detection/DFL-Bundesliga-2clases/data.yaml"
+      epochs: 100
+      batch: 16
+      imgsz: 640
+      output_name: "sin_arbitro/dfl-bundesliga"
+
 
 # Logging
 logging:
