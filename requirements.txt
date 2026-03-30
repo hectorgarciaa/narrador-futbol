@@ -15,6 +15,7 @@ sympy>=1.13.0
 
 # Data Processing and Analysis
 pandas>=2.2.0
+pyarrow>=18.0.0
 
 # Visualization
 plotly>=5.18.0

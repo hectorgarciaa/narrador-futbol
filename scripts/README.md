@@ -88,6 +88,34 @@ Es el script principal del proyecto y sirve como referencia de cómo usar el paq
 
 ---
 
+## Scripts de acciones
+
+### `actions/convert_tracks_to_pathcrf.py` — Adaptador `tracks.json` → PathCRF
+
+**Objetivo:** transformar la salida JSON del tracker actual en un parquet ancho compatible con el formato que espera `PathCRF`.
+
+**CLI:**
+```bash
+python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
+```
+
+**Opciones útiles:**
+- `--output-path /ruta/salida.parquet`: permite guardar el parquet en una ruta concreta.
+- `--fps 25`: controla los `timestamp`, velocidades y aceleraciones derivadas.
+
+**Flujo:**
+1. Lee el `tracks.json` generado por `scripts/track.py`.
+2. Fusiona `player` y `goalkeeper` en 22 slots fijos (`home_1..11`, `away_1..11`) y conserva 3 árbitros (`referee_1..3`).
+3. Interpola huecos internos con coordenadas de campo (`field_position_m`) y rellena los slots que nunca aparecen con una plantilla simple de formación alineada al equipo visible.
+4. Genera una trayectoria aproximada del balón y del portador actual a partir del bbox del balón y el jugador más cercano visible.
+5. Exporta:
+   - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.parquet`
+   - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.summary.json`
+
+**Limitación importante:** como el `tracks.json` actual no proyecta el balón al campo, `ball_x/ball_y` es una estimación basada en el portador inferido y no una reconstrucción física exacta.
+
+---
+
 ### `track_partidos_posiciones.py` — Batch de tracking (partidosPosiciones o Kaggle DFL)
 
 **Objetivo:** ejecutar `scripts/track.py` automáticamente en lote:

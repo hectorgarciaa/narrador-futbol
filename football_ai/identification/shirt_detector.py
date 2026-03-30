@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 class ShirtDetector:
-    def __init__(self, n_clusters=2, init='k-means++', n_init=10, random_state=0):
+    def __init__(self, n_clusters=2, init='k-means++', n_init=5, random_state=0):
         self.km = KMeans(n_clusters=n_clusters, init=init, n_init=n_init,
                          random_state=random_state)
 
@@ -28,4 +28,4 @@ class ShirtDetector:
         background_label = unique_labels[np.argmax(counts)]
         shirt_label = 1 - background_label
         shirt_color = centers[shirt_label]
-        return shirt_color
+        return np.asarray(shirt_color, dtype=np.float32)

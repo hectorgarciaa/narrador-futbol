@@ -7,6 +7,7 @@ Paquete Python principal del sistema de narración de fútbol con IA. Contiene t
 ```
 football_ai/
 ├── __init__.py
+├── actions/        # Adaptadores y utilidades para datasets de acciones (PathCRF)
 ├── core/           # Configuración global, logging centralizado, serialización
 ├── detection/      # Inferencia YOLO (jugadores, árbitros, balón)
 ├── positions/      # Roles posicionales online, estabilización y artefactos CSV/PNG
@@ -22,6 +23,7 @@ football_ai/
 | Módulo | Responsabilidad principal | Clases clave |
 |---|---|---|
 | [`core`](core/README.md) | Carga de `config.yaml`, logging, conversión a JSON | `Config`, `Logger`, `convert_to_serializable` |
+| [`actions`](actions/README.md) | Adaptación de `tracks.json` a datasets de acciones y puente con PathCRF | `PathCRFTracksAdapter` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
 | [`positions`](positions/README.md) | Inferencia online de roles, estabilización táctica y exportes/plots de posiciones | `OnlineSpecialSeedRoleAssigner` |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |

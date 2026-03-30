@@ -54,6 +54,7 @@ narrador-futbol/
 │
 ├── football_ai/            # Paquete principal (toda la lógica de negocio)
 │   ├── core/               # Configuración, logging, serialización
+│   ├── actions/            # Adaptadores de tracking a datasets de acciones (PathCRF)
 │   ├── detection/          # Wrapper YOLO + cabeza DetectR8 para balón
 │   ├── positions/          # Lógica de roles posicionales y estabilización online
 │   ├── tracking/           # Tracker (orquestador) + ByteTrack extendido
@@ -495,6 +496,12 @@ python scripts/detect_ball.py
 ```bash
 python scripts/train/finetune_player.py
 ```
+
+### Adaptar `tracks.json` al formato PathCRF
+```bash
+python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
+```
+Este paso genera un parquet ancho en `football_ai/actions/pathcrf/data/narrador/tracking_processed/` con 22 slots fijos de jugadores, 3 árbitros, balón aproximado y variables de estado por frame. Si faltan tracks en algún frame, el adaptador interpola huecos internos y rellena ausencias persistentes con una plantilla simple de formación alineada al equipo visible.
 
 ### Grid search de hiperparámetros del tracker
 ```bash

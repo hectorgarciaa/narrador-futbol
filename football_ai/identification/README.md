@@ -37,34 +37,36 @@ Los parámetros `n_clusters`, `init`, `n_init` y `random_state` son configurable
 ## `team_detector.py` — `TeamDetector`
 
 ### Objetivo
-Asignar cada detección del modelo YOLO al equipo correspondiente y mantener un estimado del color real de camiseta de cada equipo que se refina progresivamente durante el vídeo.
+Asignar cada detección del modelo YOLO al equipo correspondiente a partir del color dominante de la camiseta y, cuando no se usan referencias fijas, aprender automáticamente los colores de equipo mediante clustering.
 
 ### Implementación
 
-#### 1. Modos de asignación
+#### 1. Inicialización y configuración
 
-`TeamDetector` soporta dos estrategias:
+La implementación actual se configura desde `config.yaml -> color_clustering` y expone estos parámetros principales:
 
-- `reference` (compatibilidad): usa colores de referencia (`teams` en `config.yaml` o `--team-colors`) y ajuste adaptativo.
-- `auto-bootstrap`: ignora nombres de equipo predefinidos, agrupa colores de camiseta en los frames iniciales y fija una referencia robusta por equipo para todo el vídeo (nombres neutrales, p. ej. `Equipo 1`, `Equipo 2`).
+- `n_teams`: número de equipos/clusters a separar.
+- `with_ref`: si `true`, reordena los clusters aprendidos usando `team_colors` como referencia externa.
+- `team_colors`: colores LAB de referencia opcionales.
+- `min_samples`: número mínimo de muestras antes de fijar clusters.
+- `min_size_cluster`: tamaño mínimo exigido para cada cluster válido.
+- `candidate_classes`: clases que participan en la inferencia de equipo.
 
-En ambos modos, por defecto solo participan `player` y `goalkeeper` en la inferencia de equipo.
+Por defecto solo se intentan clasificar detecciones cuya clase esté en `candidate_classes`.
 
-#### 2. Sistema de confirmación adaptativo (`update_team_colors`)
-Antes de que un equipo tenga suficientes muestras, el color de referencia puede ser impreciso. El sistema:
-1. Extrae el color de camiseta del jugador con `ShirtDetector`.
-2. Calcula la distancia al equipo más cercano.
-3. Agrupa muestras similares (distancia < `color_tolerance` en espacio LAB).
-4. Cuando un grupo acumula ≥ `confirmation_threshold` detecciones, **actualiza el color de referencia del equipo** al centroide de ese grupo.
-5. Ese equipo queda marcado como "confirmado" y su color ya no se actualiza más.
+#### 2. Aprendizaje de colores (`update_team_colors`)
+Cuando se acumulan al menos `min_samples` colores de camiseta:
+1. Se aplica `KMeans` sobre las muestras LAB recogidas.
+2. Si aparece un cluster demasiado pequeño (`< min_size_cluster`), se considera ruido y se reintenta sobre el cluster mayor.
+3. La referencia final de cada equipo se calcula con la **mediana** de los colores del cluster.
+4. Si `with_ref=true`, esas referencias se emparejan con `team_colors`; si no, se nombran de forma neutral (`Equipo 1`, `Equipo 2`, ...).
 
-Esto permite que el sistema se adapte automáticamente al color exacto de las camisetas en las condiciones de iluminación del partido, en lugar de depender únicamente de los colores precalibrados.
-En `auto-bootstrap`, tras cerrar bootstrap, la referencia de cada equipo se calcula como **mediana por cluster** y queda fija para evitar cambios de etiqueta durante el vídeo. Además, se exige un mínimo de muestras por cluster (por defecto 4): si aparece un cluster pequeño (<=3), se re-clusteriza sobre el cluster grande para evitar que outliers (p. ej. árbitros) dominen un equipo.
+Hasta que el clustering queda fijado, `detect_teams` puede devolver `team=None` para las detecciones candidatas si no hay suficientes muestras.
 
 #### 3. Asignación (`assign_team`)
-Con los colores (iniciales o confirmados), asigna el equipo por **distancia euclidiana mínima en espacio RGB** entre el color de camiseta detectado y los colores de referencia actualizados.
+Una vez disponibles las referencias, la asignación se hace por **distancia euclidiana mínima en espacio LAB** entre el color detectado y los colores de equipo aprendidos.
 
-#### 4. Extracción de región de camiseta (`get_team_of_players`)
+#### 4. Extracción de región de camiseta
 El crop que se analiza es el **50% superior** del bounding box del jugador. Esto excluye el pantalón, las botas y el césped, que introducían ruido en el clustering.
 
 ```python
@@ -72,21 +74,21 @@ from football_ai.identification import TeamDetector
 import numpy as np
 
 td = TeamDetector(
-    team_colors_refs={
+    n_teams=2,
+    with_ref=True,
+    team_colors={
         "Real Madrid": np.array([255, 127, 127]),
         "Wolfsburgo":  np.array([224, 77, 196])
     },
-    confirmation_threshold=3,   # de config.yaml: color_clustering.confirmation_threshold
-    color_tolerance=25,         # de config.yaml: color_clustering.color_tolerance
-    assignment_mode="auto-bootstrap",
-    auto_bootstrap_frames=1,
-    auto_bootstrap_min_samples=12
+    min_samples=60,
+    min_size_cluster=4,
+    candidate_classes=["player"]
 )
 
 # frame_detections es el resultado YOLO de un frame (objeto Results)
 team_info_list = td.detect_teams(frame_detections, show_plot=False)
 # → lista con un dict por detección:
-# [{"class": "player", "team": "Real Madrid", "distances": {...}, "shirt_color": np.array, "bbox_size": int}, ...]
+# [{"class": "player", "team": "Real Madrid", "distances": {...}, "shirt_color": [L, A, B], "bbox_size": float}, ...]
 ```
 
 #### 5. Visualización de depuración (`visualize_shirt_clusters`)

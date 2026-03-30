@@ -26,7 +26,6 @@ class Tracker:
         model_path,
         conf,
         tracker_conf,
-        team_colors,
         team_detector_conf=None,
         ball_min_conf=0.01,
         max_tracks_per_class=None,
@@ -42,7 +41,7 @@ class Tracker:
 
         self.model = Detector(model_path, conf)
         # Compatibilidad: nueva convención snake_case y alias legacy camelCase.
-        self.team_detector = TeamDetector(team_colors, **team_detector_conf)
+        self.team_detector = TeamDetector(**team_detector_conf)
         self.teamDetector = self.team_detector
         self.max_tracks_per_class = max_tracks_per_class
         self.max_total_tracks = int(
