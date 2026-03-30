@@ -43,30 +43,41 @@ Asignar cada detección del modelo YOLO al equipo correspondiente a partir del c
 
 #### 1. Inicialización y configuración
 
-La implementación actual se configura desde `config.yaml -> color_clustering` y expone estos parámetros principales:
+La implementación actual combina dos fuentes de configuración:
 
-- `n_teams`: número de equipos/clusters a separar.
-- `with_ref`: si `true`, reordena los clusters aprendidos usando `team_colors` como referencia externa.
-- `team_colors`: colores LAB de referencia opcionales.
-- `min_samples`: número mínimo de muestras antes de fijar clusters.
-- `min_size_cluster`: tamaño mínimo exigido para cada cluster válido.
-- `candidate_classes`: clases que participan en la inferencia de equipo.
+- `tracking.team_assignment_mode`: `reference` o `auto-bootstrap`.
+- `tracking.team_bootstrap_*`: controla cuántos frames/muestras se usan para fijar los clusters en modo bootstrap.
+- `tracking.team_candidate_classes`: clases que aportan muestras de color.
+- `color_clustering.*`: hiperparámetros del `ShirtDetector` y compatibilidad con la configuración antigua.
+- `teams` / `--team-colors` / `lineup_spec.json`: referencias LAB opcionales para nombrar equipos.
 
-Por defecto solo se intentan clasificar detecciones cuya clase esté en `candidate_classes`.
+En ambos modos, por defecto participan `player` y `goalkeeper` en la inferencia de equipo.
 
-#### 2. Aprendizaje de colores (`update_team_colors`)
-Cuando se acumulan al menos `min_samples` colores de camiseta:
-1. Se aplica `KMeans` sobre las muestras LAB recogidas.
-2. Si aparece un cluster demasiado pequeño (`< min_size_cluster`), se considera ruido y se reintenta sobre el cluster mayor.
-3. La referencia final de cada equipo se calcula con la **mediana** de los colores del cluster.
-4. Si `with_ref=true`, esas referencias se emparejan con `team_colors`; si no, se nombran de forma neutral (`Equipo 1`, `Equipo 2`, ...).
+#### 2. Modo `reference`
+Cuando `team_assignment_mode=reference`, `TeamDetector` arranca con colores LAB de referencia y asigna cada detección al equipo más cercano. Además, mantiene un pequeño mecanismo de confirmación:
 
-Hasta que el clustering queda fijado, `detect_teams` puede devolver `team=None` para las detecciones candidatas si no hay suficientes muestras.
+1. Busca el equipo de referencia más cercano al color detectado.
+2. Acumula muestras parecidas por equipo.
+3. Cuando una muestra se repite `confirmation_threshold` veces dentro de `color_tolerance`, sustituye la referencia por ese color confirmado del vídeo.
 
-#### 3. Asignación (`assign_team`)
-Una vez disponibles las referencias, la asignación se hace por **distancia euclidiana mínima en espacio LAB** entre el color detectado y los colores de equipo aprendidos.
+Así el detector empieza funcionando desde el primer frame, pero puede adaptarse ligeramente a la iluminación real del partido.
 
-#### 4. Extracción de región de camiseta
+#### 3. Modo `auto-bootstrap`
+Cuando `team_assignment_mode=auto-bootstrap`:
+
+1. Se recogen colores de camiseta durante los primeros frames.
+2. Se aplica `KMeans` para separar `auto_num_teams` clusters.
+3. Si un cluster es demasiado pequeño (`auto_min_cluster_samples`), se trata como ruido y se reintenta sobre el cluster mayor.
+4. La referencia final de cada equipo se calcula con la **mediana** LAB de cada cluster.
+
+Si además se usa un `lineup_spec.json` generado por la interfaz, el bootstrap sigue aprendiendo los centroides reales del vídeo, pero renombra los clusters según los colores de equipo introducidos por el usuario.
+
+Hasta que el bootstrap queda fijado, `detect_teams` puede devolver `team=None` para las detecciones candidatas.
+
+#### 4. Asignación (`assign_team`)
+Una vez disponibles las referencias activas, la asignación se hace por **distancia euclidiana mínima en espacio LAB** entre el color detectado y los colores de equipo aprendidos o confirmados.
+
+#### 5. Extracción de región de camiseta
 El crop que se analiza es el **50% superior** del bounding box del jugador. Esto excluye el pantalón, las botas y el césped, que introducían ruido en el clustering.
 
 ```python
@@ -74,15 +85,14 @@ from football_ai.identification import TeamDetector
 import numpy as np
 
 td = TeamDetector(
-    n_teams=2,
-    with_ref=True,
-    team_colors={
+    team_colors_refs={
         "Real Madrid": np.array([255, 127, 127]),
         "Wolfsburgo":  np.array([224, 77, 196])
     },
-    min_samples=60,
-    min_size_cluster=4,
-    candidate_classes=["player"]
+    assignment_mode="auto-bootstrap",
+    auto_bootstrap_min_samples=12,
+    auto_min_cluster_samples=4,
+    team_candidate_classes=["player", "goalkeeper"],
 )
 
 # frame_detections es el resultado YOLO de un frame (objeto Results)
@@ -91,7 +101,7 @@ team_info_list = td.detect_teams(frame_detections, show_plot=False)
 # [{"class": "player", "team": "Real Madrid", "distances": {...}, "shirt_color": [L, A, B], "bbox_size": float}, ...]
 ```
 
-#### 5. Visualización de depuración (`visualize_shirt_clusters`)
+#### 6. Visualización de depuración (`visualize_shirt_clusters`)
 Función standalone disponible en `football_ai.evaluation.cluster_visualizer` que muestra una cuadrícula con hasta 20 jugadores. Cada jugador ocupa dos columnas: la imagen original del crop y la imagen segmentada por KMeans coloreada con los centroides. Útil para depurar el comportamiento del clustering.
 
 ```python

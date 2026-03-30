@@ -23,10 +23,14 @@ from football_ai.evaluation import Evaluator
 from football_ai.visualization import Drawer
 from football_ai.core import get_config, get_logger, Logger, convert_to_serializable
 from football_ai.positions import (
+    LineupSlotMatcher,
     OnlineSpecialSeedRoleAssigner,
     build_role_artifacts_output_dir,
     build_role_predictions_output_paths,
+    build_expected_roles_by_team,
+    build_team_colors_by_team,
     copy_output_artifact,
+    load_lineup_spec,
     save_dataframe_csv,
     save_role_visualizations,
 )
@@ -135,6 +139,14 @@ def parse_args():
         help=(
             "Optional key inside paths.data (config.yaml), e.g. video_prueba_ajustado. "
             "You can also pass a direct video path."
+        ),
+    )
+    parser.add_argument(
+        "--lineup-spec",
+        default=None,
+        help=(
+            "Ruta a un JSON de alineaciones generado por la interfaz web. "
+            "Permite definir equipos por color, formación y jugador por slot."
         ),
     )
     parser.add_argument(
@@ -424,6 +436,14 @@ def apply_team_color_overrides(base_team_colors, raw_overrides, logger):
     return updated_team_colors
 
 
+def build_team_colors_from_raw_mapping(raw_team_colors):
+    team_colors = {}
+    for team_name, raw_color in (raw_team_colors or {}).items():
+        rgb_color = parse_color_to_rgb(raw_color)
+        team_colors[str(team_name)] = rgb_to_lab_opencv(rgb_color)
+    return team_colors
+
+
 def resolve_video_path(config, video_shortcut):
     """
     Resolve video path either from a config shortcut (paths.data.<key>)
@@ -623,9 +643,27 @@ if __name__ == "__main__":
     logger.info("Starting football tracking system")
     
     try:
+        lineup_spec = None
+        lineup_matcher = None
+        lineup_expected_roles_by_team = None
+        lineup_team_colors_raw = {}
+        if args.lineup_spec:
+            lineup_spec = load_lineup_spec(
+                args.lineup_spec,
+                project_root=config.project_root,
+            )
+            lineup_matcher = LineupSlotMatcher(lineup_spec)
+            lineup_expected_roles_by_team = build_expected_roles_by_team(lineup_spec)
+            lineup_team_colors_raw = build_team_colors_by_team(lineup_spec)
+
         # Get paths and parameters from config
         MODEL_PATH = str(config.get_path('paths', 'models', 'modelo_base'))
-        VIDEO_PATH, video_source = resolve_video_path(config, args.video_shortcut)
+        effective_video_shortcut = args.video_shortcut or (
+            str(lineup_spec.get("video_source") or "").strip()
+            if lineup_spec is not None
+            else None
+        )
+        VIDEO_PATH, video_source = resolve_video_path(config, effective_video_shortcut)
         OUTPUT = build_output_video_path(config, VIDEO_PATH)
         OUTPUT_PATH_NAMED, OUTPUT_PATH_LEGACY = build_tracks_output_paths(
             config, VIDEO_PATH
@@ -816,8 +854,72 @@ if __name__ == "__main__":
                 "reassign_min_field_distance_m", 4.0
             ),
         }
-        
-        TEAM_DETECTOR_CONF = config.color_clustering
+        color_clustering_cfg = config.color_clustering
+
+        # Team colors
+        TEAM_COLORS = (
+            build_team_colors_from_raw_mapping(lineup_team_colors_raw)
+            if lineup_spec is not None
+            else config.get_team_colors()
+        )
+        if args.team_colors:
+            TEAM_COLORS = apply_team_color_overrides(
+                TEAM_COLORS,
+                args.team_colors,
+                logger,
+            )
+
+        team_mode = (
+            args.team_mode
+            or ("auto-bootstrap" if lineup_spec is not None else None)
+            or tracking_cfg.get("team_assignment_mode", "reference")
+        )
+        team_bootstrap_frames = (
+            args.team_bootstrap_frames
+            if args.team_bootstrap_frames is not None
+            else tracking_cfg.get("team_bootstrap_frames", 1)
+        )
+        team_bootstrap_min_samples = (
+            args.team_bootstrap_min_samples
+            if args.team_bootstrap_min_samples is not None
+            else tracking_cfg.get(
+                "team_bootstrap_min_samples",
+                color_clustering_cfg.get("min_samples", 12),
+            )
+        )
+        team_bootstrap_min_cluster_samples = (
+            args.team_bootstrap_min_cluster_samples
+            if args.team_bootstrap_min_cluster_samples is not None
+            else tracking_cfg.get(
+                "team_bootstrap_min_cluster_samples",
+                color_clustering_cfg.get("min_size_cluster", 4),
+            )
+        )
+        TEAM_DETECTOR_CONF = {
+            "team_colors_refs": TEAM_COLORS,
+            "confirmation_threshold": color_clustering_cfg.get("confirmation_threshold", 3),
+            "color_tolerance": color_clustering_cfg.get("color_tolerance", 25),
+            "assignment_mode": team_mode,
+            "auto_bootstrap_frames": team_bootstrap_frames,
+            "auto_bootstrap_min_samples": team_bootstrap_min_samples,
+            "auto_num_teams": tracking_cfg.get(
+                "team_bootstrap_num_teams",
+                color_clustering_cfg.get("n_teams", 2),
+            ),
+            "auto_min_cluster_samples": team_bootstrap_min_cluster_samples,
+            "auto_team_name_prefix": tracking_cfg.get("team_auto_name_prefix", "Equipo"),
+            "auto_label_by_reference_colors": lineup_spec is not None,
+            "team_candidate_classes": tracking_cfg.get(
+                "team_candidate_classes",
+                color_clustering_cfg.get("candidate_classes", ["player", "goalkeeper"]),
+            ),
+            "shirt_detector_kwargs": {
+                "n_clusters": color_clustering_cfg.get("n_clusters", 2),
+                "init": color_clustering_cfg.get("init", "k-means++"),
+                "n_init": color_clustering_cfg.get("n_init", 10),
+                "random_state": color_clustering_cfg.get("random_state", 0),
+            },
+        }
         
         logger.info(f"Model: {MODEL_PATH}")
         logger.info(f"Video: {VIDEO_PATH}")
@@ -833,6 +935,17 @@ if __name__ == "__main__":
         logger.info(f"Tracking configuration: {TRACKER_CONF}")
         logger.info(f"Field tracking configuration: {FIELD_TRACKING_CONF}")
         logger.info(f"Team detector configuration: {TEAM_DETECTOR_CONF}")
+        if lineup_spec is not None:
+            logger.info(f"Lineup spec loaded: {lineup_spec.get('spec_path')}")
+            logger.info(
+                f"Lineup expected_roles_by_team override: {lineup_expected_roles_by_team}"
+            )
+            copy_output_artifact(
+                lineup_spec["spec_path"],
+                ROLE_ARTIFACTS_DIR / Path(lineup_spec["spec_path"]).name,
+                logger,
+                "Lineup spec JSON",
+            )
         
         # Run tracking
         tracker = Tracker(
@@ -849,6 +962,8 @@ if __name__ == "__main__":
             config=config,
             video_path=VIDEO_PATH,
             logger=logger,
+            expected_roles_by_team_override=lineup_expected_roles_by_team,
+            lineup_matcher=lineup_matcher,
         )
         logger.info("Extracting tracks from video...")
         tracks = tracker.get_tracks(
@@ -887,6 +1002,10 @@ if __name__ == "__main__":
             summary["position_role_online_applied"] = True
             for key, value in role_postprocess_result.items():
                 summary[f"special_seed_{key}"] = value
+        if lineup_spec is not None:
+            summary["lineup_spec_applied"] = True
+            summary["lineup_spec_path"] = str(lineup_spec.get("spec_path"))
+            summary["lineup_teams"] = sorted(lineup_expected_roles_by_team.keys())
 
         # Save tracks JSON
         save_result(tracks, OUTPUT_PATH_NAMED, logger)

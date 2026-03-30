@@ -84,6 +84,10 @@ narrador-futbol/
 │   ├── finetuning/         # Modelo fine-tuned de jugadores
 │   └── finetuning-balon/   # Modelo fine-tuned de balón
 │
+├── interfaz/               # UI web ligera para introducir alineaciones y lanzar tracking
+│   ├── app.py              # Backend HTTP sin dependencias extra
+│   └── static/             # HTML/CSS/JS del editor de alineaciones
+│
 └── experiments/            # Notebooks de análisis y visualización
     ├── detection/
     ├── set_transformer.ipynb # Entrenamiento + aplicación de Set Transformer para roles
@@ -217,6 +221,38 @@ Este script verifica:
 - ✓ Módulos de football_ai importables
 - ✓ PyTorch y estado de CUDA
 - ✓ Variables de entorno configuradas
+
+---
+
+## 🧾 Interfaz de alineaciones
+
+Ahora el proyecto incluye una interfaz web ligera en `interfaz/` para:
+
+- introducir el nombre de cada equipo
+- indicar el color de camiseta que servirá para renombrar los clusters del bootstrap
+- elegir la formación (`4-3-3`, `5-3-2`, `4-4-2`)
+- escribir el jugador asociado a cada slot táctico
+- lanzar `scripts/track.py` automáticamente con un `lineup_spec.json`
+
+Ejecución:
+
+```bash
+python interfaz/app.py
+```
+
+Después abre:
+
+```text
+http://127.0.0.1:8765
+```
+
+La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/lineup_spec.json` y llama a `scripts/track.py --lineup-spec ...`.
+
+Cuando el tracker estabiliza los slots:
+
+- el equipo se resuelve por color de cluster contra los colores introducidos por el usuario
+- la formación seleccionada sustituye el once esperado fijo de `config.yaml` para esa ejecución
+- si existe un slot único o ya desdoblado (`MC_IZQ`, `MC_DCHO`, `DC_IZQ`, `DC_DCHO`), se asigna también `player_name` al track y al resumen final
 
 ---
 

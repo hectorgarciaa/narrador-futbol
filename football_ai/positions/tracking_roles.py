@@ -18,6 +18,8 @@ from scipy.optimize import linear_sum_assignment
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from .lineup_spec import LineupSlotMatcher
+
 
 DEFAULT_SPECIAL_SEED_CANONICAL_IDS = (1, 2)
 DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = (
@@ -202,6 +204,7 @@ def _ordered_roles_from_exports(frame_df, player_df):
         (frame_df, "predicted_role_frame"),
         (player_df, "predicted_role"),
         (player_df, "expected_role_slot"),
+        (player_df, "display_role_slot"),
     ):
         if df is None or df.empty or col_name not in df.columns:
             continue
@@ -947,7 +950,9 @@ def save_role_assignment_overview_plot(
                     left += vals
 
             for row_idx, row in team_df.iterrows():
-                final_role = row.get("expected_role_slot")
+                final_role = row.get("display_role_slot")
+                if pd.isna(final_role) or not str(final_role).strip():
+                    final_role = row.get("expected_role_slot")
                 if pd.isna(final_role) or not str(final_role).strip():
                     final_role = row.get("predicted_role")
                 final_role = _normalize_role_token(final_role)
@@ -962,9 +967,10 @@ def save_role_assignment_overview_plot(
                         break
                     cumulative += width
 
-                has_expected_slot = pd.notna(row.get("expected_role_slot")) and str(
-                    row.get("expected_role_slot")
-                ).strip()
+                has_expected_slot = (
+                    (pd.notna(row.get("display_role_slot")) and str(row.get("display_role_slot")).strip())
+                    or (pd.notna(row.get("expected_role_slot")) and str(row.get("expected_role_slot")).strip())
+                )
                 marker = "D" if has_expected_slot else "X"
                 face = (
                     ROLE_PLOT_COLORS.get(final_role, "#000000")
@@ -1554,7 +1560,15 @@ def apply_special_seed_role_team_assignment(
 
 
 class OnlineSpecialSeedRoleAssigner:
-    def __init__(self, config, video_path, logger):
+    def __init__(
+        self,
+        config,
+        video_path,
+        logger,
+        *,
+        expected_roles_by_team_override=None,
+        lineup_matcher=None,
+    ):
         self.config = config
         self.video_path = Path(video_path)
         self.logger = logger
@@ -1624,7 +1638,16 @@ class OnlineSpecialSeedRoleAssigner:
                 list(DEFAULT_SPECIAL_SEED_DEFENDER_ROLES),
             )
         }
-        self.expected_roles_by_team = _resolve_expected_roles_by_team_from_config(config)
+        self.expected_roles_by_team = (
+            _normalize_expected_roles_mapping(expected_roles_by_team_override)
+            if expected_roles_by_team_override is not None
+            else _resolve_expected_roles_by_team_from_config(config)
+        )
+        self.lineup_matcher = (
+            lineup_matcher
+            if isinstance(lineup_matcher, LineupSlotMatcher)
+            else None
+        )
         self.last_team_by_special_id = {}
         self.prev_positions = {}
         self.role_state_by_track_id = {}
@@ -1936,6 +1959,8 @@ class OnlineSpecialSeedRoleAssigner:
                     row["frames_seen"] = int(row["frames_seen"]) + 1
                     row["last_frame_id"] = int(frame_id)
                     for col in (
+                        "player_name",
+                        "lineup_slot",
                         "predicted_role",
                         "predicted_role_confidence",
                         "predicted_role_unconstrained",
@@ -2096,8 +2121,81 @@ class OnlineSpecialSeedRoleAssigner:
         state["assignment_method"] = (
             None if assignment_method is None else str(assignment_method)
         )
+        for class_name in ("player", "goalkeeper"):
+            class_frames = tracks.get(class_name, [])
+            if int(frame_id) >= len(class_frames):
+                continue
+            frame_tracks = class_frames[int(frame_id)]
+            if not isinstance(frame_tracks, dict):
+                continue
+            for track_key in (int(track_id), str(track_id)):
+                track_data = frame_tracks.get(track_key)
+                if not isinstance(track_data, dict):
+                    continue
+                track_data["predicted_role_frame"] = str(role_label)
+                track_data["predicted_role_frame_confidence"] = float(confidence)
+                track_data["predicted_role"] = str(role_label)
+                track_data["predicted_role_confidence"] = float(confidence)
+                track_data["role_stabilized"] = True
+                track_data["role_stabilized_at_frame"] = int(frame_id)
+                track_data["role_stabilization_observations"] = int(
+                    state.get("observations", 0)
+                )
+                if expected_role_slot is not None:
+                    track_data["expected_role_slot"] = str(expected_role_slot)
+                    track_data["display_role_slot"] = str(expected_role_slot)
+                if assignment_method is not None:
+                    track_data["assignment_method"] = str(assignment_method)
+                    track_data["stable_role_assignment_method"] = str(
+                        assignment_method
+                    )
+                self._apply_lineup_assignment_to_track(track_data, state)
         if increment_stats:
             self.stats["stable_role_tracks_frozen"] += 1
+
+    def _resolve_lineup_assignment(self, team_id, state=None, track_data=None):
+        if self.lineup_matcher is None:
+            return None, None
+
+        team_value = team_id
+        slot_candidates = []
+        if isinstance(state, dict):
+            team_value = state.get("team_id", team_value)
+            slot_candidates.extend(
+                [
+                    state.get("display_role_slot"),
+                    state.get("expected_role_slot"),
+                    state.get("frozen_role"),
+                ]
+            )
+        if isinstance(track_data, dict):
+            team_value = track_data.get("team", team_value)
+            slot_candidates.extend(
+                [
+                    track_data.get("display_role_slot"),
+                    track_data.get("expected_role_slot"),
+                    track_data.get("predicted_role"),
+                    track_data.get("predicted_role_frame"),
+                ]
+            )
+
+        return self.lineup_matcher.resolve_player_name(team_value, *slot_candidates)
+
+    def _apply_lineup_assignment_to_track(self, track_data, state=None):
+        if not isinstance(track_data, dict) or self.lineup_matcher is None:
+            return
+        resolved_slot, player_name = self._resolve_lineup_assignment(
+            team_id=track_data.get("team"),
+            state=state,
+            track_data=track_data,
+        )
+        if not resolved_slot or not player_name:
+            return
+        track_data["lineup_slot"] = str(resolved_slot)
+        track_data["player_name"] = str(player_name)
+        if isinstance(state, dict):
+            state["lineup_slot"] = str(resolved_slot)
+            state["player_name"] = str(player_name)
 
     def _freeze_ready_roles_by_team(self, tracks, frame_id):
         role_labels = self._role_labels_for_assignment()
@@ -2282,6 +2380,13 @@ class OnlineSpecialSeedRoleAssigner:
                 if len(candidates) < 2:
                     for _, _, _, state in candidates:
                         state["display_role_slot"] = str(base_role)
+                        resolved_slot, player_name = self._resolve_lineup_assignment(
+                            team_id=state.get("team_id"),
+                            state=state,
+                        )
+                        if resolved_slot and player_name:
+                            state["lineup_slot"] = str(resolved_slot)
+                            state["player_name"] = str(player_name)
                     continue
 
                 candidates.sort(
@@ -2297,6 +2402,14 @@ class OnlineSpecialSeedRoleAssigner:
                 right_state["display_role_slot"] = f"{base_role}_DCHO"
                 for _, _, _, state in candidates[1:-1]:
                     state["display_role_slot"] = str(base_role)
+                for _, _, _, state in candidates:
+                    resolved_slot, player_name = self._resolve_lineup_assignment(
+                        team_id=state.get("team_id"),
+                        state=state,
+                    )
+                    if resolved_slot and player_name:
+                        state["lineup_slot"] = str(resolved_slot)
+                        state["player_name"] = str(player_name)
 
     def _complete_unassigned_expected_role_slots(self, tracks, frame_id):
         if not self.expected_roles_by_team:
@@ -2791,6 +2904,8 @@ class OnlineSpecialSeedRoleAssigner:
                 "expected_role_slot": None,
                 "display_role_slot": None,
                 "assignment_method": None,
+                "lineup_slot": None,
+                "player_name": None,
                 "x_sum": 0.0,
                 "y_sum": 0.0,
                 "dist_left_sum": 0.0,
@@ -2912,6 +3027,7 @@ class OnlineSpecialSeedRoleAssigner:
                         track_data["stable_role_assignment_method"] = (
                             "team_unique_hungarian"
                         )
+                self._apply_lineup_assignment_to_track(track_data, state)
 
     def _assign_special_seed_frame_teams(self, tracks, frame_id, frame_predictions_df):
         defender_candidates = []
@@ -3011,6 +3127,7 @@ class OnlineSpecialSeedRoleAssigner:
                     track_data.setdefault("role_stabilized_at_frame", int(frame_id))
                     track_data.setdefault("role_stabilization_observations", 1)
                     track_data["stable_role_assignment_method"] = "manual_special_goalkeeper"
+                    self._apply_lineup_assignment_to_track(track_data, state=None)
 
     def on_frame(self, tracks, frame_id):
         self.stats["processed_frames"] += 1

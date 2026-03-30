@@ -103,6 +103,16 @@ class Drawer:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
 
         info_lines = []
+        player_name = data.get("player_name")
+        lineup_slot = data.get("lineup_slot")
+
+        if player_name:
+            if lineup_slot:
+                info_lines.append(
+                    f"{player_name} | {_format_role_overlay_label(lineup_slot)}"
+                )
+            else:
+                info_lines.append(str(player_name))
 
         predicted_role_frame = data.get("predicted_role_frame")
         predicted_role = data.get("predicted_role")
