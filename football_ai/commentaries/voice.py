@@ -74,12 +74,17 @@ def discover_default_speaker_wavs(
 ) -> list[Path]:
     root = Path(search_dir).expanduser().resolve()
     candidates = sorted(path for path in root.glob("*.wav") if path.is_file())
-    preferred = [
-        path
-        for path in candidates
-        if path.name.lower() in {"mi_voz.wav", "mi-voz.wav", "mi voz.wav"}
-    ]
-    return preferred or candidates
+    if not candidates:
+        return []
+
+    preferred = []
+    remaining = []
+    for path in candidates:
+        if path.name.lower() in {"mi_voz.wav", "mi-voz.wav", "mi voz.wav"}:
+            preferred.append(path)
+        else:
+            remaining.append(path)
+    return preferred + remaining
 
 
 def resolve_speaker_wavs(
@@ -87,13 +92,13 @@ def resolve_speaker_wavs(
 ) -> tuple[Path, ...]:
     if speaker_wavs is None:
         candidates = discover_default_speaker_wavs()
-        if len(candidates) != 1:
+        if not candidates:
             raise ValueError(
                 "No se pudo resolver automaticamente `speaker_wav`. "
-                "Deja un `mi_Voz.wav` en football_ai/commentaries/ "
+                "Deja uno o varios `.wav` en football_ai/commentaries/ "
                 "o pasalo con `--speaker-wav`."
             )
-        return (candidates[0],)
+        return tuple(candidates)
 
     if isinstance(speaker_wavs, (str, Path)):
         items: list[str | Path] = [speaker_wavs]

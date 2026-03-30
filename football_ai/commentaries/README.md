@@ -90,5 +90,5 @@ El prompt esta pensado para:
 - El modelo por defecto del modulo es `tinyllama:1.1b`.
 - Si existe `OLLAMA_HOST` en el entorno, se usa como base URL automaticamente.
 - La sintesis de voz usa por defecto `tts_models/multilingual/multi-dataset/xtts_v2`.
-- Si existe `football_ai/commentaries/mi_Voz.wav`, el modulo lo usa por defecto como muestra de clonacion.
+- Si existen varios `.wav` en `football_ai/commentaries/`, el modulo los usa todos por defecto como referencias de voz y prioriza `mi_Voz.wav` si está presente.
 - La salida de audio se guarda por defecto en `output/commentaries/audio/`.
