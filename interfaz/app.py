@@ -218,18 +218,23 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # noqa: A003
         return
 
-    def _send_json(self, payload, status=HTTPStatus.OK):
+    def _send_json(self, payload, status=HTTPStatus.OK, include_body=True):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(int(status))
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        if include_body:
+            self.wfile.write(data)
 
-    def _send_file(self, file_path):
+    def _send_file(self, file_path, include_body=True):
         file_path = Path(file_path)
         if not file_path.exists() or not file_path.is_file():
-            self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
+            self._send_json(
+                {"error": "Not found"},
+                status=HTTPStatus.NOT_FOUND,
+                include_body=include_body,
+            )
             return
         content_type, _ = mimetypes.guess_type(str(file_path))
         content_type = content_type or "application/octet-stream"
@@ -238,35 +243,43 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
-        self.wfile.write(content)
+        if include_body:
+            self.wfile.write(content)
 
     def _read_json_body(self):
         content_length = int(self.headers.get("Content-Length", "0") or 0)
         raw = self.rfile.read(content_length) if content_length > 0 else b"{}"
         return json.loads(raw.decode("utf-8"))
 
-    def _handle_get_run_status(self, run_id):
+    def _handle_get_run_status(self, run_id, include_body=True):
         run_paths = build_run_paths(run_id)
         status = read_json(run_paths["status_path"], default=None)
         if status is None:
             self._send_json(
                 {"error": f"No existe la ejecución {run_id}."},
                 status=HTTPStatus.NOT_FOUND,
+                include_body=include_body,
             )
             return
         status["log_tail"] = tail_log(run_paths["log_path"])
-        self._send_json(status)
+        self._send_json(status, include_body=include_body)
 
-    def do_GET(self):  # noqa: N802
+    def _handle_request(self, include_body=True):
         parsed = urlparse(self.path)
         path = parsed.path
 
         if path == "/api/formations":
-            self._send_json({"formations": get_formation_catalog()})
+            self._send_json(
+                {"formations": get_formation_catalog()},
+                include_body=include_body,
+            )
             return
 
         if path == "/api/videos":
-            self._send_json({"videos": config_video_shortcuts()})
+            self._send_json(
+                {"videos": config_video_shortcuts()},
+                include_body=include_body,
+            )
             return
 
         if path == "/api/runs":
@@ -275,7 +288,7 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
                 status = read_json(run_dir / "status.json", default=None)
                 if status is not None:
                     run_items.append(status)
-            self._send_json({"runs": run_items[:20]})
+            self._send_json({"runs": run_items[:20]}, include_body=include_body)
             return
 
         if path.startswith("/api/runs/"):
@@ -284,13 +297,14 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(
                     {"error": "Run id inválido."},
                     status=HTTPStatus.BAD_REQUEST,
+                    include_body=include_body,
                 )
                 return
-            self._handle_get_run_status(run_id)
+            self._handle_get_run_status(run_id, include_body=include_body)
             return
 
         if path in {"/", ""}:
-            self._send_file(STATIC_ROOT / "index.html")
+            self._send_file(STATIC_ROOT / "index.html", include_body=include_body)
             return
 
         static_candidate = (STATIC_ROOT / path.lstrip("/")).resolve()
@@ -298,9 +312,16 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {"error": "Ruta no permitida."},
                 status=HTTPStatus.FORBIDDEN,
+                include_body=include_body,
             )
             return
-        self._send_file(static_candidate)
+        self._send_file(static_candidate, include_body=include_body)
+
+    def do_GET(self):  # noqa: N802
+        self._handle_request(include_body=True)
+
+    def do_HEAD(self):  # noqa: N802
+        self._handle_request(include_body=False)
 
     def do_POST(self):  # noqa: N802
         parsed = urlparse(self.path)
@@ -343,7 +364,7 @@ def parse_args():
         description="Interfaz web ligera para introducir alineaciones y lanzar tracking."
     )
     parser.add_argument("--host", default="127.0.0.1", help="Host a escuchar.")
-    parser.add_argument("--port", type=int, default=8765, help="Puerto HTTP.")
+    parser.add_argument("--port", type=int, default=8767, help="Puerto HTTP.")
     return parser.parse_args()
 
 

@@ -88,6 +88,8 @@ narrador-futbol/
 │   ├── app.py              # Backend HTTP sin dependencias extra
 │   └── static/             # HTML/CSS/JS del editor de alineaciones
 │
+├── football_ai/commentaries/ # Generacion local de comentarios sinteticos con Ollama
+│
 └── experiments/            # Notebooks de análisis y visualización
     ├── detection/
     ├── set_transformer.ipynb # Entrenamiento + aplicación de Set Transformer para roles
@@ -243,7 +245,7 @@ python interfaz/app.py
 Después abre:
 
 ```text
-http://127.0.0.1:8765
+http://127.0.0.1:8767
 ```
 
 La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/lineup_spec.json` y llama a `scripts/track.py --lineup-spec ...`.
@@ -253,6 +255,30 @@ Cuando el tracker estabiliza los slots:
 - el equipo se resuelve por color de cluster contra los colores introducidos por el usuario
 - la formación seleccionada sustituye el once esperado fijo de `config.yaml` para esa ejecución
 - si existe un slot único o ya desdoblado (`MC_IZQ`, `MC_DCHO`, `DC_IZQ`, `DC_DCHO`), se asigna también `player_name` al track y al resumen final
+
+---
+
+## 🎙️ Comentarios sintéticos
+
+El proyecto incluye también un módulo en `football_ai/commentaries/` para convertir eventos ya detectados o simulados en comentarios cortos de narrador usando Ollama.
+
+Ejemplo rápido:
+
+```bash
+python -m football_ai.commentaries \
+  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"frontal del area","action_index":30}'
+```
+
+El modelo por defecto es `tinyllama:1.1b`. En `gol` se exige `team_name`, y el minuto solo se menciona cuando `action_index` es múltiplo de `30`.
+
+Ese mismo módulo puede convertir el comentario a audio con clonación de voz basada en XTTS:
+
+```bash
+python -m football_ai.commentaries \
+  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"frontal del area","action_index":30}' \
+  --speaker-wav "football_ai/commentaries/mi_Voz.wav" \
+  --audio-out output/commentaries/audio/demo.wav
+```
 
 ---
 

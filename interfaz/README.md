@@ -23,10 +23,15 @@ python interfaz/app.py
 Opciones:
 
 ```bash
-python interfaz/app.py --host 127.0.0.1 --port 8765
+python interfaz/app.py --host 127.0.0.1 --port 8767
 ```
 
-Después abre `http://127.0.0.1:8765`.
+Después abre `http://127.0.0.1:8767`.
+
+Nota:
+
+- la interfaz expone también respuestas `HEAD` para mejorar compatibilidad con navegadores como Safari;
+- si trabajas en una máquina remota, `127.0.0.1` debe estar reenviado a tu equipo local o abrirse con la IP/host remotos.
 
 ## Qué genera
 
