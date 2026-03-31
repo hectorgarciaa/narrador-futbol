@@ -1,5 +1,6 @@
 import numpy as np
 import supervision as sv
+from time import perf_counter
 
 from football_ai.detection import Detector
 from football_ai.identification import TeamDetector
@@ -10,6 +11,29 @@ from football_ai.tracking.possession import PossessionConfig, TeamPossessionEsti
 
 
 class Tracker(TrackerLogicMixin):
+    @staticmethod
+    def _measure_phase_execution(fn, *args, **kwargs):
+        start = perf_counter()
+        result = fn(*args, **kwargs)
+        elapsed_ms = (perf_counter() - start) * 1000.0
+        return result, elapsed_ms
+
+    @staticmethod
+    def _print_frame_phase_profile(phase_rows):
+        total_ms = sum(float(row[1]) for row in phase_rows)
+        for phase_index, row in enumerate(phase_rows, start=1):
+            phase_title, phase_ms = row[0], row[1]
+            print(f"fase {phase_index}: {phase_title}: {phase_ms:.2f} ms", flush=True)
+            subphase_rows = row[2] if len(row) > 2 else None
+            if subphase_rows:
+                for subphase_title, subphase_ms in subphase_rows:
+                    print(
+                        f"  subfase: {subphase_title}: {subphase_ms:.2f} ms",
+                        flush=True,
+                    )
+        print(f"FRAME: TIEMPO TOTAL: {total_ms:.2f} ms", flush=True)
+        print("#########################################", flush=True)
+
     @staticmethod
     def _normalize_detection_class_name(class_name):
         token = str(class_name or "").strip().lower()
@@ -32,6 +56,25 @@ class Tracker(TrackerLogicMixin):
         if normalized <= 0:
             return None
         return normalized
+
+    @classmethod
+    def _detection_class_candidates_from_metadata(cls, metadata):
+        if not isinstance(metadata, dict):
+            return []
+        candidates = []
+        for key in ("class_tracker", "class", "class_yolo"):
+            normalized = cls._normalize_detection_class_name(metadata.get(key))
+            if not normalized or normalized in candidates:
+                continue
+            candidates.append(normalized)
+        return candidates
+
+    @classmethod
+    def _primary_class_from_metadata(cls, metadata):
+        candidates = cls._detection_class_candidates_from_metadata(metadata)
+        if not candidates:
+            return None, []
+        return candidates[0], candidates
 
     def __init__(self, model_path, detector_conf, team_detector_conf, bytetracker_conf,
                  ball_conf, tracker_conf, projector_conf, project_root):
@@ -89,6 +132,26 @@ class Tracker(TrackerLogicMixin):
         self.reserve_penalty_spot_seed_match_distance_m = tracker_conf["reserve_penalty_spot_seed_match_distance_m"]
         self.referee_recovery_max_lost_frames = tracker_conf["referee_recovery_max_lost_frames"]
         self.referee_recovery_max_distance = tracker_conf["referee_recovery_max_distance"]
+        self.use_shirt_color_for_reassign = bool(
+            tracker_conf.get("use_shirt_color_for_reassign", False)
+        )
+        self.shirt_color_reassign_distance_gate = float(
+            tracker_conf.get("shirt_color_reassign_distance_gate", 45.0)
+        )
+        self.shirt_color_reassign_distance_growth_per_frame = float(
+            tracker_conf.get("shirt_color_reassign_distance_growth_per_frame", 0.0)
+        )
+        raw_shirt_color_reassign_distance_cap = tracker_conf.get(
+            "shirt_color_reassign_distance_cap",
+            None,
+        )
+        if raw_shirt_color_reassign_distance_cap is None:
+            self.shirt_color_reassign_distance_cap = None
+        else:
+            shirt_color_cap = float(raw_shirt_color_reassign_distance_cap)
+            self.shirt_color_reassign_distance_cap = (
+                shirt_color_cap if np.isfinite(shirt_color_cap) and shirt_color_cap > 0.0 else None
+            )
 
         self.use_field_positions = projector_conf["enabled"]
         self.field_position_classes = projector_conf["classes"]
@@ -144,6 +207,578 @@ class Tracker(TrackerLogicMixin):
             == cls._normalize_track_identifier(right_track_id)
         )
 
+    def _phase_prepare_frame_inputs(self, detections, collect_visual_debug):
+        subphase_rows = []
+
+        t0 = perf_counter()
+        detections.names = {
+            k: self._normalize_detection_class_name(v)
+            for k, v in detections.names.items()
+        }
+        subphase_rows.append(("Normalizar nombres de clase", (perf_counter() - t0) * 1000.0))
+
+        t0 = perf_counter()
+        detections_sv = sv.Detections.from_ultralytics(detections)
+        frame_size = (
+            None
+            if detections.orig_img is None
+            else (int(detections.orig_img.shape[1]), int(detections.orig_img.shape[0]))
+        )
+        subphase_rows.append(("Convertir a supervision + frame_size", (perf_counter() - t0) * 1000.0))
+
+        t0 = perf_counter()
+        raw_detections, detection_class_labels = self._get_raw_detections(
+            detections,
+            collect_visual_debug,
+        )
+        subphase_rows.append(("Extraer detecciones RAW", (perf_counter() - t0) * 1000.0))
+
+        t0 = perf_counter()
+        field_projection, field_positions, ground_points_projected = (
+            self._get_field_projection_and_positions(
+                detections_sv,
+                detection_class_labels,
+                detections.orig_img,
+            )
+        )
+        subphase_rows.append(("Proyección de campo (PnLCalib)", (perf_counter() - t0) * 1000.0))
+        return {
+            "payload": (
+                detections_sv,
+                frame_size,
+                raw_detections,
+                detection_class_labels,
+                field_projection,
+                field_positions,
+                ground_points_projected,
+            ),
+            "subphase_rows": subphase_rows,
+        }
+
+    def _phase_assign_team_and_enrich_metadata(
+        self,
+        detections,
+        detections_sv,
+        detection_class_labels,
+        show_kmeans,
+        field_positions,
+        ground_points_projected,
+    ):
+        subphase_rows = []
+
+        t0 = perf_counter()
+        teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
+        subphase_rows.append(("TeamDetector.detect_teams", (perf_counter() - t0) * 1000.0))
+
+        t0 = perf_counter()
+        teams_labels = np.array(
+            [dicc["team"] for dicc in teams_of_detected_objects],
+            dtype=object,
+        )
+        class_labels = np.array(
+            [
+                self._normalize_detection_class_name(dicc["class"])
+                for dicc in teams_of_detected_objects
+            ],
+            dtype=object,
+        )
+        yolo_class_labels = np.array(
+            [
+                self._normalize_detection_class_name(class_name)
+                for class_name in detection_class_labels
+            ],
+            dtype=object,
+        )
+        subphase_rows.append(("Construir arrays de labels", (perf_counter() - t0) * 1000.0))
+
+        t0 = perf_counter()
+        self._enrich_metadata(
+            detections_sv,
+            teams_labels,
+            class_labels,
+            yolo_class_labels,
+            teams_of_detected_objects,
+            field_positions,
+            ground_points_projected,
+        )
+        subphase_rows.append(("Enriquecer metadata de detecciones", (perf_counter() - t0) * 1000.0))
+        return {
+            "payload": (
+                teams_of_detected_objects,
+                teams_labels,
+                class_labels,
+                yolo_class_labels,
+            ),
+            "subphase_rows": subphase_rows,
+        }
+
+    def _phase_update_bytetrack(
+        self,
+        detections_sv,
+        teams_labels,
+        class_labels,
+        yolo_class_labels,
+    ):
+        return self.tracker.update_with_detections(
+            detections_sv,
+            teams_labels,
+            class_labels,
+            yolo_class_labels=yolo_class_labels,
+        )
+
+    @staticmethod
+    def _phase_initialize_empty_frame_tracks(tracks):
+        for key in tracks.keys():
+            tracks[key].append({})
+
+    def _phase_process_tracked_detections(
+        self,
+        sorted_tracked_detections,
+        canonical_state,
+        raw_to_canonical_id,
+        canonical_to_raw_id,
+        used_canonical_ids_in_frame,
+        tracks,
+        accepted_raw_detection_indexes,
+        collect_visual_debug,
+        n_frame,
+        pending_detections,
+        ball_candidates,
+        bytetrack_discard_reason_by_raw_idx,
+    ):
+        for object_detected in sorted_tracked_detections:
+            bbox, _, confidence, _, tracker_id, metadata = object_detected
+            bbox = self._bbox_to_list(bbox)
+            confidence = float(confidence)
+            class_name, detection_class_candidates = self._primary_class_from_metadata(
+                metadata
+            )
+            if class_name is None:
+                continue
+            detected_team = metadata["team"]
+            field_position = metadata["field_position"]
+            raw_detection_idx = metadata["raw_det_idx"]
+            detection_shirt_color = metadata.get("shirt_color")
+
+            if class_name == "ball":
+                ball_candidates.append(
+                    {
+                        "bbox": bbox,
+                        "confidence": confidence,
+                        "metadata": metadata,
+                        "source": "tracked",
+                        "raw_det_idx": raw_detection_idx,
+                    }
+                )
+                continue
+
+            raw_tracker_id = int(tracker_id)
+            canonical_id = raw_to_canonical_id.get(raw_tracker_id)
+            output_class_name = class_name
+            if canonical_id is not None:
+                previous_state = canonical_state.get(canonical_id)
+                if previous_state is None:
+                    if collect_visual_debug and raw_detection_idx is not None:
+                        bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                            "reason_pre": "canonical_state_missing",
+                        }
+                    canonical_id = None
+                elif canonical_id in used_canonical_ids_in_frame:
+                    if collect_visual_debug and raw_detection_idx is not None:
+                        bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                            "reason_pre": "canonical_id_used_in_frame",
+                        }
+                    canonical_id = None
+                else:
+                    output_class_name = previous_state["class_name"]
+                    if output_class_name not in tracks:
+                        if collect_visual_debug and raw_detection_idx is not None:
+                            bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                                "reason_pre": "canonical_class_unsupported",
+                            }
+                        canonical_id = None
+                    else:
+                        resolved_class, resolved_reason = (
+                            self._resolve_candidate_class_for_detection_debug(
+                                previous_state,
+                                class_name,
+                                detected_team,
+                                bbox,
+                                field_position,
+                                n_frame,
+                                detection_class_candidates=detection_class_candidates,
+                                detection_shirt_color=detection_shirt_color,
+                            )
+                        )
+                        if resolved_class is None:
+                            if collect_visual_debug and raw_detection_idx is not None:
+                                bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                                    "reason_pre": str(resolved_reason or "canonical_gate_failed"),
+                                }
+                        else:
+                            output_class_name = resolved_class
+                        canonical_id = None
+
+            if class_name in {"player", "goalkeeper"}:
+                (
+                    special_override_id,
+                    special_override_class_name,
+                    special_override_distance_sq,
+                ) = (
+                    self._best_special_penalty_seed_id(
+                        bbox,
+                        [
+                            candidate_id
+                            for candidate_id in canonical_state.keys()
+                            if candidate_id not in used_canonical_ids_in_frame
+                        ],
+                        canonical_state,
+                        class_name,
+                        detected_team,
+                        n_frame,
+                        field_position=field_position,
+                        detection_class_candidates=detection_class_candidates,
+                        detection_shirt_color=detection_shirt_color,
+                    )
+                )
+                should_apply_special_override = (
+                    special_override_id is not None
+                    and special_override_class_name is not None
+                )
+                if (
+                    should_apply_special_override
+                    and canonical_id is not None
+                    and not canonical_state.get(canonical_id, {}).get(
+                        "special_penalty_seed",
+                        False,
+                    )
+                ):
+                    current_state = canonical_state.get(canonical_id)
+                    current_lost_frames = max(
+                        0,
+                        n_frame - int(current_state.get("last_frame", n_frame)),
+                    ) if isinstance(current_state, dict) else 0
+                    current_distance_sq = self._bbox_distance_sq(
+                        current_state.get("bbox") if isinstance(current_state, dict) else None,
+                        bbox,
+                        class_name=output_class_name,
+                        field_position_a=(
+                            current_state.get("field_position")
+                            if isinstance(current_state, dict)
+                            else None
+                        ),
+                        field_position_b=field_position,
+                    )
+                    should_apply_special_override = (
+                        current_lost_frames > 1
+                        and special_override_distance_sq is not None
+                        and (
+                            current_distance_sq is None
+                            or special_override_distance_sq < current_distance_sq
+                        )
+                    )
+                if should_apply_special_override:
+                    canonical_id = special_override_id
+                    output_class_name = special_override_class_name
+
+            if canonical_id is None:
+                output_class_name = class_name
+                if collect_visual_debug and raw_detection_idx is not None:
+                    entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                        int(raw_detection_idx),
+                        {},
+                    )
+                    entry.setdefault("reason_pre", "raw_tracker_id_unmapped_or_rejected")
+                pending_detections.append(
+                    {
+                        "raw_tracker_id": raw_tracker_id,
+                        "bbox": bbox,
+                        "confidence": confidence,
+                        "detected_team": detected_team,
+                        "field_position": field_position,
+                        "metadata": metadata,
+                        "preferred_class_name": output_class_name,
+                        "raw_detection_idx": raw_detection_idx,
+                        "detection_class_candidates": detection_class_candidates,
+                        "shirt_color": detection_shirt_color,
+                    }
+                )
+                continue
+
+            self._commit_assignment(
+                canonical_to_raw_id,
+                raw_to_canonical_id,
+                raw_tracker_id,
+                canonical_state,
+                n_frame,
+                used_canonical_ids_in_frame,
+                tracks,
+                accepted_raw_detection_indexes,
+                collect_visual_debug,
+                canonical_id,
+                output_class_name,
+                bbox,
+                confidence,
+                detected_team,
+                field_position,
+                metadata,
+                raw_detection_idx=raw_detection_idx,
+                detection_class_candidates=detection_class_candidates,
+            )
+
+    def _phase_assign_pending_detections(
+        self,
+        pending_detections,
+        canonical_state,
+        used_canonical_ids_in_frame,
+        n_frame,
+        collect_visual_debug,
+        bytetrack_discard_reason_by_raw_idx,
+        canonical_to_raw_id,
+        raw_to_canonical_id,
+        tracks,
+        accepted_raw_detection_indexes,
+    ):
+        available_ids = [
+            candidate_id
+            for candidate_id in canonical_state.keys()
+            if candidate_id not in used_canonical_ids_in_frame
+        ]
+        pending_assignments = self._assign_pending_by_lost_order(
+            pending_detections,
+            available_ids,
+            canonical_state,
+            n_frame,
+        )
+
+        for pending_idx, pending in enumerate(pending_detections):
+            assignment = pending_assignments.get(pending_idx)
+            if assignment is not None:
+                canonical_id, output_class_name = assignment
+            else:
+                output_class_name = pending["preferred_class_name"]
+                class_limit = self.max_tracks_per_class.get(output_class_name)
+                if class_limit is not None:
+                    class_count = self._count_ids_for_class(
+                        canonical_state,
+                        output_class_name,
+                        current_frame=n_frame,
+                    )
+                    if class_count >= int(class_limit):
+                        if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                            entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                                int(pending["raw_detection_idx"]),
+                                {},
+                            )
+                            entry["reason_post"] = "canonical_class_limit_reached"
+                        continue
+                next_free_id = self._next_free_canonical_id(canonical_state)
+                if next_free_id is None:
+                    if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                        entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                            int(pending["raw_detection_idx"]),
+                            {},
+                        )
+                        entry["reason_post"] = "canonical_no_free_id"
+                    continue
+                canonical_id = next_free_id
+
+            self._commit_assignment(
+                canonical_to_raw_id,
+                raw_to_canonical_id,
+                pending["raw_tracker_id"],
+                canonical_state,
+                n_frame,
+                used_canonical_ids_in_frame,
+                tracks,
+                accepted_raw_detection_indexes,
+                collect_visual_debug,
+                canonical_id,
+                output_class_name,
+                pending["bbox"],
+                pending["confidence"],
+                pending["detected_team"],
+                pending["field_position"],
+                pending["metadata"],
+                raw_detection_idx=pending.get("raw_detection_idx"),
+                detection_class_candidates=pending.get("detection_class_candidates"),
+            )
+            if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                # Mark as accepted if it came from YOLO index.
+                try:
+                    bytetrack_discard_reason_by_raw_idx.pop(
+                        int(pending["raw_detection_idx"]),
+                        None,
+                    )
+                except (TypeError, ValueError):
+                    pass
+
+    @staticmethod
+    def _phase_emit_reserved_seed_tracks(
+        canonical_state,
+        used_canonical_ids_in_frame,
+        tracks,
+        n_frame,
+        field_projection,
+        build_reserved_seed_track_payload_fn,
+    ):
+        for canonical_id, state in canonical_state.items():
+            if canonical_id in used_canonical_ids_in_frame:
+                continue
+            if not state.get("reserved_seed", False):
+                continue
+            tracks["player"][n_frame][canonical_id] = build_reserved_seed_track_payload_fn(
+                state,
+                field_projection,
+            )
+
+    def _phase_collect_raw_ball_candidates(
+        self,
+        detections,
+        field_positions,
+        ground_points_projected,
+        ball_candidates,
+    ):
+        if detections.boxes is None or len(detections.boxes) <= 0:
+            return
+        boxes = detections.boxes
+        xyxy = boxes.xyxy.cpu().numpy()
+        conf = boxes.conf.cpu().numpy()
+        cls = boxes.cls.cpu().numpy().astype(int)
+        for raw_idx, (bbox, score, cid) in enumerate(zip(xyxy, conf, cls)):
+            class_name = self._normalize_detection_class_name(detections.names[cid])
+            if class_name != "ball" or score < self.ball_min_conf:
+                continue
+            x1, y1, x2, y2 = bbox.tolist()
+            ball_candidates.append(
+                {
+                    "bbox": [x1, y1, x2, y2],
+                    "confidence": float(score),
+                    "metadata": {
+                        "team": None,
+                        "distances": None,
+                        "shirt_color": None,
+                        "bbox_size": float((x2 - x1) * (y2 - y1)),
+                        "field_position": (
+                            field_positions[raw_idx]
+                            if raw_idx < len(field_positions)
+                            else None
+                        ),
+                        "ground_point_image": (
+                            ground_points_projected[raw_idx]
+                            if raw_idx < len(ground_points_projected)
+                            else None
+                        ),
+                    },
+                    "source": "raw",
+                    "raw_det_idx": int(raw_idx),
+                }
+            )
+
+    def _phase_select_and_update_ball_track(
+        self,
+        ball_candidates,
+        ball_state,
+        n_frame,
+        frame_size,
+        tracks,
+        collect_visual_debug,
+        accepted_raw_detection_indexes,
+    ):
+        selected_ball = self._select_ball_candidate(
+            ball_candidates,
+            ball_state,
+            n_frame,
+            frame_size=frame_size,
+        )
+        if selected_ball is None:
+            return ball_state
+        tracks["ball"][n_frame][0] = self._build_ball_track_payload(
+            selected_ball["bbox"],
+            selected_ball["confidence"],
+            selected_ball["metadata"],
+        )
+        if collect_visual_debug and selected_ball.get("raw_det_idx") is not None:
+            accepted_raw_detection_indexes.add(int(selected_ball["raw_det_idx"]))
+        return self._update_ball_state(
+            ball_state if self._ball_state_is_active(ball_state, n_frame) else None,
+            selected_ball["bbox"],
+            n_frame,
+        )
+
+    def _phase_update_possession(self, tracks, n_frame):
+        frame_tracks_for_possession = {
+            "player": tracks["player"][n_frame],
+            "goalkeeper": tracks["goalkeeper"][n_frame],
+            "referee": tracks["referee"][n_frame],
+            "ball": tracks["ball"][n_frame],
+        }
+        possession_info = self.possession_estimator.update_frame(
+            n_frame,
+            frame_tracks_for_possession,
+        )
+        self._attach_possession_metadata(tracks, n_frame, possession_info)
+
+    @staticmethod
+    def _phase_build_visual_debug_frame(
+        collect_visual_debug,
+        raw_detections,
+        accepted_raw_detection_indexes,
+        bytetrack_raw_detection_indexes,
+        bytetrack_id_by_raw_idx,
+        bytetrack_discard_reason_by_raw_idx,
+        visual_debug_frames,
+    ):
+        if not collect_visual_debug:
+            return
+        discarded = [
+            raw_detection
+            for raw_detection in raw_detections
+            if int(raw_detection["raw_det_idx"]) not in accepted_raw_detection_indexes
+        ]
+        discarded_not_tracked = []
+        discarded_tracked_no_canonical = []
+        for det in discarded:
+            raw_idx = int(det.get("raw_det_idx"))
+            if raw_idx in bytetrack_raw_detection_indexes:
+                payload = dict(det)
+                payload["bytetrack_id"] = bytetrack_id_by_raw_idx.get(raw_idx)
+                reason_info = bytetrack_discard_reason_by_raw_idx.get(raw_idx, {})
+                reason_pre = reason_info.get("reason_pre")
+                reason_post = reason_info.get("reason_post")
+                if reason_pre and reason_post:
+                    payload["discard_reason"] = f"{reason_pre}|{reason_post}"
+                elif reason_post:
+                    payload["discard_reason"] = str(reason_post)
+                elif reason_pre:
+                    payload["discard_reason"] = str(reason_pre)
+                discarded_tracked_no_canonical.append(payload)
+            else:
+                discarded_not_tracked.append(det)
+        visual_debug_frames.append(
+            {
+                "raw_detections": raw_detections,
+                "discarded_detections": discarded,
+                "discarded_yolo_not_tracked": discarded_not_tracked,
+                "discarded_bytetrack_not_canonical": discarded_tracked_no_canonical,
+            }
+        )
+
+    @staticmethod
+    def _phase_run_frame_hook(frame_hook, tracks, n_frame):
+        subphase_rows = []
+        t0 = perf_counter()
+        is_callable = callable(frame_hook)
+        subphase_rows.append(("Comprobar callable(frame_hook)", (perf_counter() - t0) * 1000.0))
+
+        if is_callable:
+            t0 = perf_counter()
+            frame_hook(tracks, n_frame)
+            subphase_rows.append(("Ejecutar frame_hook.on_frame", (perf_counter() - t0) * 1000.0))
+        else:
+            subphase_rows.append(("Ejecutar frame_hook.on_frame", 0.0))
+        return subphase_rows
+
     def _attach_possession_metadata(self, tracks, frame_id, possession_info):
         owning_team_id = possession_info.get("team_id")
         owning_player_id = possession_info.get("player_id")
@@ -186,7 +821,14 @@ class Tracker(TrackerLogicMixin):
                 "nearest_team_id": possession_nearest_team_id,
             }
 
-    def get_tracks(self, video, show_kmeans=False, frame_hook=None, collect_visual_debug=False):
+    def get_tracks(
+        self,
+        video,
+        show_kmeans=False,
+        frame_hook=None,
+        collect_visual_debug=False,
+        profile_phases=False,
+    ):
         self.possession_estimator = TeamPossessionEstimator(self.possession_config)
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [], "possession": []}
 
@@ -201,27 +843,73 @@ class Tracker(TrackerLogicMixin):
         
         ball_state = None
         for n_frame, detections in enumerate(model_detections):
-            detections.names = {k: self._normalize_detection_class_name(v) for k, v in detections.names.items()}
-            
-            detections_sv = sv.Detections.from_ultralytics(detections)
+            frame_phase_rows = []
 
-            frame_size = None if detections.orig_img is None else (int(detections.orig_img.shape[1]), int(detections.orig_img.shape[0]))
-            
-            raw_detections, detection_class_labels = self._get_raw_detections(detections, collect_visual_debug) 
+            (
+                prepare_phase_result,
+                elapsed_ms,
+            ) = self._measure_phase_execution(
+                self._phase_prepare_frame_inputs,
+                detections,
+                collect_visual_debug,
+            )
+            (
+                (
+                    detections_sv,
+                    frame_size,
+                    raw_detections,
+                    detection_class_labels,
+                    field_projection,
+                    field_positions,
+                    ground_points_projected,
+                )
+            ) = prepare_phase_result["payload"]
+            frame_phase_rows.append((
+                "Preparar detecciones y proyección",
+                elapsed_ms,
+                prepare_phase_result.get("subphase_rows"),
+            ))
 
-            field_projection, field_positions, ground_points_projected = self._get_field_projection_and_positions(detections_sv, detection_class_labels, detections.orig_img)
+            (
+                assign_phase_result,
+                elapsed_ms,
+            ) = self._measure_phase_execution(
+                self._phase_assign_team_and_enrich_metadata,
+                detections,
+                detections_sv,
+                detection_class_labels,
+                show_kmeans,
+                field_positions,
+                ground_points_projected,
+            )
+            (
+                (
+                    teams_of_detected_objects,
+                    teams_labels,
+                    class_labels,
+                    yolo_class_labels,
+                )
+            ) = assign_phase_result["payload"]
+            frame_phase_rows.append((
+                "Asignar equipo y enriquecer metadata",
+                elapsed_ms,
+                assign_phase_result.get("subphase_rows"),
+            ))
 
-            teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
+            tracks_detection, elapsed_ms = self._measure_phase_execution(
+                self._phase_update_bytetrack,
+                detections_sv,
+                teams_labels,
+                class_labels,
+                yolo_class_labels,
+            )
+            frame_phase_rows.append(("Asociación ByteTrack", elapsed_ms))
 
-            teams_labels = np.array([dicc["team"] for dicc in teams_of_detected_objects], dtype=object)
-            class_labels = np.array([dicc["class"] for dicc in teams_of_detected_objects], dtype=object)
-
-            self._enrich_metadata(detections_sv, teams_labels, class_labels, teams_of_detected_objects, field_positions, ground_points_projected)
-
-            tracks_detection = self.tracker.update_with_detections(detections_sv, teams_labels, class_labels)
-            
-            for key in tracks.keys():
-                tracks[key].append({})
+            _, elapsed_ms = self._measure_phase_execution(
+                self._phase_initialize_empty_frame_tracks,
+                tracks,
+            )
+            frame_phase_rows.append(("Inicializar contenedores de frame", elapsed_ms))
 
             sorted_tracked_detections = self._sort_tracked_detections(tracks_detection)
 
@@ -234,359 +922,100 @@ class Tracker(TrackerLogicMixin):
 
             pending_detections = []
             ball_candidates = []
-            
-            for object_detected in sorted_tracked_detections:
-                bbox, _, confidence, _, tracker_id, metadata = object_detected
-                bbox = self._bbox_to_list(bbox)
-                confidence = float(confidence)
-                class_name = metadata["class_name"]
-                detected_team = metadata["team"]
-                field_position = metadata["field_position"]
-                raw_detection_idx = metadata["raw_det_idx"]
 
-                if class_name == "ball":
-                    ball_candidates.append(
-                        {
-                            "bbox": bbox,
-                            "confidence": confidence,
-                            "metadata": metadata,
-                            "source": "tracked",
-                            "raw_det_idx": raw_detection_idx,
-                        }
-                    )
-                    continue
-
-                raw_tracker_id = int(tracker_id)
-                canonical_id = raw_to_canonical_id.get(raw_tracker_id)
-                output_class_name = class_name
-                if canonical_id is not None:
-                    previous_state = canonical_state.get(canonical_id)
-                    if previous_state is None:
-                        if collect_visual_debug and raw_detection_idx is not None:
-                            bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
-                                "reason_pre": "canonical_state_missing",
-                            }
-                        canonical_id = None
-                    elif canonical_id in used_canonical_ids_in_frame:
-                        if collect_visual_debug and raw_detection_idx is not None:
-                            bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
-                                "reason_pre": "canonical_id_used_in_frame",
-                            }
-                        canonical_id = None
-                    else:
-                        output_class_name = previous_state["class_name"]
-                        if output_class_name not in tracks:
-                            if collect_visual_debug and raw_detection_idx is not None:
-                                bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
-                                    "reason_pre": "canonical_class_unsupported",
-                                }
-                            canonical_id = None
-                        else:
-                            resolved_class, resolved_reason = (
-                                self._resolve_candidate_class_for_detection_debug(
-                                    previous_state,
-                                    class_name,
-                                    detected_team,
-                                    bbox,
-                                    field_position,
-                                    n_frame,
-                                )
-                            )
-                            if resolved_class is None:
-                                if collect_visual_debug and raw_detection_idx is not None:
-                                    bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
-                                        "reason_pre": str(resolved_reason or "canonical_gate_failed"),
-                                    }
-                            canonical_id = None
-
-                if class_name in {"player", "goalkeeper"}:
-                    (
-                        special_override_id,
-                        special_override_class_name,
-                        special_override_distance_sq,
-                    ) = (
-                        self._best_special_penalty_seed_id(
-                            bbox,
-                            [
-                                candidate_id
-                                for candidate_id in canonical_state.keys()
-                                if candidate_id not in used_canonical_ids_in_frame
-                            ],
-                            canonical_state,
-                            class_name,
-                            detected_team,
-                            n_frame,
-                            field_position=field_position,
-                        )
-                    )
-                    should_apply_special_override = (
-                        special_override_id is not None
-                        and special_override_class_name is not None
-                    )
-                    if (
-                        should_apply_special_override
-                        and canonical_id is not None
-                        and not canonical_state.get(canonical_id, {}).get(
-                            "special_penalty_seed",
-                            False,
-                        )
-                    ):
-                        current_state = canonical_state.get(canonical_id)
-                        current_lost_frames = max(
-                            0,
-                            n_frame - int(current_state.get("last_frame", n_frame)),
-                        ) if isinstance(current_state, dict) else 0
-                        current_distance_sq = self._bbox_distance_sq(
-                            current_state.get("bbox") if isinstance(current_state, dict) else None,
-                            bbox,
-                            class_name=output_class_name,
-                            field_position_a=(
-                                current_state.get("field_position")
-                                if isinstance(current_state, dict)
-                                else None
-                            ),
-                            field_position_b=field_position,
-                        )
-                        should_apply_special_override = (
-                            current_lost_frames > 1
-                            and special_override_distance_sq is not None
-                            and (
-                                current_distance_sq is None
-                                or special_override_distance_sq < current_distance_sq
-                            )
-                        )
-                    if should_apply_special_override:
-                        canonical_id = special_override_id
-                        output_class_name = special_override_class_name
-
-                if canonical_id is None:
-                    output_class_name = class_name
-                    if collect_visual_debug and raw_detection_idx is not None:
-                        entry = bytetrack_discard_reason_by_raw_idx.setdefault(
-                            int(raw_detection_idx),
-                            {},
-                        )
-                        entry.setdefault("reason_pre", "raw_tracker_id_unmapped_or_rejected")
-                    pending_detections.append(
-                        {
-                            "raw_tracker_id": raw_tracker_id,
-                            "bbox": bbox,
-                            "confidence": confidence,
-                            "detected_team": detected_team,
-                            "field_position": field_position,
-                            "metadata": metadata,
-                            "preferred_class_name": output_class_name,
-                            "raw_detection_idx": raw_detection_idx,
-                        }
-                    )
-                    continue
-
-                self._commit_assignment(
-                    canonical_to_raw_id,
-                    raw_to_canonical_id,
-                    raw_tracker_id,
-                    canonical_state,
-                    n_frame,
-                    used_canonical_ids_in_frame,
-                    tracks,
-                    accepted_raw_detection_indexes,
-                    collect_visual_debug,
-                    canonical_id,
-                    output_class_name,
-                    bbox,
-                    confidence,
-                    detected_team,
-                    field_position,
-                    metadata,
-                    raw_detection_idx=raw_detection_idx,
-                )
-
-            available_ids = [
-                candidate_id
-                for candidate_id in canonical_state.keys()
-                if candidate_id not in used_canonical_ids_in_frame
-            ]
-            pending_assignments = self._assign_pending_by_lost_order(
-                pending_detections,
-                available_ids,
+            _, elapsed_ms = self._measure_phase_execution(
+                self._phase_process_tracked_detections,
+                sorted_tracked_detections,
                 canonical_state,
+                raw_to_canonical_id,
+                canonical_to_raw_id,
+                used_canonical_ids_in_frame,
+                tracks,
+                accepted_raw_detection_indexes,
+                collect_visual_debug,
                 n_frame,
+                pending_detections,
+                ball_candidates,
+                bytetrack_discard_reason_by_raw_idx,
             )
+            frame_phase_rows.append(("Canonización inicial desde tracks detectados", elapsed_ms))
 
-            for pending_idx, pending in enumerate(pending_detections):
-                assignment = pending_assignments.get(pending_idx)
-                if assignment is not None:
-                    canonical_id, output_class_name = assignment
-                else:
-                    output_class_name = pending["preferred_class_name"]
-                    class_limit = self.max_tracks_per_class.get(output_class_name)
-                    if class_limit is not None:
-                        class_count = self._count_ids_for_class(
-                            canonical_state,
-                            output_class_name,
-                            current_frame=n_frame,
-                        )
-                        if class_count >= int(class_limit):
-                            if collect_visual_debug and pending.get("raw_detection_idx") is not None:
-                                entry = bytetrack_discard_reason_by_raw_idx.setdefault(
-                                    int(pending["raw_detection_idx"]),
-                                    {},
-                                )
-                                entry["reason_post"] = "canonical_class_limit_reached"
-                            continue
-                    next_free_id = self._next_free_canonical_id(canonical_state)
-                    if next_free_id is None:
-                        if collect_visual_debug and pending.get("raw_detection_idx") is not None:
-                            entry = bytetrack_discard_reason_by_raw_idx.setdefault(
-                                int(pending["raw_detection_idx"]),
-                                {},
-                            )
-                            entry["reason_post"] = "canonical_no_free_id"
-                        continue
-                    canonical_id = next_free_id
+            _, elapsed_ms = self._measure_phase_execution(
+                self._phase_assign_pending_detections,
+                pending_detections,
+                canonical_state,
+                used_canonical_ids_in_frame,
+                n_frame,
+                collect_visual_debug,
+                bytetrack_discard_reason_by_raw_idx,
+                canonical_to_raw_id,
+                raw_to_canonical_id,
+                tracks,
+                accepted_raw_detection_indexes,
+            )
+            frame_phase_rows.append(("Resolver pendientes y asignar IDs canónicos", elapsed_ms))
 
-                self._commit_assignment(
-                    canonical_to_raw_id,
-                    raw_to_canonical_id,
-                    pending["raw_tracker_id"],
-                    canonical_state,
-                    n_frame,
-                    used_canonical_ids_in_frame,
-                    tracks,
-                    accepted_raw_detection_indexes,
-                    collect_visual_debug,
-                    canonical_id,
-                    output_class_name,
-                    pending["bbox"],
-                    pending["confidence"],
-                    pending["detected_team"],
-                    pending["field_position"],
-                    pending["metadata"],
-                    raw_detection_idx=pending.get("raw_detection_idx"),
-                )
-                if collect_visual_debug and pending.get("raw_detection_idx") is not None:
-                    # Mark as accepted if it came from YOLO index.
-                    try:
-                        bytetrack_discard_reason_by_raw_idx.pop(
-                            int(pending["raw_detection_idx"]),
-                            None,
-                        )
-                    except (TypeError, ValueError):
-                        pass
+            _, elapsed_ms = self._measure_phase_execution(
+                self._phase_emit_reserved_seed_tracks,
+                canonical_state,
+                used_canonical_ids_in_frame,
+                tracks,
+                n_frame,
+                field_projection,
+                self._build_reserved_seed_track_payload,
+            )
+            frame_phase_rows.append(("Emitir tracks de seeds reservadas", elapsed_ms))
 
-            for canonical_id, state in canonical_state.items():
-                if canonical_id in used_canonical_ids_in_frame:
-                    continue
-                if not state.get("reserved_seed", False):
-                    continue
-                tracks["player"][n_frame][canonical_id] = self._build_reserved_seed_track_payload(
-                    state,
-                    field_projection,
-                )
+            _, elapsed_ms = self._measure_phase_execution(
+                self._phase_collect_raw_ball_candidates,
+                detections,
+                field_positions,
+                ground_points_projected,
+                ball_candidates,
+            )
+            frame_phase_rows.append(("Añadir candidatas de balón YOLO crudo", elapsed_ms))
 
-            if detections.boxes is not None and len(detections.boxes) > 0:
-                boxes = detections.boxes
-                xyxy = boxes.xyxy.cpu().numpy()
-                conf = boxes.conf.cpu().numpy()
-                cls = boxes.cls.cpu().numpy().astype(int)
-                for raw_idx, (bbox, score, cid) in enumerate(zip(xyxy, conf, cls)):
-                    class_name = self._normalize_detection_class_name(detections.names[cid])
-                    if class_name != "ball" or score < self.ball_min_conf:
-                        continue
-                    x1, y1, x2, y2 = bbox.tolist()
-                    ball_candidates.append(
-                        {
-                            "bbox": [x1, y1, x2, y2],
-                            "confidence": float(score),
-                            "metadata": {
-                                "team": None,
-                                "distances": None,
-                                "shirt_color": None,
-                                "bbox_size": float((x2 - x1) * (y2 - y1)),
-                                "field_position": (
-                                    field_positions[raw_idx]
-                                    if raw_idx < len(field_positions)
-                                    else None
-                                ),
-                                "ground_point_image": (
-                                    ground_points_projected[raw_idx]
-                                    if raw_idx < len(ground_points_projected)
-                                    else None
-                                ),
-                            },
-                            "source": "raw",
-                            "raw_det_idx": int(raw_idx),
-                        }
-                    )
-
-            selected_ball = self._select_ball_candidate(
+            ball_state, elapsed_ms = self._measure_phase_execution(
+                self._phase_select_and_update_ball_track,
                 ball_candidates,
                 ball_state,
                 n_frame,
-                frame_size=frame_size,
+                frame_size,
+                tracks,
+                collect_visual_debug,
+                accepted_raw_detection_indexes,
             )
-            if selected_ball is not None:
-                tracks["ball"][n_frame][0] = self._build_ball_track_payload(
-                    selected_ball["bbox"],
-                    selected_ball["confidence"],
-                    selected_ball["metadata"],
-                )
-                if collect_visual_debug and selected_ball.get("raw_det_idx") is not None:
-                    accepted_raw_detection_indexes.add(int(selected_ball["raw_det_idx"]))
-                ball_state = self._update_ball_state(
-                    ball_state if self._ball_state_is_active(ball_state, n_frame) else None,
-                    selected_ball["bbox"],
-                    n_frame,
-                )
+            frame_phase_rows.append(("Seleccionar balón y actualizar estado", elapsed_ms))
 
-            frame_tracks_for_possession = {
-                "player": tracks["player"][n_frame],
-                "goalkeeper": tracks["goalkeeper"][n_frame],
-                "referee": tracks["referee"][n_frame],
-                "ball": tracks["ball"][n_frame],
-            }
-            possession_info = self.possession_estimator.update_frame(
+            _, elapsed_ms = self._measure_phase_execution(
+                self._phase_update_possession,
+                tracks,
                 n_frame,
-                frame_tracks_for_possession,
             )
-            self._attach_possession_metadata(tracks, n_frame, possession_info)
+            frame_phase_rows.append(("Actualizar posesión del frame", elapsed_ms))
 
-            if collect_visual_debug:
-                discarded = [
-                    raw_detection
-                    for raw_detection in raw_detections
-                    if int(raw_detection["raw_det_idx"]) not in accepted_raw_detection_indexes
-                ]
-                discarded_not_tracked = []
-                discarded_tracked_no_canonical = []
-                for det in discarded:
-                    raw_idx = int(det.get("raw_det_idx"))
-                    if raw_idx in bytetrack_raw_detection_indexes:
-                        payload = dict(det)
-                        payload["bytetrack_id"] = bytetrack_id_by_raw_idx.get(raw_idx)
-                        reason_info = bytetrack_discard_reason_by_raw_idx.get(raw_idx, {})
-                        reason_pre = reason_info.get("reason_pre")
-                        reason_post = reason_info.get("reason_post")
-                        if reason_pre and reason_post:
-                            payload["discard_reason"] = f"{reason_pre}|{reason_post}"
-                        elif reason_post:
-                            payload["discard_reason"] = str(reason_post)
-                        elif reason_pre:
-                            payload["discard_reason"] = str(reason_pre)
-                        discarded_tracked_no_canonical.append(payload)
-                    else:
-                        discarded_not_tracked.append(det)
-                visual_debug_frames.append(
-                    {
-                        "raw_detections": raw_detections,
-                        "discarded_detections": discarded,
-                        "discarded_yolo_not_tracked": discarded_not_tracked,
-                        "discarded_bytetrack_not_canonical": discarded_tracked_no_canonical,
-                    }
-                )
+            _, elapsed_ms = self._measure_phase_execution(
+                self._phase_build_visual_debug_frame,
+                collect_visual_debug,
+                raw_detections,
+                accepted_raw_detection_indexes,
+                bytetrack_raw_detection_indexes,
+                bytetrack_id_by_raw_idx,
+                bytetrack_discard_reason_by_raw_idx,
+                visual_debug_frames,
+            )
+            frame_phase_rows.append(("Construir debug visual del frame", elapsed_ms))
 
-            if callable(frame_hook):
-                frame_hook(tracks, n_frame)
+            hook_subphase_rows, elapsed_ms = self._measure_phase_execution(
+                self._phase_run_frame_hook,
+                frame_hook,
+                tracks,
+                n_frame,
+            )
+            frame_phase_rows.append(("Ejecutar frame hook", elapsed_ms, hook_subphase_rows))
+
+            if profile_phases:
+                self._print_frame_phase_profile(frame_phase_rows)
         self.visualization_debug_frames = visual_debug_frames if collect_visual_debug else []
         return tracks
     
@@ -602,7 +1031,7 @@ class Tracker(TrackerLogicMixin):
                     raw_detections.append(
                         {
                             "raw_det_idx": int(raw_idx),
-                            "class_name": detections.names[cid],
+                            "class_yolo": self._normalize_detection_class_name(detections.names[cid]),
                             "bbox": [float(v) for v in bbox.tolist()],
                             "confidence": float(score),
                         }
@@ -624,12 +1053,22 @@ class Tracker(TrackerLogicMixin):
     
         return field_projection, field_positions, ground_points_projected
     
-    def _enrich_metadata(self, detections_sv, teams_labels, class_labels, teams_of_detected_objects, field_positions, ground_points_projected):
+    def _enrich_metadata(
+        self,
+        detections_sv,
+        teams_labels,
+        class_labels,
+        yolo_class_labels,
+        teams_of_detected_objects,
+        field_positions,
+        ground_points_projected,
+    ):
         # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
         if detections_sv.data is None:
             detections_sv.data = {}
         detections_sv.data["team"] = teams_labels
         detections_sv.data["class"] = class_labels
+        detections_sv.data["class_yolo"] = yolo_class_labels
         detections_sv.data["distances"] = np.array([dicc["distances"] for dicc in teams_of_detected_objects], dtype=object)
         detections_sv.data["shirt_color"] = np.array([dicc["shirt_color"] for dicc in teams_of_detected_objects], dtype=object)
         detections_sv.data["bbox_size"] = np.array([dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float)
@@ -639,10 +1078,14 @@ class Tracker(TrackerLogicMixin):
         detections_sv.data["raw_det_idx"] = np.arange(len(detections_sv), dtype=np.int32)
 
     def _sort_tracked_detections(self, tracks_detection, class_priority={"referee": 0, "goalkeeper": 1, "player": 2, "ball": 3}):
+        def _priority_from_metadata(metadata):
+            class_name, _ = self._primary_class_from_metadata(metadata)
+            return class_priority.get(str(class_name), max(class_priority.values()) + 1)
+
         return sorted(
             list(tracks_detection), 
             key=lambda item: (
-                class_priority[str(item[5]["class_name"])],
+                _priority_from_metadata(item[5]),
                 -float(item[2])
             )
         )
@@ -684,6 +1127,7 @@ class Tracker(TrackerLogicMixin):
         field_position,
         metadata,
         raw_detection_idx=None,
+        detection_class_candidates=None,
     ):
         previous_owner_raw_id = canonical_to_raw_id.get(canonical_id)
         previous_canonical_id = raw_to_canonical_id.get(raw_tracker_id)
@@ -778,6 +1222,7 @@ class Tracker(TrackerLogicMixin):
             "class_name": output_class_name,
             "last_frame": n_frame,
             "team": resolved_team,
+            "shirt_color": self._shirt_color_to_tuple(metadata.get("shirt_color")),
             "field_position": resolved_field_position,
             "movement_samples": movement_samples,
             "mean_step_distance": mean_step_distance,
@@ -786,6 +1231,7 @@ class Tracker(TrackerLogicMixin):
             "step_per_frame_m2": step_per_frame_m2,
             "reserved_seed": False,
             "special_penalty_seed": special_penalty_seed,
+            "class_candidates": list(detection_class_candidates or []),
         }
         used_canonical_ids_in_frame.add(canonical_id)
 
@@ -795,6 +1241,9 @@ class Tracker(TrackerLogicMixin):
             "team": resolved_team,
             "distances": metadata.get("distances"),
             "shirt_color": metadata.get("shirt_color"),
+            "class_tracker": output_class_name,
+            "class_relabel": metadata.get("class"),
+            "class_yolo": metadata.get("class_yolo"),
             "bbox_size": metadata.get("bbox_size"),
             "field_position_m": (
                 list(self._field_position_to_tuple(field_position))
@@ -812,4 +1261,3 @@ class Tracker(TrackerLogicMixin):
 
         if collect_visual_debug and raw_detection_idx is not None:
             accepted_raw_detection_indexes.add(int(raw_detection_idx))
-

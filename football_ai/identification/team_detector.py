@@ -21,6 +21,8 @@ class TeamDetector:
         self.candidate_classes = [c_name for c_name in ["player", "referee"]]
         self.updated = {class_name: False for class_name in self.candidate_classes}
         self.class_samples = {class_name: [] for class_name in self.candidate_classes}
+        
+        self.contador = 0
 
     def detect_teams(self, frame_detections, show_plot=False):
         shirts = []
@@ -39,7 +41,11 @@ class TeamDetector:
                 if len(self.class_samples[class_name]) > self.min_samples[class_name] and not self.updated[class_name]:
                     self.updated[class_name] = self._update_class_colors(class_name)
                 
+                aux = class_name
                 class_name, team, distances = self._reassign_class(object_detected, shirt_color)
+                if aux != class_name:
+                    self.contador += 1
+
 
                 teams_of_detected_objects.append(
                     {

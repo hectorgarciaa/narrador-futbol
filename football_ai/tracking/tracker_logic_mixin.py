@@ -5,6 +5,25 @@ import numpy as np
 
 class TrackerLogicMixin:
     @staticmethod
+    def _normalize_class_label(class_name):
+        token = str(class_name or "").strip().lower()
+        if not token:
+            return None
+        aliases = {
+            "player": "player",
+            "players": "player",
+            "goalkeeper": "goalkeeper",
+            "gk": "goalkeeper",
+            "keeper": "goalkeeper",
+            "referee": "referee",
+            "ref": "referee",
+            "refs": "referee",
+            "ball": "ball",
+            "balls": "ball",
+        }
+        return aliases.get(token, token)
+
+    @staticmethod
     def _bbox_to_list(bbox):
         if bbox is None:
             return None
@@ -33,6 +52,95 @@ class TrackerLogicMixin:
         if field_position.size < 2 or not np.all(np.isfinite(field_position[:2])):
             return None
         return (float(field_position[0]), float(field_position[1]))
+
+    @staticmethod
+    def _shirt_color_to_tuple(shirt_color):
+        if shirt_color is None:
+            return None
+        color = np.asarray(shirt_color, dtype=np.float32).reshape(-1)
+        if color.size < 3 or not np.all(np.isfinite(color[:3])):
+            return None
+        return (float(color[0]), float(color[1]), float(color[2]))
+
+    @staticmethod
+    def _is_person_like_class(class_name):
+        return class_name in {"player", "goalkeeper", "referee"}
+
+    def _ordered_detection_class_candidates(self, detection_class, detection_class_candidates):
+        ordered = []
+        for candidate_class in [detection_class, *(detection_class_candidates or [])]:
+            normalized = self._normalize_class_label(candidate_class)
+            if normalized is None or normalized in ordered:
+                continue
+            ordered.append(normalized)
+        return ordered
+
+    def _select_detection_class_for_candidate(
+        self,
+        candidate_state,
+        detection_class,
+        detection_class_candidates=None,
+    ):
+        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        ordered_candidates = self._ordered_detection_class_candidates(
+            detection_class,
+            detection_class_candidates,
+        )
+        if not ordered_candidates:
+            return self._normalize_class_label(detection_class)
+
+        if (
+            candidate_state.get("special_penalty_seed")
+            and candidate_class in {"player", "goalkeeper"}
+        ):
+            for class_option in ordered_candidates:
+                if class_option in {"player", "goalkeeper"}:
+                    return class_option
+            return candidate_class
+
+        if candidate_state.get("reserved_seed") and candidate_class == "player":
+            for class_option in ordered_candidates:
+                if class_option in {"player", "goalkeeper"}:
+                    return class_option
+            return "player"
+
+        if candidate_class is not None:
+            for class_option in ordered_candidates:
+                if self._is_compatible_class(candidate_class, class_option):
+                    return class_option
+
+        if candidate_class == "referee":
+            for class_option in ordered_candidates:
+                if class_option in {"referee", "player"}:
+                    return class_option
+
+        if candidate_class == "player":
+            for class_option in ordered_candidates:
+                if class_option in {"player", "goalkeeper", "referee"}:
+                    return class_option
+
+        return ordered_candidates[0]
+
+    def _shirt_color_distance_gate_for_lost_frames(self, lost_frames):
+        base_gate = float(getattr(self, "shirt_color_reassign_distance_gate", 45.0))
+        growth_per_frame = float(
+            getattr(self, "shirt_color_reassign_distance_growth_per_frame", 0.0)
+        )
+        raw_gate = base_gate + (growth_per_frame * max(0, int(lost_frames) - 1))
+        gate_cap = getattr(self, "shirt_color_reassign_distance_cap", None)
+        if gate_cap is not None:
+            raw_gate = min(raw_gate, float(gate_cap))
+        return float(max(1.0, raw_gate))
+
+    def _is_shirt_color_compatible(
+        self,
+        previous_state,
+        detection_shirt_color,
+        current_frame,
+        class_name=None,
+    ):
+        # Color-LAB gate disabled: canonical reassignment no longer vetoes by shirt color.
+        return True
 
     @staticmethod
     def _update_running_stats(prev_count, prev_mean, prev_m2, value):
@@ -805,9 +913,18 @@ class TrackerLogicMixin:
         detection_bbox,
         detection_field_position,
         current_frame,
+        detection_class_candidates=None,
+        detection_shirt_color=None,
     ):
-        candidate_class = candidate_state.get("class_name")
+        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
         if candidate_class is None:
+            return None
+        detection_class = self._select_detection_class_for_candidate(
+            candidate_state,
+            detection_class,
+            detection_class_candidates=detection_class_candidates,
+        )
+        if detection_class is None:
             return None
 
         if (
@@ -936,6 +1053,8 @@ class TrackerLogicMixin:
         detection_bbox,
         detection_field_position,
         current_frame,
+        detection_class_candidates=None,
+        detection_shirt_color=None,
     ):
         """
         Debug helper for canonical reassignment decisions.
@@ -945,9 +1064,16 @@ class TrackerLogicMixin:
             - resolved_class_name: same value that `_resolve_candidate_class_for_detection` would return.
             - reason: None when resolved_class_name is not None, otherwise a short reason code.
         """
-        candidate_class = candidate_state.get("class_name")
+        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
         if candidate_class is None:
             return None, "candidate_class_missing"
+        detection_class = self._select_detection_class_for_candidate(
+            candidate_state,
+            detection_class,
+            detection_class_candidates=detection_class_candidates,
+        )
+        if detection_class is None:
+            return None, "detection_class_missing"
 
         if (
             candidate_state.get("special_penalty_seed")
@@ -1102,6 +1228,8 @@ class TrackerLogicMixin:
                     pending["bbox"],
                     pending.get("field_position"),
                     current_frame,
+                    detection_class_candidates=pending.get("detection_class_candidates"),
+                    detection_shirt_color=pending.get("shirt_color"),
                 )
                 if output_class_name is None:
                     continue
@@ -1376,6 +1504,8 @@ class TrackerLogicMixin:
         detection_team,
         current_frame,
         field_position=None,
+        detection_class_candidates=None,
+        detection_shirt_color=None,
     ):
         best_id = None
         best_output_class = None
@@ -1396,6 +1526,8 @@ class TrackerLogicMixin:
                 bbox,
                 field_position,
                 current_frame,
+                detection_class_candidates=detection_class_candidates,
+                detection_shirt_color=detection_shirt_color,
             )
             if output_class_name is None:
                 continue

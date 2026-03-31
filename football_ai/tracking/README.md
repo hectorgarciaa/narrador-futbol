@@ -43,14 +43,14 @@ tracker = Tracker(
 Si no pasas `field_tracking_conf`, el tracker puede funcionar solo con `bbox` en imagen. En `scripts/track.py`, por defecto se lee esta configuración desde `config.yaml` y se activa la proyección 2D del campo.
 `PnLCalib` no se guarda dentro de este repositorio como código versionado: el propio tracker lo clona en `models/reference_points/pnlcalib_repo/` y descarga sus pesos en la primera ejecución. Por tanto, otra persona que ya tenga este repo solo necesita `git pull`; no tiene que clonar `PnLCalib` manualmente.
 
-### Pipeline interno de `get_tracks(video, show_kmeans)`
+### Pipeline interno de `get_tracks(video, show_kmeans, frame_hook=None, collect_visual_debug=False, profile_phases=False)`
 
 Por cada frame del vídeo:
 
 1. **Detección YOLO** (`Detector.detect`): genera las detecciones brutas del frame.
 2. **Identificación de equipo** (`TeamDetector.detect_teams`): por cada detección de `player/goalkeeper` extrae color de camiseta (KMeans en LAB) y asigna equipo. Puede operar en modo `reference` o `auto-bootstrap`. Si el tracking se lanza desde la interfaz con un `lineup_spec.json`, `auto-bootstrap` sigue usando la mediana de cada cluster pero renombra los equipos por cercanía a los colores definidos por el usuario.
 3. **PnLCalibFieldProjector**: calibra el campo en ese frame y proyecta `player` y `goalkeeper` a coordenadas métricas `[x_m, y_m]` sobre el césped.
-4. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional y, para `player`/`goalkeeper`, incorpora distancia en el campo 2D al coste de asociación.
+4. **ByteTrack** (`ByteTrack.update_with_detections`): asocia las detecciones a tracks con IDs persistentes entre frames. Usa la etiqueta de equipo como penalización adicional, combina doble señal de clase por detección (clase YOLO original + clase reetiquetada por `TeamDetector`) para permitir remapeos controlados cuando discrepan, añade consenso temporal de clase por track y, para `player`/`goalkeeper`, incorpora distancia en el campo 2D al coste de asociación.
 5. **Seeds canónicos opcionales en punto de penalti**: si `reserve_penalty_spot_seed_players=true`, el tracker crea dos tracks semilla sintéticos de clase `player` en los puntos de penalti. No pasan por `TeamDetector`, así que no contaminan el clustering de colores ni tienen equipo asignado. Sí participan en la reasignación canónica por posición de campo, reservando dos IDs para jugadores no visibles al inicio. Mientras no absorban una detección real, también se escriben en el JSON final con `synthetic_seed=true`.
 6. **Lógica especial para los IDs reservados**: esos dos IDs no exigen coincidencia `player/goalkeeper` para recuperar una detección real y no fijan equipo por color durante el tracking. Su equipo se asigna frame a frame durante el propio tracking con el modelo de roles posicionales y el defensa más cercano. Como ya se consideran porteros conocidos, no entran al Set Transformer y se etiquetan manualmente como `POR`. Si defines `tracking.expected_roles_by_team`, o pasas un `lineup_spec.json` desde la interfaz, ese once esperado se usa solo al congelar el `role` estable, no para imponer una plaza táctica distinta en cada frame. El congelado se decide con la evidencia acumulada del jugador durante la ventana de estabilización y luego se asigna una plaza esperada por equipo con la estrategia configurada en `tracking.role_stabilization_expected_roles_assignment` (`hungarian`, `greedy` o `ratio_priority`). El modo `ratio_priority` hace una foto global al llegar a `role_stabilization_window_frames`: con esa evidencia fija intenta asignar plazas esperadas por equipo, y si un rol dominante no es válido para la alineación esperada o una plaza válida ya quedó ocupada, transfiere esa masa a la siguiente plaza válida libre del ranking del jugador. Después exige un ratio acumulado mínimo para esa plaza válida y, además, un ratio mínimo en la propia plaza final. Si aún quedan plazas libres tras ese filtro, resuelve los descartes restantes con una asignación óptima entre jugadores pendientes y slots disponibles y, si todavía queda algún slot del once sin cubrir, completa esas plazas con los tracks ya congelados que seguían sin `expected_role_slot` usando la mejor combinación restante. Cuando un once esperado contiene dos `MC` o dos `DC`, tras congelar ambos slots el sistema los desdobla a `MC_IZQ/MC_DCHO` o `DC_IZQ/DC_DCHO` usando la media acumulada de distancia a las bandas hasta ese instante, en coordenadas ya orientadas por dirección de ataque. Si existe un `lineup_spec.json`, en ese mismo instante también intenta resolver `player_name` combinando `team + display_role_slot`. Los jugadores con menos de `role_stabilization_expected_roles_min_count` observaciones no compiten por plaza táctica en la fase fuerte y primero se congelan con su rol dominante de esa foto. El histórico previo ya no se backfillea: los frames anteriores mantienen la predicción original que tuvieron. Si una detección reaparece con un `raw_tracker_id` ya arrastrando otro canónico, los IDs especiales solo pueden reclamarla si ese canónico no estaba realmente activo y además la geometría favorece al ID especial.
 7. **Reasignación canónica coherente con ByteTrack**: para `player/goalkeeper` con `field_position_m`, la segunda capa de IDs canónicos usa exactamente el mismo gate geométrico que ByteTrack (`field_position_match_distance_*`). No añade un suelo extra ni expansión por velocidad en esa capa, así que no puede reusar un ID final con un salto de campo mayor que el permitido por la capa base.
@@ -62,6 +62,8 @@ Por cada frame del vídeo:
    - y, si hay varias candidatas plausibles, se prioriza la más coherente con la posición esperada y la confianza.
    Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Cuando la trayectoria prevista saca el balón fuera de la imagen, la búsqueda queda anclada al borde por el que salió; no se aceptan reapariciones “hacia atrás” dentro de la pantalla. Solo tras `tracking.ball.max_reassign_lost_frames` frames perdidos se permite una redetección libre por máxima confianza.
 9. **Estimación de posesión online**: tras cerrar el frame, se ejecuta una heurística temporal de posesión (`TeamPossessionEstimator`) que decide `equipo + jugador` en control del balón usando distancia balón-pie, contacto estricto/flexible y señales de movimiento del balón (cambio de dirección, caída de velocidad, continuidad del portador y cambios de equipo). El resultado se inyecta en el propio `tracks` de ese frame para consumo posterior (PathCRF, visualización, análisis).
+
+Si `profile_phases=True`, el tracker imprime por frame los tiempos de cada fase y el total, sin modificar la lógica ni el resultado del pipeline.
 
 ### Formato de salida
 
@@ -121,13 +123,27 @@ ByteTrack es un algoritmo de tracking multi-objeto que mejora otros métodos al 
 
 1. **Primera asociación** (alta confianza): detecciones con `score > track_thresh` se asocian a tracks activos usando distancia IoU + filtro de Kalman.
 2. **Segunda asociación** (baja confianza): detecciones con `0.1 < score < track_thresh` se asocian a tracks perdidos en el paso anterior.
-3. **Nuevos tracks**: detecciones sin asociar inicializan nuevos tracks tentatives.
+3. **Nuevos tracks**: detecciones sin asociar pueden inicializar tracks tentativos, pero antes pasan un filtro anti-solape:
+   - si solapan (IoU > 0) con cualquier track activo (`Tracked` + `is_activated=true`), se descartan;
+   - entre candidatos nuevos, si dos solapan > 0.60, se conserva solo el de mayor confianza.
 4. **Confirmación**: un track pasa a activo después de `minimum_consecutive_frames` frames consecutivos.
 5. **Eliminación**: un track perdido se elimina tras `lost_track_buffer` frames sin detección.
 
 ### Extensión: penalización por equipo
 
 Se ha añadido un atributo `team` a cada `STrack`. Si en la primera asociación se intenta asociar una detección de un equipo distinto al del track, se añade una **penalización** (configurable vía `team_penalty` en config.yaml, por defecto 1000) a la matriz de costes IoU, haciendo esa asociación prácticamente imposible.
+
+### Extensión: doble señal de clase y consenso por track
+
+Cada detección de persona llega al tracking con dos clases:
+- `class_yolo`: clase original de YOLO.
+- `class`: clase reetiquetada por `TeamDetector`.
+
+El matching interno aplica la penalización de clase con este patrón: si `class_team == track.class` no penaliza; si `class_team != track.class` pero `class_yolo == track.class` aplica la relajada (`class_mismatch_relaxed_penalty`); y si ninguna señal apoya al track aplica la fuerte (`class_mismatch_penalty`). Además, cada `STrack` acumula evidencia temporal (`class_vote_weight_relabel`, `class_vote_weight_yolo`) y solo cambia su clase interna cuando la nueva hipótesis supera un margen de consenso (`class_consensus_switch_margin`).
+
+### Extensión: color de camiseta como metadata (sin coste/gate)
+
+El color LAB de camiseta se mantiene en la metadata de detecciones/tracks para análisis y visualización, pero actualmente no añade penalización al coste de ByteTrack ni gate de veto en la canonización.
 
 ### Modos de asignación de equipo (TeamDetector)
 
@@ -166,6 +182,13 @@ Parámetros en `config.yaml`:
 - `bbox_center_distance_gate_px` (normalización en píxeles; escala con frames perdidos)
 - `lost_time_penalty_weight` (penaliza candidatos con más frames perdidos)
 - `lost_time_penalty_max_frames` (normalización del penalizador temporal)
+- `class_mismatch_penalty` (penalización fuerte por mismatch de clase en matching interno)
+- `class_mismatch_relaxed_penalty` (penalización reducida cuando clase YOLO y clase reetiquetada discrepan)
+- `allow_class_remap_when_signals_disagree` (habilita la vía de remapeo por clase cuando hay desacuerdo de señales)
+- `class_vote_weight_relabel` / `class_vote_weight_yolo` (peso de cada señal de clase en el consenso temporal)
+- `class_consensus_switch_margin` (ventaja mínima acumulada para permitir cambio de clase en el track interno)
+- `shirt_color_distance_weight` (actualmente sin efecto en matching interno)
+- `shirt_color_distance_gate` (parámetro legado; sin efecto mientras la penalización LAB esté desactivada)
 - `field_position_match_distance_gate_m` (base del gate espacial en metros)
 - `field_position_match_distance_cap_m` (tope absoluto del gate espacial acumulado)
 - `field_position_match_distance_max_lost_frames` (tope de crecimiento temporal del gate)
@@ -186,6 +209,10 @@ Parámetros en `config.yaml`:
 - `ball.max_reassign_lost_frames`
 - `ball.high_conf_override`
 - `strict_person_class_separation` (si `true`, no mezcla `player` y `goalkeeper`)
+- `use_shirt_color_for_reassign` (actualmente sin efecto: la canonización no veta por color LAB)
+- `shirt_color_reassign_distance_gate` (parámetro legado de color LAB en canonización)
+- `shirt_color_reassign_distance_growth_per_frame` (parámetro legado de color LAB en canonización)
+- `shirt_color_reassign_distance_cap` (parámetro legado de color LAB en canonización)
 - `reserve_penalty_spot_seed_players` (si `true`, reserva dos IDs sintéticos en los puntos de penalti)
 - `reserve_penalty_spot_seed_match_distance_m` (radio máximo en metros para absorber una detección real sobre cada seed)
 - `special_seed_role_team_assignment_enabled` (si `true`, ejecuta el modelo de roles para asignar equipo a los IDs reservados)
@@ -213,11 +240,10 @@ Para reducir ID switches en clips largos, conviene combinar este gate con límit
 - `reassign_min_distance` (imagen, píxeles; útil en clases sin campo)
 - `field_position_match_distance_*` (si el problema está en `player/goalkeeper` con homografía)
 
-Además, se implementa un mecanismo de **tolerancia a cambios temporales de equipo**:
-- Si el equipo asignado cambia en un frame, no se actualiza inmediatamente.
-- Se contabilizan los frames de discordancia en `team_switch_frames`.
-- Solo después de `team_switch_threshold` frames consecutivos (configurable en config.yaml, por defecto 5) con el nuevo equipo se confirma el cambio.
-- Esto evita que falsos positivos del `TeamDetector` contaminen la asignación de equipo.
+Además, se implementa un mecanismo de **consenso temporal de equipo**:
+- Cada track acumula votos de equipo por frame (`team_vote_weight`).
+- El equipo canónico del track solo cambia cuando el nuevo equipo supera al actual por un margen (`team_consensus_switch_margin`).
+- Esto evita que falsos positivos puntuales del `TeamDetector` contaminen la identidad de equipo.
 
 ### Parámetros principales
 

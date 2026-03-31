@@ -265,6 +265,11 @@ def run_tracking_pipeline(args):
             lineup_matcher=lineup_matcher,
         )
 
+        profile_phases_enabled = bool(getattr(args, "profile_phases", False))
+        if not profile_phases_enabled:
+            profile_phases_enabled = bool(tracker_conf.get("profile_phases", False))
+        logger.info("Phase profiling per frame: %s", profile_phases_enabled)
+
         logger.info("Extracting tracks from video...")
         
         tracks = tracker.get_tracks(
@@ -272,6 +277,7 @@ def run_tracking_pipeline(args):
             show_kmeans,
             frame_hook=online_special_seed_role_assigner.on_frame,
             collect_visual_debug=four_panel_enabled,
+            profile_phases=profile_phases_enabled,
         )
 
         if four_panel_enabled:

@@ -72,6 +72,14 @@ def parse_args():
         default=None,
         help="Muestras mínimas por cluster al cerrar bootstrap.",
     )
+    parser.add_argument(
+        "--profile-phases",
+        action="store_true",
+        help=(
+            "Mide y muestra tiempos por fase del pipeline en cada frame. "
+            "No altera resultados, solo añade trazas de rendimiento."
+        ),
+    )
     return parser.parse_args()
 
 

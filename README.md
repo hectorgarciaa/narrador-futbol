@@ -23,7 +23,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 
 ### ✅ Fase 1: Detección, tracking e identificación de equipos
 - Fine-tuning de YOLOv11 para las clases `player`, `goalkeeper`, `referee`, `ball`.
-- Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo.
+- Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo, doble señal de clase (YOLO + reetiquetado por color) y remapeo controlado por consenso.
 - Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
@@ -127,7 +127,7 @@ python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video>_debug_
 | Área | Tecnología |
 |---|---|
 | Detección | YOLOv8 / YOLOv11 (Ultralytics), fine-tuning con dataset Roboflow |
-| Tracking | ByteTrack (supervision), extendido con restricción de equipo y posiciones 2D sobre el campo |
+| Tracking | ByteTrack (supervision), extendido con restricción de equipo, doble señal de clase y posiciones 2D sobre el campo |
 | Identificación de equipo | KMeans (scikit-learn), espacio de color LAB (OpenCV) |
 | Evaluación | NumPy, pandas, Plotly, seaborn, matplotlib |
 | Configuración | YAML (`config.yaml` centralizado) |
@@ -336,6 +336,12 @@ También puedes sobreescribir por terminal los colores de equipo y convertirlos 
 ```bash
 python scripts/track.py video_prueba_ajustado --team-colors "{Madrid:blanco, Wolsfburgo:verde-claro}"
 ```
+Si quieres perfilar cuellos de botella por frame (sin alterar resultados), activa:
+```bash
+python scripts/track.py video_prueba_ajustado --profile-phases
+```
+Esto imprime tiempos por fase y el total de cada frame.
+Alternativamente, puedes fijarlo en `config.yaml` con `tracking.profile_phases: true`.
 `--team-colors` acepta:
 - lenguaje natural de color (ej. `rojo`, `verde clarito`, `azul marino`, `rojo oscuro`)
 - HEX (ej. `#90EE90`)
@@ -707,7 +713,7 @@ Puntos importantes:
 Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/tracking/byte_tracker.py`):
 
 - `max_total_tracks`
-- `enforce_internal_class_limits`
+- `enforce_internal_class_limits` (legacy; ByteTrack ya no aplica límite interno por clase)
 - `team_mismatch_penalty`
 - `second_match_threshold`
 - `unconfirmed_match_threshold`

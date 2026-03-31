@@ -1,6 +1,7 @@
 import logging
 
 import numpy as np
+from types import SimpleNamespace
 from typing import Dict, Optional
 
 from supervision.detection.core import Detections
@@ -66,6 +67,16 @@ class ByteTrack:
         use_bbox_center_for_matching: bool = True,
         bbox_center_distance_weight: float = 0.5,
         bbox_center_distance_gate_px: float = 120.0,
+        class_mismatch_penalty: float = 1000.0,
+        class_mismatch_relaxed_penalty: float = 180.0,
+        allow_class_remap_when_signals_disagree: bool = True,
+        class_vote_weight_relabel: float = 1.0,
+        class_vote_weight_yolo: float = 1.0,
+        class_consensus_switch_margin: float = 2.0,
+        shirt_color_distance_weight: float = 0.0,
+        shirt_color_distance_gate: float = 45.0,
+        team_vote_weight: float = 1.0,
+        team_consensus_switch_margin: float = 2.0,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
@@ -119,6 +130,22 @@ class ByteTrack:
             min(1.0, max(0.0, bbox_center_distance_weight))
         )
         self.bbox_center_distance_gate_px = float(max(1.0, bbox_center_distance_gate_px))
+        self.class_mismatch_penalty = float(max(0.0, class_mismatch_penalty))
+        relaxed_penalty = float(max(0.0, class_mismatch_relaxed_penalty))
+        self.class_mismatch_relaxed_penalty = min(
+            self.class_mismatch_penalty,
+            relaxed_penalty,
+        )
+        self.allow_class_remap_when_signals_disagree = bool(
+            allow_class_remap_when_signals_disagree
+        )
+        self.class_vote_weight_relabel = float(max(0.0, class_vote_weight_relabel))
+        self.class_vote_weight_yolo = float(max(0.0, class_vote_weight_yolo))
+        self.class_consensus_switch_margin = float(max(0.0, class_consensus_switch_margin))
+        self.shirt_color_distance_weight = float(max(0.0, shirt_color_distance_weight))
+        self.shirt_color_distance_gate = float(max(1.0, shirt_color_distance_gate))
+        self.team_vote_weight = float(max(0.0, team_vote_weight))
+        self.team_consensus_switch_margin = float(max(0.0, team_consensus_switch_margin))
         self.assigned_track_ids_by_class = {
             class_name: set() for class_name in self.max_tracks_per_class
         }
@@ -140,21 +167,85 @@ class ByteTrack:
         self.external_id_counter = IdCounter(start_id=1)
 
     def _can_activate_track(self, class_name: Optional[str]) -> bool:
-        if class_name is None:
-            return True
-        class_limit = self.max_tracks_per_class.get(class_name)
-        if class_limit is None:
-            return True
-        assigned_ids = self.assigned_track_ids_by_class.setdefault(class_name, set())
-        return len(assigned_ids) < class_limit
+        # Internal class limits are disabled: track creation is never blocked by class count.
+        return True
 
     def _register_track(self, track: STrack) -> None:
-        class_name = getattr(track, "class_name", None)
-        if class_name is None or class_name not in self.max_tracks_per_class:
-            return
-        self.assigned_track_ids_by_class.setdefault(class_name, set()).add(
-            int(track.external_track_id)
+        # Kept as a no-op for compatibility with existing call sites.
+        return
+
+    @staticmethod
+    def _track_tlbr(track: STrack) -> Optional[np.ndarray]:
+        tlbr = getattr(track, "tlbr", None)
+        if tlbr is None:
+            return None
+        tlbr = np.asarray(tlbr, dtype=np.float32).reshape(-1)
+        if tlbr.size < 4 or not np.all(np.isfinite(tlbr[:4])):
+            return None
+        return tlbr[:4]
+
+    @staticmethod
+    def _tlbr_iou(box_a: Optional[np.ndarray], box_b: Optional[np.ndarray]) -> float:
+        if box_a is None or box_b is None:
+            return 0.0
+        x1 = max(float(box_a[0]), float(box_b[0]))
+        y1 = max(float(box_a[1]), float(box_b[1]))
+        x2 = min(float(box_a[2]), float(box_b[2]))
+        y2 = min(float(box_a[3]), float(box_b[3]))
+        inter_w = max(0.0, x2 - x1)
+        inter_h = max(0.0, y2 - y1)
+        inter = inter_w * inter_h
+        if inter <= 0.0:
+            return 0.0
+        area_a = max(0.0, float(box_a[2] - box_a[0])) * max(
+            0.0, float(box_a[3] - box_a[1])
         )
+        area_b = max(0.0, float(box_b[2] - box_b[0])) * max(
+            0.0, float(box_b[3] - box_b[1])
+        )
+        union = area_a + area_b - inter
+        if union <= 0.0:
+            return 0.0
+        return float(inter / union)
+
+    def _filter_new_track_candidate_indices(
+        self,
+        detections: list[STrack],
+        candidate_indices: list[int],
+        active_tracked_pool: list[STrack],
+    ) -> list[int]:
+        # Rule 1: if candidate overlaps any active tracked object even minimally, reject.
+        min_overlap_iou = 1e-6
+        valid_indices = []
+        for idx in candidate_indices:
+            candidate_box = self._track_tlbr(detections[idx])
+            overlaps_active = False
+            for active_track in active_tracked_pool:
+                if self._tlbr_iou(candidate_box, self._track_tlbr(active_track)) > min_overlap_iou:
+                    overlaps_active = True
+                    break
+            if not overlaps_active:
+                valid_indices.append(idx)
+
+        # Rule 2: among remaining candidates, suppress near-duplicates (IoU > 0.60)
+        # keeping only the highest-confidence one.
+        valid_indices.sort(
+            key=lambda i: float(getattr(detections[i], "score", 0.0)),
+            reverse=True,
+        )
+        selected_indices = []
+        selected_boxes = []
+        for idx in valid_indices:
+            candidate_box = self._track_tlbr(detections[idx])
+            overlaps_selected = any(
+                self._tlbr_iou(candidate_box, selected_box) > 0.60
+                for selected_box in selected_boxes
+            )
+            if overlaps_selected:
+                continue
+            selected_indices.append(idx)
+            selected_boxes.append(candidate_box)
+        return selected_indices
 
     @staticmethod
     def _field_position_to_array(field_position) -> Optional[np.ndarray]:
@@ -164,6 +255,163 @@ class ByteTrack:
         if field_position.size < 2 or not np.all(np.isfinite(field_position[:2])):
             return None
         return field_position[:2]
+
+    @staticmethod
+    def _normalize_class_label(class_name) -> Optional[str]:
+        token = str(class_name or "").strip().lower()
+        if not token:
+            return None
+        aliases = {
+            "player": "player",
+            "players": "player",
+            "goalkeeper": "goalkeeper",
+            "gk": "goalkeeper",
+            "keeper": "goalkeeper",
+            "referee": "referee",
+            "ref": "referee",
+            "refs": "referee",
+            "ball": "ball",
+            "balls": "ball",
+        }
+        return aliases.get(token, token)
+
+    def _normalize_class_labels(self, labels):
+        if labels is None:
+            return None
+        return [self._normalize_class_label(label) for label in labels]
+
+    @staticmethod
+    def _shirt_color_to_array(shirt_color) -> Optional[np.ndarray]:
+        if shirt_color is None:
+            return None
+        array = np.asarray(shirt_color, dtype=np.float32).reshape(-1)
+        if array.size < 3 or not np.all(np.isfinite(array[:3])):
+            return None
+        return array[:3]
+
+    @staticmethod
+    def _person_like_class(class_name: Optional[str]) -> bool:
+        return class_name in {"player", "goalkeeper", "referee"}
+
+    def _resolve_detection_class(
+        self,
+        class_name_relabel: Optional[str],
+        class_name_yolo: Optional[str],
+    ) -> Optional[str]:
+        if class_name_relabel is not None:
+            return class_name_relabel
+        return class_name_yolo
+
+    def _class_mismatch_pair_penalty(self, track: STrack, det: STrack) -> float:
+        track_class = getattr(track, "class_name", None)
+        if track_class is None:
+            return 0.0
+
+        det_class = getattr(det, "class_name", None)
+        if det_class is None or det_class == track_class:
+            return 0.0
+
+        det_class_team = getattr(det, "class_name_team", None)
+        det_class_yolo = getattr(det, "class_name_yolo", None)
+        if det_class_team is None and det_class_yolo is None:
+            return self.class_mismatch_penalty
+
+        # Regla pedida:
+        # 1) team detector == track -> 0
+        # 2) team detector != track y yolo == track -> relajada
+        # 3) team detector != track y yolo != track -> fuerte
+        if det_class_team is not None and det_class_team == track_class:
+            return 0.0
+
+        if (
+            det_class_team is not None
+            and det_class_team != track_class
+            and det_class_yolo is not None
+            and det_class_yolo == track_class
+            and self.allow_class_remap_when_signals_disagree
+        ):
+            return self.class_mismatch_relaxed_penalty
+
+        return self.class_mismatch_penalty
+
+    def _shirt_color_pair_penalty(self, track: STrack, det: STrack) -> float:
+        if self.shirt_color_distance_weight <= 0.0:
+            return 0.0
+        track_class = getattr(track, "class_name", None)
+        det_class = getattr(det, "class_name", None)
+        if not self._person_like_class(track_class) or not self._person_like_class(det_class):
+            return 0.0
+
+        track_color = self._shirt_color_to_array(getattr(track, "shirt_color", None))
+        det_color = self._shirt_color_to_array(getattr(det, "shirt_color", None))
+        if track_color is None or det_color is None:
+            return 0.0
+
+        gate = max(self.shirt_color_distance_gate, 1e-6)
+        color_distance = float(np.linalg.norm(track_color - det_color))
+        normalized = min(color_distance / gate, 1.0)
+        return self.shirt_color_distance_weight * normalized
+
+    def _update_track_class_consensus(self, track: STrack, det: STrack) -> None:
+        votes = getattr(track, "class_votes", None)
+        if not isinstance(votes, dict):
+            votes = {}
+
+        class_relabel = getattr(det, "class_name_team", None)
+        class_yolo = getattr(det, "class_name_yolo", None)
+
+        if class_relabel is not None and self.class_vote_weight_relabel > 0.0:
+            votes[class_relabel] = float(votes.get(class_relabel, 0.0)) + self.class_vote_weight_relabel
+        if class_yolo is not None and self.class_vote_weight_yolo > 0.0:
+            votes[class_yolo] = float(votes.get(class_yolo, 0.0)) + self.class_vote_weight_yolo
+
+        track.class_votes = votes
+        if not votes:
+            return
+
+        best_class = max(votes.items(), key=lambda item: item[1])[0]
+        best_score = float(votes.get(best_class, 0.0))
+        current_class = getattr(track, "class_name", None)
+        current_score = float(votes.get(current_class, 0.0))
+
+        if current_class is None:
+            track.class_name = best_class
+            return
+
+        if (
+            best_class != current_class
+            and best_score >= (current_score + self.class_consensus_switch_margin)
+        ):
+            track.class_name = best_class
+
+    def _update_track_team_consensus(self, track: STrack, det: STrack) -> None:
+        new_team = getattr(det, "equipo", None)
+        if new_team is None:
+            return
+
+        votes = getattr(track, "team_votes", None)
+        if not isinstance(votes, dict):
+            votes = {}
+
+        if self.team_vote_weight > 0.0:
+            votes[new_team] = float(votes.get(new_team, 0.0)) + self.team_vote_weight
+        track.team_votes = votes
+
+        current_team = getattr(track, "equipo", None)
+        if current_team is None:
+            track.equipo = new_team
+            return
+        if not votes:
+            return
+
+        best_team = max(votes.items(), key=lambda item: item[1])[0]
+        best_score = float(votes.get(best_team, 0.0))
+        current_score = float(votes.get(current_team, 0.0))
+        if (
+            best_team != current_team
+            and best_score >= (current_score + self.team_consensus_switch_margin)
+        ):
+            track.equipo = best_team
 
     def _uses_field_positions_for_class(self, class_name: Optional[str]) -> bool:
         if not self.use_field_positions:
@@ -324,14 +572,17 @@ class ByteTrack:
 
         return dists
 
-    @staticmethod
-    def _apply_track_metadata(track: STrack, det: STrack) -> None:
-        if getattr(det, "equipo", None) is not None:
-            track.equipo = det.equipo
-        if getattr(track, "class_name", None) is None and getattr(
-            det, "class_name", None
-        ) is not None:
+    def _apply_track_metadata(self, track: STrack, det: STrack) -> None:
+        if getattr(det, "shirt_color", None) is not None:
+            track.shirt_color = det.shirt_color
+        if getattr(det, "class_name_team", None) is not None:
+            track.class_name_team = det.class_name_team
+        if getattr(det, "class_name_yolo", None) is not None:
+            track.class_name_yolo = det.class_name_yolo
+        if getattr(track, "class_name", None) is None and getattr(det, "class_name", None) is not None:
             track.class_name = det.class_name
+        self._update_track_class_consensus(track, det)
+        self._update_track_team_consensus(track, det)
         det_field_position = ByteTrack._field_position_to_array(
             getattr(det, "field_position", None)
         )
@@ -339,7 +590,13 @@ class ByteTrack:
             track.field_position = det_field_position.copy()
 
     def update_with_detections(
-        self, detections: Detections, team_labels, class_labels=None, field_positions=None
+        self,
+        detections: Detections,
+        team_labels,
+        class_labels=None,
+        field_positions=None,
+        yolo_class_labels=None,
+        shirt_colors=None,
     ) -> Detections:
         """
         Updates the tracker with the provided detections and returns the updated
@@ -385,14 +642,25 @@ class ByteTrack:
                 detections.confidence[:, np.newaxis],
             )
         )
+        if class_labels is None and detections.data is not None:
+            class_labels = detections.data.get("class")
+        if yolo_class_labels is None and detections.data is not None:
+            yolo_class_labels = detections.data.get("class_yolo")
         if field_positions is None and detections.data is not None:
             field_positions = detections.data.get("field_position")
+        if shirt_colors is None and detections.data is not None:
+            shirt_colors = detections.data.get("shirt_color")
+
+        class_labels = self._normalize_class_labels(class_labels)
+        yolo_class_labels = self._normalize_class_labels(yolo_class_labels)
 
         tracks = self.update_with_tensors(
             tensors=tensors,
             team_labels=team_labels,
             class_labels=class_labels,
             field_positions=field_positions,
+            yolo_class_labels=yolo_class_labels,
+            shirt_colors=shirt_colors,
         )
 
         if len(tracks) > 0:
@@ -402,12 +670,32 @@ class ByteTrack:
             ious = box_iou_batch(detection_bounding_boxes, track_bounding_boxes)
 
             iou_costs = 1 - ious
+            class_tracker_by_detection = np.array(
+                [None] * len(detections),
+                dtype=object,
+            )
             if class_labels is not None:
                 for i_detection, det_class in enumerate(class_labels):
+                    det_yolo_class = (
+                        yolo_class_labels[i_detection]
+                        if yolo_class_labels is not None
+                        and i_detection < len(yolo_class_labels)
+                        else None
+                    )
                     for i_track, track in enumerate(tracks):
-                        track_class = getattr(track, "class_name", None)
-                        if track_class is not None and det_class != track_class:
-                            iou_costs[i_detection, i_track] += 1000
+                        track_like = SimpleNamespace(
+                            class_name=getattr(track, "class_name", None),
+                            class_name_team=getattr(track, "class_name_team", None),
+                            class_name_yolo=getattr(track, "class_name_yolo", None),
+                        )
+                        det_like = SimpleNamespace(
+                            class_name=det_class,
+                            class_name_team=det_class,
+                            class_name_yolo=det_yolo_class,
+                        )
+                        penalty = self._class_mismatch_pair_penalty(track_like, det_like)
+                        if penalty > 0.0:
+                            iou_costs[i_detection, i_track] += penalty
             if field_positions is not None:
                 detection_field_positions = np.asarray(field_positions, dtype=np.float32)
                 for i_detection, det_class in enumerate(class_labels if class_labels is not None else []):
@@ -443,6 +731,14 @@ class ByteTrack:
                 detections.tracker_id[i_detection] = int(
                     tracks[i_track].external_track_id
                 )
+                class_tracker_by_detection[i_detection] = getattr(
+                    tracks[i_track],
+                    "class_name",
+                    None,
+                )
+            if detections.data is None:
+                detections.data = {}
+            detections.data["class_tracker"] = class_tracker_by_detection
 
             return detections[detections.tracker_id != -1]
 
@@ -477,6 +773,8 @@ class ByteTrack:
         team_labels,
         class_labels=None,
         field_positions=None,
+        yolo_class_labels=None,
+        shirt_colors=None,
     ) -> list[STrack]:
         """
         Updates the tracker with the provided tensors and returns the updated tracks.
@@ -507,6 +805,8 @@ class ByteTrack:
         scores_second = scores[inds_second]
         keep_indices = np.where(remain_inds)[0]
         second_indices = np.where(inds_second)[0]
+        normalized_class_labels = self._normalize_class_labels(class_labels)
+        normalized_yolo_class_labels = self._normalize_class_labels(yolo_class_labels)
 
         # Filter team_labels with the same indices as high-confidence detections
         if team_labels is not None:
@@ -530,14 +830,28 @@ class ByteTrack:
                 if team_labels is not None and keep_idx < len(team_labels)
                 else None
             )
-            det.class_name = (
-                class_labels[keep_idx]
-                if class_labels is not None and keep_idx < len(class_labels)
+            det.class_name_team = (
+                normalized_class_labels[keep_idx]
+                if normalized_class_labels is not None and keep_idx < len(normalized_class_labels)
                 else None
+            )
+            det.class_name_yolo = (
+                normalized_yolo_class_labels[keep_idx]
+                if normalized_yolo_class_labels is not None and keep_idx < len(normalized_yolo_class_labels)
+                else None
+            )
+            det.class_name = self._resolve_detection_class(
+                det.class_name_team,
+                det.class_name_yolo,
             )
             det.field_position = (
                 self._field_position_to_array(field_positions[keep_idx])
                 if field_positions is not None and keep_idx < len(field_positions)
+                else None
+            )
+            det.shirt_color = (
+                self._shirt_color_to_array(shirt_colors[keep_idx])
+                if shirt_colors is not None and keep_idx < len(shirt_colors)
                 else None
             )
             
@@ -566,9 +880,7 @@ class ByteTrack:
                 if hasattr(track, "equipo") and hasattr(det, "equipo"):
                     if track.equipo != det.equipo:
                         dists[i, j] += self.team_mismatch_penalty
-                if hasattr(track, "class_name") and hasattr(det, "class_name"):
-                    if track.class_name != det.class_name:
-                        dists[i, j] += 1000  # evita cruces de IDs entre clases
+                dists[i, j] += self._class_mismatch_pair_penalty(track, det)
 
         dists = self._apply_field_position_costs(dists, strack_pool, detections)
         dists = matching.fuse_score(dists, detections)
@@ -576,31 +888,10 @@ class ByteTrack:
         matches, u_track, u_detection = matching.linear_assignment(
             dists, thresh=self.minimum_matching_threshold
         )
-        # Handle team switches in tracks
+        # Team update is handled via vote consensus in `_apply_track_metadata`.
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
-
-            old_team = getattr(track, "team", None)
-            new_team = getattr(det, "team", None)
-
-            if old_team is not None and new_team is not None and old_team != new_team:
-                if not hasattr(track, "team_switch_frames"):
-                    track.team_switch_frames = 1
-                else:
-                    track.team_switch_frames += 1
-
-                # Si se mantiene el error muchos frames, asumimos que sí cambió realmente
-                if track.team_switch_frames >= 5:
-                    track.equipo = new_team
-                    track.team_switch_frames = 0  # reset
-
-            else:
-                if hasattr(track, "team_switch_frames"):
-                    track.team_switch_frames = 0
-
-                if old_team is None and new_team is not None:
-                    track.equipo = new_team
             self._apply_track_metadata(track, det)
 
             # --- Normal track update ---
@@ -636,14 +927,28 @@ class ByteTrack:
                     if team_labels is not None and second_idx < len(team_labels)
                     else None
                 )
-                det.class_name = (
-                    class_labels[second_idx]
-                    if class_labels is not None and second_idx < len(class_labels)
+                det.class_name_team = (
+                    normalized_class_labels[second_idx]
+                    if normalized_class_labels is not None and second_idx < len(normalized_class_labels)
                     else None
+                )
+                det.class_name_yolo = (
+                    normalized_yolo_class_labels[second_idx]
+                    if normalized_yolo_class_labels is not None and second_idx < len(normalized_yolo_class_labels)
+                    else None
+                )
+                det.class_name = self._resolve_detection_class(
+                    det.class_name_team,
+                    det.class_name_yolo,
                 )
                 det.field_position = (
                     self._field_position_to_array(field_positions[second_idx])
                     if field_positions is not None and second_idx < len(field_positions)
+                    else None
+                )
+                det.shirt_color = (
+                    self._shirt_color_to_array(shirt_colors[second_idx])
+                    if shirt_colors is not None and second_idx < len(shirt_colors)
                     else None
                 )
                 detections_second.append(det)
@@ -662,9 +967,7 @@ class ByteTrack:
         )
         for i, track in enumerate(r_tracked_stracks):
             for j, det in enumerate(detections_second):
-                if hasattr(track, "class_name") and hasattr(det, "class_name"):
-                    if track.class_name != det.class_name:
-                        dists[i, j] += 1000
+                dists[i, j] += self._class_mismatch_pair_penalty(track, det)
         dists = self._apply_field_position_costs(
             dists,
             r_tracked_stracks,
@@ -698,9 +1001,7 @@ class ByteTrack:
         dists = self._apply_bbox_center_costs(dists, unconfirmed, detections)
         for i, track in enumerate(unconfirmed):
             for j, det in enumerate(detections):
-                if hasattr(track, "class_name") and hasattr(det, "class_name"):
-                    if track.class_name != det.class_name:
-                        dists[i, j] += 1000
+                dists[i, j] += self._class_mismatch_pair_penalty(track, det)
 
         dists = self._apply_field_position_costs(dists, unconfirmed, detections)
         dists = matching.fuse_score(dists, detections)
@@ -718,10 +1019,33 @@ class ByteTrack:
             removed_stracks.append(track)
 
         """ Step 4: Init new stracks"""
-        for inew in u_detection:
-            track = detections[inew]
-            if track.score < self.det_thresh:
+        active_tracked_pool = []
+        seen_internal_ids = set()
+        for candidate_track in (
+            list(self.tracked_tracks) + list(activated_starcks) + list(refind_stracks)
+        ):
+            internal_track_id = getattr(candidate_track, "internal_track_id", None)
+            if internal_track_id is not None:
+                if internal_track_id in seen_internal_ids:
+                    continue
+                seen_internal_ids.add(internal_track_id)
+            if getattr(candidate_track, "state", None) != TrackState.Tracked:
                 continue
+            if not bool(getattr(candidate_track, "is_activated", False)):
+                continue
+            active_tracked_pool.append(candidate_track)
+
+        candidate_indices = [
+            inew for inew in u_detection if detections[inew].score >= self.det_thresh
+        ]
+        filtered_candidate_indices = self._filter_new_track_candidate_indices(
+            detections=detections,
+            candidate_indices=candidate_indices,
+            active_tracked_pool=active_tracked_pool,
+        )
+
+        for inew in filtered_candidate_indices:
+            track = detections[inew]
             if not self._can_activate_track(getattr(track, "class_name", None)):
                 continue
             track.activate(self.kalman_filter, self.frame_id)

@@ -86,7 +86,7 @@ team_detector:
   shirt_detector_conf:
     n_clusters: 2
     init: "k-means++"
-    n_init: 5
+    n_init: 3
     random_state: 0
 
 
@@ -141,6 +141,16 @@ tracking:
     use_bbox_center_for_matching: false  # Si true, usa BB-Overlap en lugar de IoU para el coste de matching. Recomendado para detecciones con bounding boxes muy ajustados al jugador.
     bbox_center_distance_weight: 0.7  # Peso de la distancia entre centros de bounding box en el coste de matching (si use_bbox_center_for_matching es false)
     bbox_center_distance_gate_px: 120.0  # Distancia máxima en píxeles entre centros de bounding box para considerar un match (si use_bbox_center_for_matching es false)
+    class_mismatch_penalty: 1000.0  # Penalización fuerte por mismatch de clase en el matching interno
+    class_mismatch_relaxed_penalty: 180.0  # Penalización reducida si clase YOLO y clase reetiquetada discrepan (permite remapeos)
+    allow_class_remap_when_signals_disagree: true  # Si true, habilita la vía de remapeo cuando las dos señales de clase no coinciden
+    class_vote_weight_relabel: 1.0  # Peso del voto de clase reetiquetada (TeamDetector) en el consenso por track
+    class_vote_weight_yolo: 1.0  # Peso del voto de clase original YOLO en el consenso por track
+    class_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para permitir cambio de clase del track interno
+    shirt_color_distance_weight: 0.0  # Sin efecto en matching interno (penalización LAB desactivada)
+    shirt_color_distance_gate: 45.0  # Distancia LAB a partir de la cual el cambio de color deja de penalizar linealmente
+    team_vote_weight: 1.0  # Peso del voto de equipo observado en cada frame para consenso temporal por track
+    team_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para cambiar el equipo canónico de un track
     max_tracks_per_class:   # Límite de tracks por clase en la salida final del tracker
       player: 22
       ball: 1
@@ -193,13 +203,18 @@ tracking:
   motion_std_floor: 0.5  # Límite mínimo del gate estadístico
   referee_recovery_max_lost_frames: 3  # Máximo número de frames perdidos para intentar una recuperación específica de árbitros
   referee_recovery_max_distance: 45.0  # Distancia máxima en metros para
+  use_shirt_color_for_reassign: false  # Sin efecto en canonización (gate LAB desactivado)
+  shirt_color_reassign_distance_gate: 45.0  # Distancia LAB máxima base entre color previo y actual para aceptar continuidad
+  shirt_color_reassign_distance_growth_per_frame: 1.5  # Apertura del gate de color por frame perdido
+  shirt_color_reassign_distance_cap: 70.0  # Tope del gate dinámico de color LAB
   strict_person_class_separation: true  # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
-  # Si es false (recomendado), ByteTrack NO limita internamente cuántos tracks puede activar
-  # por clase. El límite por clase se aplica en la capa canónica/salida final.
+  # Legacy: ByteTrack ya no limita internamente la creación por clase (se ignora este flag).
+  # El límite por clase se aplica en la capa canónica/salida final.
   enforce_internal_class_limits: false
   require_field_position_for_reassign: true  # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles. Si falta field_position, la reasignación se rechaza.
   max_reassign_lost_frames: null  # Tope opcional de frames perdidos para reasignar un ID. null/0/desactivado => un track puede reaparecer tras muchos frames.
   max_reassign_lost_frames_by_class: {}  # Sin corte por clase (legacy). Evita capar reenganches tardíos.
+  profile_phases: false  # Si true, imprime tiempos por fase en cada frame (profiling)
   reserve_penalty_spot_seed_players: true  # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos de penalti.
   reserve_penalty_spot_seed_match_distance_m: 12.0  # Distancia máxima en metros desde el punto de penalti para absorber una detección real sobre cada track semilla reservado.    
   
