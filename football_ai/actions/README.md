@@ -18,7 +18,7 @@ Convierte un `tracks.json` del tracker actual a un parquet ancho compatible con 
 
 ### Limitaciones explícitas
 
-- El `tracks.json` actual no proyecta el balón al campo, así que `ball_x/ball_y` es una aproximación basada en el portador inferido, no una triangulación física exacta.
+- El `tracks.json` ya puede incluir `field_position_m` del balón cuando existe proyección válida; aun así, `ball_x/ball_y` puede seguir recurriendo al portador inferido o a fallback temporal cuando esa proyección falte o sea poco fiable.
 - Si faltan jugadores durante todo el clip, el adaptador crea slots sintéticos; eso sirve para estructurar PathCRF, pero no equivale a tracking real.
 - `phase_id`, `episode_id` y `ball_state` salen en esta primera fase como una única secuencia viva (`1`, `1`, `"alive"`). Más adelante se puede endurecer con segmentación real.
 

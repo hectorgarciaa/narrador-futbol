@@ -605,6 +605,7 @@ class TrackerLogicMixin:
         return False
 
     def _build_ball_track_payload(self, bbox, confidence, metadata):
+        field_position = self._field_position_to_tuple(metadata.get("field_position"))
         return {
             "bbox": bbox,
             "confidence": float(confidence),
@@ -612,8 +613,12 @@ class TrackerLogicMixin:
             "distances": metadata.get("distances"),
             "shirt_color": metadata.get("shirt_color"),
             "bbox_size": metadata.get("bbox_size"),
-            "field_position_m": None,
-            "ground_point_image": None,
+            "field_position_m": list(field_position) if field_position is not None else None,
+            "ground_point_image": (
+                metadata.get("ground_point_image").tolist()
+                if hasattr(metadata.get("ground_point_image"), "tolist")
+                else metadata.get("ground_point_image")
+            ),
         }
 
     def _update_ball_state(self, previous_state, bbox, current_frame):

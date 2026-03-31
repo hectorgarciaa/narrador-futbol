@@ -24,7 +24,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 ### ✅ Fase 1: Detección, tracking e identificación de equipos
 - Fine-tuning de YOLOv11 para las clases `player`, `goalkeeper`, `referee`, `ball`.
 - Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo.
-- Proyección automática al campo 2D con **PnLCalib** para usar posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
+- Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
 

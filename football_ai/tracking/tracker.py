@@ -232,12 +232,14 @@ class Tracker(TrackerLogicMixin):
                         }
                     )
 
-            teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
-            teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
-            class_labels = [
-                self._normalize_detection_class_name(dicc["class"])
-                for dicc in teams_of_detected_objects
-            ]
+            detection_class_labels = []
+            if detections.boxes is not None and len(detections.boxes) > 0:
+                detection_class_ids = detections.boxes.cls.cpu().numpy().astype(int)
+                detection_class_labels = [
+                    self._normalize_detection_class_name(detections.names[class_id])
+                    for class_id in detection_class_ids
+                ]
+
             field_projection = None
             field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
             ground_points_projected = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
@@ -246,10 +248,17 @@ class Tracker(TrackerLogicMixin):
                     field_projection = self.field_projector.project_detections(
                         original_frame_bgr,
                         detections_sv.xyxy,
-                        class_names=class_labels,
+                        class_names=detection_class_labels,
                     )
                     field_positions = field_projection.field_positions_m
                     ground_points_projected = field_projection.ground_points_image_projected
+
+            teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
+            teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
+            class_labels = [
+                self._normalize_detection_class_name(dicc["class"])
+                for dicc in teams_of_detected_objects
+            ]
 
             # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
             if detections_sv.data is None:
@@ -716,7 +725,16 @@ class Tracker(TrackerLogicMixin):
                                 "distances": None,
                                 "shirt_color": None,
                                 "bbox_size": float((x2 - x1) * (y2 - y1)),
-                                "ground_point_image": None,
+                                "field_position": (
+                                    field_positions[raw_idx]
+                                    if raw_idx < len(field_positions)
+                                    else None
+                                ),
+                                "ground_point_image": (
+                                    ground_points_projected[raw_idx]
+                                    if raw_idx < len(ground_points_projected)
+                                    else None
+                                ),
                             },
                             "source": "raw",
                             "raw_det_idx": int(raw_idx),

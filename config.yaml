@@ -82,7 +82,7 @@ team_detector:
   with_ref: true                 # Si true, usa colores de referencia (config.yaml/teams) para inicializar KMeans y asignar equipos.
   min_samples: 60                 # Muestras mínimas para considerar calcular cluster
   min_size_cluster: 4             # Tamaño mínimo de cluster para considerarlo válido (evita clusters muy pequeños por outliers)
-  candidate_classes: ["player"]   # Clases que participan en la detección de color de equipo
+  candidate_classes: ["player", "ref"]   # Clases que participan en la detección de color de equipo
   team_colors: 
     Real Madrid: [255, 127, 127]    # Color de referencia en lab_opencv
     Wolfsburgo: [224, 77, 196]      # Color de referencia en lab_opencv

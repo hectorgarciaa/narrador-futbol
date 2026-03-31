@@ -20,7 +20,13 @@ from football_ai.reference_points.pnlcalib_runtime import (
 )
 
 
-FIELD_POSITION_CLASSES = frozenset({"player", "goalkeeper"})
+FIELD_POSITION_CLASSES = frozenset({"player", "goalkeeper", "referee", "ball"})
+GROUND_POINT_BOTTOM_OFFSET_BY_CLASS = {
+    "player": 0.04,
+    "goalkeeper": 0.04,
+    "referee": 0.04,
+    "ball": 0.0,
+}
 logger = logging.getLogger(__name__)
 
 
@@ -102,7 +108,11 @@ class PnLCalibFieldProjector:
             temporal_blend=temporal_blend,
         )
 
-    def _ground_points_from_bboxes(self, bboxes_xyxy: np.ndarray) -> np.ndarray:
+    def _ground_points_from_bboxes(
+        self,
+        bboxes_xyxy: np.ndarray,
+        class_names: Optional[Sequence[Optional[str]]] = None,
+    ) -> np.ndarray:
         boxes = np.asarray(bboxes_xyxy, dtype=np.float32).reshape(-1, 4)
         if len(boxes) == 0:
             return np.zeros((0, 2), dtype=np.float32)
@@ -113,8 +123,28 @@ class PnLCalibFieldProjector:
         y2 = boxes[:, 3]
         heights = np.maximum(y2 - y1, 1.0)
 
+        if class_names is None:
+            offset_ratios = np.full(len(boxes), self.bottom_offset_ratio, dtype=np.float32)
+        else:
+            normalized_class_names = [
+                str(class_name).strip().lower() if class_name is not None else ""
+                for class_name in class_names
+            ]
+            if len(normalized_class_names) < len(boxes):
+                normalized_class_names.extend([""] * (len(boxes) - len(normalized_class_names)))
+            offset_ratios = np.asarray(
+                [
+                    GROUND_POINT_BOTTOM_OFFSET_BY_CLASS.get(
+                        class_name,
+                        self.bottom_offset_ratio,
+                    )
+                    for class_name in normalized_class_names[: len(boxes)]
+                ],
+                dtype=np.float32,
+            )
+
         x_coords = 0.5 * (x1 + x2)
-        y_coords = y2 - (self.bottom_offset_ratio * heights)
+        y_coords = y2 - (offset_ratios * heights)
         return np.column_stack([x_coords, y_coords]).astype(np.float32)
 
     @staticmethod
@@ -147,7 +177,10 @@ class PnLCalibFieldProjector:
 
         original_shape_hw = original_frame.shape[:2]
         projected_shape_hw = projected_frame.shape[:2]
-        ground_points_original = self._ground_points_from_bboxes(bboxes_xyxy)
+        ground_points_original = self._ground_points_from_bboxes(
+            bboxes_xyxy,
+            class_names=class_names,
+        )
         ground_points_projected = self._scale_points(
             ground_points_original,
             source_shape_hw=original_shape_hw,
