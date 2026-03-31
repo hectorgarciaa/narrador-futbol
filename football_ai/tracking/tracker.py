@@ -188,138 +188,49 @@ class Tracker(TrackerLogicMixin):
 
     def get_tracks(self, video, show_kmeans=False, frame_hook=None, collect_visual_debug=False):
         self.possession_estimator = TeamPossessionEstimator(self.possession_config)
-        model_detections = self.model.detect(video)
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [], "possession": []}
+
+        model_detections = self.model.detect(video)
+        
         visual_debug_frames = [] if collect_visual_debug else None
+        
         raw_to_canonical_id = {}
         canonical_to_raw_id = {}
         canonical_state = {}
         self._initialize_reserved_penalty_spot_players(canonical_state)
+        
         ball_state = None
         for n_frame, detections in enumerate(model_detections):
-            detections.names = {k: self._normalize_detection_class_name(v) for k, v in detections.items()}
+            detections.names = {k: self._normalize_detection_class_name(v) for k, v in detections.names.items()}
+            
             detections_sv = sv.Detections.from_ultralytics(detections)
-            frame_size = None
-            original_frame_bgr = getattr(detections, "orig_img", None)
-            if original_frame_bgr is not None:
-                frame_size = (
-                    int(original_frame_bgr.shape[1]),
-                    int(original_frame_bgr.shape[0]),
-                )
-            raw_detections = []
-            accepted_raw_detection_indexes = set()
-            bytetrack_raw_detection_indexes = set()
-            bytetrack_discard_reason_by_raw_idx = {}
-            bytetrack_id_by_raw_idx = {}
-            if collect_visual_debug and detections.boxes is not None and len(detections.boxes) > 0:
-                raw_xyxy = detections.boxes.xyxy.cpu().numpy()
-                raw_conf = detections.boxes.conf.cpu().numpy()
-                raw_cls = detections.boxes.cls.cpu().numpy().astype(int)
-                for raw_idx, (bbox, score, cid) in enumerate(zip(raw_xyxy, raw_conf, raw_cls)):
-                    class_name = self._normalize_detection_class_name(detections.names[cid])
-                    raw_detections.append(
-                        {
-                            "raw_det_idx": int(raw_idx),
-                            "class_name": class_name,
-                            "bbox": [float(v) for v in bbox.tolist()],
-                            "confidence": float(score),
-                        }
-                    )
 
-            detection_class_labels = []
-            if detections.boxes is not None and len(detections.boxes) > 0:
-                detection_class_ids = detections.boxes.cls.cpu().numpy().astype(int)
-                detection_class_labels = [
-                    self._normalize_detection_class_name(detections.names[class_id])
-                    for class_id in detection_class_ids
-                ]
+            frame_size = None if detections.orig_img is None else (int(detections.orig_img.shape[1]), int(detections.orig_img.shape[0]))
+            
+            raw_detections, detection_class_labels = self._get_raw_detections(detections, collect_visual_debug) 
 
-            field_projection = None
-            field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
-            ground_points_projected = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
-            if self.field_projector is not None:
-                if original_frame_bgr is not None:
-                    field_projection = self.field_projector.project_detections(
-                        original_frame_bgr,
-                        detections_sv.xyxy,
-                        class_names=detection_class_labels,
-                    )
-                    field_positions = field_projection.field_positions_m
-                    ground_points_projected = field_projection.ground_points_image_projected
+            field_projection, field_positions, ground_points_projected = self._get_field_projection_and_positions(detections_sv, detection_class_labels, detections.orig_img)
 
             teams_of_detected_objects = self.team_detector.detect_teams(detections, show_kmeans)
-            teams_labels = [dicc["team"] for dicc in teams_of_detected_objects]
-            class_labels = [
-                self._normalize_detection_class_name(dicc["class"])
-                for dicc in teams_of_detected_objects
-            ]
 
-            # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
-            if detections_sv.data is None:
-                detections_sv.data = {}
-            detections_sv.data["team"] = np.array(
-                [dicc["team"] for dicc in teams_of_detected_objects], dtype=object
-            )
-            detections_sv.data["distances"] = np.array(
-                [dicc["distances"] for dicc in teams_of_detected_objects], dtype=object
-            )
-            detections_sv.data["shirt_color"] = np.array(
-                [dicc["shirt_color"] for dicc in teams_of_detected_objects], dtype=object
-            )
-            detections_sv.data["bbox_size"] = np.array(
-                [dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float
-            )
-            detections_sv.data["class"] = np.array(
-                [dicc["class"] for dicc in teams_of_detected_objects], dtype=object
-            )
-            detections_sv.data["field_position"] = np.asarray(
-                field_positions, dtype=np.float32
-            )
-            detections_sv.data["ground_point_image"] = np.asarray(
-                ground_points_projected, dtype=np.float32
-            )
-            detections_sv.data["raw_det_idx"] = np.arange(len(detections_sv), dtype=np.int32)
+            teams_labels = np.array([dicc["team"] for dicc in teams_of_detected_objects], dtype=object)
+            class_labels = np.array([dicc["class"] for dicc in teams_of_detected_objects], dtype=object)
 
-            tracks_detection = self.tracker.update_with_detections(
-                detections_sv,
-                teams_labels,
-                class_labels,
-            )
+            self._enrich_metadata(detections_sv, teams_labels, class_labels, teams_of_detected_objects, field_positions, ground_points_projected)
+
+            tracks_detection = self.tracker.update_with_detections(detections_sv, teams_labels, class_labels)
             
             for key in tracks.keys():
                 tracks[key].append({})
 
+            sorted_tracked_detections = self._sort_tracked_detections(tracks_detection)
+
+            bytetrack_raw_detection_indexes, bytetrack_id_by_raw_idx = self._collect_bytetrack_detection_info(sorted_tracked_detections, collect_visual_debug)
+
             used_canonical_ids_in_frame = set()
-            class_priority = {
-                "referee": 0,
-                "goalkeeper": 1,
-                "player": 2,
-                "ball": 3,
-            }
-            sorted_tracked_detections = sorted(
-                list(tracks_detection),
-                key=lambda item: (
-                    class_priority.get(
-                        str(item[5].get("class_name", "")),
-                        99,
-                    ),
-                    -float(item[2]),
-                ),
-            )
-            if collect_visual_debug:
-                for object_detected in sorted_tracked_detections:
-                    _, _, _, _, tracker_id, metadata = object_detected
-                    raw_detection_idx = metadata.get("raw_det_idx")
-                    if raw_detection_idx is None:
-                        continue
-                    try:
-                        raw_idx_int = int(raw_detection_idx)
-                        bytetrack_raw_detection_indexes.add(raw_idx_int)
-                        bytetrack_id_by_raw_idx[raw_idx_int] = int(tracker_id)
-                    except (TypeError, ValueError):
-                        continue
-            pending_detections = []
-            ball_candidates = []
+
+            bytetrack_discard_reason_by_raw_idx = {}
+            accepted_raw_detection_indexes = set()
 
             def commit_assignment(
                 raw_tracker_id,
@@ -456,9 +367,13 @@ class Tracker(TrackerLogicMixin):
                     "reserved_seed": False,
                     "special_penalty_seed": special_penalty_seed,
                 }
+
                 if collect_visual_debug and raw_detection_idx is not None:
                     accepted_raw_detection_indexes.add(int(raw_detection_idx))
 
+            pending_detections = []
+            ball_candidates = []
+            
             for object_detected in sorted_tracked_detections:
                 bbox, _, confidence, _, tracker_id, metadata = object_detected
                 class_name = metadata["class_name"]
@@ -808,3 +723,78 @@ class Tracker(TrackerLogicMixin):
                 frame_hook(tracks, n_frame)
         self.visualization_debug_frames = visual_debug_frames if collect_visual_debug else []
         return tracks
+    
+    def _get_raw_detections(self, detections, collect_visual_debug):
+        raw_detections = []        
+        if detections.boxes is not None and len(detections.boxes) > 0:
+            raw_cls = detections.boxes.cls.cpu().numpy().astype(int)
+            detection_class_labels = [detections.names[class_id] for class_id in raw_cls]
+            if collect_visual_debug: 
+                raw_xyxy = detections.boxes.xyxy.cpu().numpy()
+                raw_conf = detections.boxes.conf.cpu().numpy()
+                for raw_idx, (bbox, score, cid) in enumerate(zip(raw_xyxy, raw_conf, raw_cls)):
+                    raw_detections.append(
+                        {
+                            "raw_det_idx": int(raw_idx),
+                            "class_name": detections.names[cid],
+                            "bbox": [float(v) for v in bbox.tolist()],
+                            "confidence": float(score),
+                        }
+                    )
+        return raw_detections, detection_class_labels
+    
+    def _get_field_projection_and_positions(self, detections_sv, detection_class_labels, orig_img):
+        field_projection = None
+        field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
+        ground_points_projected = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
+        if self.field_projector is not None and orig_img is not None:
+                field_projection = self.field_projector.project_detections(
+                    orig_img,
+                    detections_sv.xyxy,
+                    class_names=detection_class_labels,
+                )
+                field_positions = field_projection.field_positions_m
+                ground_points_projected = field_projection.ground_points_image_projected
+    
+        return field_projection, field_positions, ground_points_projected
+    
+    def _enrich_metadata(self, detections_sv, teams_labels, class_labels, teams_of_detected_objects, field_positions, ground_points_projected):
+        # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
+        if detections_sv.data is None:
+            detections_sv.data = {}
+        detections_sv.data["team"] = teams_labels
+        detections_sv.data["class"] = class_labels
+        detections_sv.data["distances"] = np.array([dicc["distances"] for dicc in teams_of_detected_objects], dtype=object)
+        detections_sv.data["shirt_color"] = np.array([dicc["shirt_color"] for dicc in teams_of_detected_objects], dtype=object)
+        detections_sv.data["bbox_size"] = np.array([dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float)
+
+        detections_sv.data["field_position"] = np.asarray(field_positions, dtype=np.float32)
+        detections_sv.data["ground_point_image"] = np.asarray(ground_points_projected, dtype=np.float32)
+        detections_sv.data["raw_det_idx"] = np.arange(len(detections_sv), dtype=np.int32)
+
+    def _sort_tracked_detections(self, tracks_detection, class_priority={"referee": 0, "goalkeeper": 1, "player": 2, "ball": 3}):
+        return sorted(
+            list(tracks_detection), 
+            key=lambda item: (
+                class_priority[str(item[5]["class_name"])],
+                -float(item[2])
+            )
+        )
+
+    def _collect_bytetrack_detection_info(self, sorted_tracked_detections, collect_visual_debug):
+        bytetrack_raw_detection_indexes = set()
+        bytetrack_id_by_raw_idx = {}
+        
+        if collect_visual_debug:
+            for object_detected in sorted_tracked_detections:
+                _, _, _, _, tracker_id, metadata = object_detected
+                raw_detection_idx = metadata.get("raw_det_idx")
+                if raw_detection_idx is None:
+                    continue
+                try:
+                    raw_idx_int = int(raw_detection_idx)
+                    bytetrack_raw_detection_indexes.add(raw_idx_int)
+                    bytetrack_id_by_raw_idx[raw_idx_int] = int(tracker_id)
+                except (TypeError, ValueError):
+                    continue
+        return bytetrack_raw_detection_indexes, bytetrack_id_by_raw_idx

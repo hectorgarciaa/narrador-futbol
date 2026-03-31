@@ -410,7 +410,7 @@ class ByteTrack:
                             iou_costs[i_detection, i_track] += 1000
             if field_positions is not None:
                 detection_field_positions = np.asarray(field_positions, dtype=np.float32)
-                for i_detection, det_class in enumerate(class_labels or []):
+                for i_detection, det_class in enumerate(class_labels if class_labels is not None else []):
                     if det_class not in self.field_position_classes:
                         continue
                     det_position = self._field_position_to_array(

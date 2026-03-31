@@ -78,7 +78,7 @@ detection:
 
 # Configuración de clustering de colores
 team_detector:
-  min_samples: 60                 # Muestras mínimas para considerar calcular cluster
+  min_samples: {"player": 60, "referee": 15}                 # Muestras mínimas para considerar calcular cluster
   min_size_cluster: 4             # Tamaño mínimo de cluster para considerarlo válido (evita clusters muy pequeños por outliers)
   team_colors: 
     Real Madrid: [255, 127, 127]    # Color de referencia en lab_opencv
