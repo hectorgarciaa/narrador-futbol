@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interfaz de Alineaciones</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Narrador Futbol</p>
+          <h1>Introduce las alineaciones y lanza el tracking</h1>
+          <p class="hero-copy">
+            El color identifica el equipo. La formación define los slots que luego
+            casarán con las posiciones estables del tracker.
+          </p>
+        </div>
+        <div class="launch-card">
+          <label class="field">
+            <span>Vídeo</span>
+            <select id="video-source"></select>
+          </label>
+          <button id="launch-run" class="primary-button">
+            Guardar alineaciones y ejecutar
+          </button>
+          <p class="hint">
+            Colores aceptados: lenguaje natural, HEX o RGB. Ejemplo:
+            <code>blanco</code>, <code>azul marino</code>, <code>#0d47a1</code>.
+          </p>
+        </div>
+      </section>
+
+      <section class="teams-grid" id="teams-grid"></section>
+
+      <section class="status-grid">
+        <article class="status-card">
+          <div class="status-head">
+            <div>
+              <p class="eyebrow">Seguimiento</p>
+              <h2>Estado de ejecución</h2>
+            </div>
+            <span id="run-badge" class="status-badge idle">Sin lanzar</span>
+          </div>
+          <div id="run-summary" class="run-summary">
+            Todavía no hay ninguna ejecución activa.
+          </div>
+        </article>
+
+        <article class="status-card">
+          <div class="status-head">
+            <div>
+              <p class="eyebrow">Salida</p>
+              <h2>Log del tracking</h2>
+            </div>
+          </div>
+          <pre id="run-log" class="run-log">Esperando ejecución...</pre>
+        </article>
+      </section>
+    </main>
+
+    <template id="team-card-template">
+      <article class="team-card">
+        <div class="team-card-head">
+          <div>
+            <p class="eyebrow">Equipo</p>
+            <h2 class="team-title"></h2>
+          </div>
+        </div>
+
+        <div class="team-fields">
+          <label class="field">
+            <span>Nombre del equipo</span>
+            <input class="team-name-input" type="text" />
+          </label>
+          <label class="field">
+            <span>Color del equipo</span>
+            <input
+              class="team-color-input"
+              type="text"
+              placeholder="blanco, azul marino, #ffffff"
+            />
+          </label>
+          <label class="field">
+            <span>Formación</span>
+            <select class="formation-select"></select>
+          </label>
+        </div>
+
+        <div class="pitch-shell">
+          <div class="pitch-header">
+            <span>Slots clicables</span>
+            <span class="pitch-legend">Ataque hacia arriba</span>
+          </div>
+          <div class="pitch" data-role="pitch"></div>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

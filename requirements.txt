@@ -8,6 +8,7 @@ opencv-python>=4.9.0.80
 # Machine Learning
 torch>=2.2.0
 torchvision>=0.17.0
+torchaudio>=2.2.0
 scikit-learn>=1.4.0
 numpy>=1.26.0
 scipy>=1.13.0
@@ -35,3 +36,8 @@ pyyaml>=6.0.1
 tqdm>=4.66.0
 shapely>=2.0.0
 lsq-ellipse>=2.2.1
+
+# Speech
+coqui-tts>=0.27.0
+torchcodec>=0.8.1
+transformers>=4.57,<5.0
