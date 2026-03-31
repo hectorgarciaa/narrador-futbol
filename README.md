@@ -103,6 +103,25 @@ Nota de arquitectura: el runtime productivo vive en `football_ai/` y `experiment
 
 ---
 
+## 🧪 Depuración de tracking (four-panel)
+
+Cuando `visualization.four_panel_enabled=true`, el vídeo de salida se genera como mosaico 2x2. En ese modo, el pipeline guarda además un JSON con metadatos por frame para depurar por qué se pierden IDs:
+
+- `output/tracks_json/tracker/<video>_debug_frames.json`
+
+Incluye, por frame:
+- detecciones crudas YOLO,
+- detecciones YOLO descartadas porque ByteTrack no las devolvió,
+- detecciones devueltas por ByteTrack pero descartadas en el mapeo a IDs canónicos (incluye `bt#<id>` y opcionalmente un `discard_reason`).
+
+Para un resumen offline rápido puedes usar:
+
+```bash
+python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video>_debug_frames.json
+```
+
+---
+
 ## 🛠️ Tecnologías
 
 | Área | Tecnología |

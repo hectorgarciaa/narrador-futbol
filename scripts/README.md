@@ -74,11 +74,18 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto `auto-bootstrap`, toma los 
 3. Guarda los tracks en JSON con `json.dump` + `convert_to_serializable` en:
    - `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (ruta principal para `experiments/positions`)
    - `output/tracks_json/tracker/tracks.json` (legacy, compatibilidad)
+   - Si `visualization.four_panel_enabled=true`, también guarda:
+     - `output/tracks_json/tracker/<video_sanitizado>_debug_frames.json` (metadatos por frame para depuración)
 4. Genera el video anotado con `Drawer.draw_tracks()` e incluye `field_position_m` bajo los `player` cuando está disponible.
    - Si `visualization.four_panel_enabled=true`, la salida pasa a mosaico 2x2 (tracking compacto, mapa de campo, detecciones YOLO descartadas y vista con continuidad).
    - Si `tracking.possession.enabled=true`, resalta al poseedor con un segundo recuadro amarillo y muestra `POS: <equipo>` en overlays (modo 1 panel y 4 paneles).
 5. El nombre del MP4 de salida se construye con el nombre del vídeo de entrada + `_tracking.mp4`.
 6. Llama a `Evaluator` para imprimir métricas en consola.
+
+**Análisis offline de descartes (four-panel):**
+```bash
+python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video_sanitizado>_debug_frames.json
+```
 
 **Nota Linux/headless:** si `visualization.show_output=true` pero no hay entorno gráfico (`DISPLAY`/`WAYLAND_DISPLAY`), la ventana en tiempo real se desactiva automáticamente y el script sigue generando el MP4 de salida.
 **Nota anti-ID-switch:** `track.py` aplica gate estadístico (`motion_std_*`) y reglas estrictas de reasignación desde `config.yaml`; con `require_field_position_for_reassign=true` no hay fallback a píxeles en reasignación y con `use_field_position_as_primary_cost=true` el matching base de `player/goalkeeper` se hace por campo.
