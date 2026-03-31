@@ -45,7 +45,15 @@ class Tracker(TrackerLogicMixin):
 
         self.model = Detector(model_path, **detector_conf)
         self.team_detector = TeamDetector(**team_detector_conf)
-        self.tracker = ByteTrack(**bytetracker_conf)
+        # Legacy behavior (pre-refactor): do not cap track activation inside ByteTrack.
+        # We still apply limits later in the canonical-ID layer (`max_tracks_per_class`).
+        enforce_internal_class_limits = bool(
+            (tracker_conf or {}).get("enforce_internal_class_limits", False)
+        )
+        bytetracker_runtime_conf = dict(bytetracker_conf or {})
+        if not enforce_internal_class_limits:
+            bytetracker_runtime_conf.pop("max_tracks_per_class", None)
+        self.tracker = ByteTrack(**bytetracker_runtime_conf)
         self.field_projector = None
         if projector_conf["enabled"]:
             self.field_projector = PnLCalibFieldProjector(project_root=project_root, **projector_conf["constructor"])

@@ -191,13 +191,12 @@ tracking:
   referee_recovery_max_lost_frames: 3  # Máximo número de frames perdidos para intentar una recuperación específica de árbitros
   referee_recovery_max_distance: 45.0  # Distancia máxima en metros para
   strict_person_class_separation: true  # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
+  # Si es false (recomendado), ByteTrack NO limita internamente cuántos tracks puede activar
+  # por clase. El límite por clase se aplica en la capa canónica/salida final.
+  enforce_internal_class_limits: false
   require_field_position_for_reassign: true  # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles. Si falta field_position, la reasignación se rechaza.
   max_reassign_lost_frames: null  # Tope opcional de frames perdidos para reasignar un ID. null/0/desactivado => un track puede reaparecer tras muchos frames.
-  max_reassign_lost_frames_by_class:  # Tope específico por clase para evitar IDs "zombie"
-    player: 30
-    goalkeeper: 30
-    referee: 20
-    ball: 30
+  max_reassign_lost_frames_by_class: {}  # Sin corte por clase (legacy). Evita capar reenganches tardíos.
   reserve_penalty_spot_seed_players: true  # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos de penalti.
   reserve_penalty_spot_seed_match_distance_m: 12.0  # Distancia máxima en metros desde el punto de penalti para absorber una detección real sobre cada track semilla reservado.    
   
