@@ -1,0 +1,43 @@
+{
+  "track_count_by_class": {
+    "player": 22,
+    "goalkeeper": 0,
+    "referee": 3,
+    "ball": 1
+  },
+  "person_slot_assignments": {
+    "1": "home_1",
+    "6": "home_2",
+    "7": "home_3",
+    "12": "home_4",
+    "15": "home_5",
+    "17": "home_6",
+    "18": "home_7",
+    "19": "home_8",
+    "20": "home_9",
+    "22": "home_10",
+    "24": "home_11",
+    "2": "away_1",
+    "5": "away_2",
+    "11": "away_3",
+    "13": "away_4",
+    "10": "away_5",
+    "9": "away_6",
+    "8": "away_7",
+    "16": "away_8",
+    "14": "away_9",
+    "21": "away_10"
+  },
+  "referee_slot_assignments": {
+    "3": "referee_1",
+    "4": "referee_2",
+    "23": "referee_3"
+  },
+  "synthetic_home_slots": [],
+  "synthetic_away_slots": [
+    "away_11"
+  ],
+  "synthetic_referee_slots": [],
+  "frames": 750,
+  "output_parquet": "football_ai/actions/pathcrf/data/narrador/tracking_processed/partido.parquet"
+}
