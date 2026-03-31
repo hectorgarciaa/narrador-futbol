@@ -159,9 +159,29 @@ class Config:
         return self._config.get('detection', {})
     
     @property
+    def team_detector(self) -> Dict[str, Any]:
+        """Team Detector configuration."""
+        return self._config.get('team_detector', {})
+    
+    @property
     def tracking(self) -> Dict[str, Any]:
         """Tracking configuration."""
         return self._config.get('tracking', {})
+    
+    @property
+    def projector(self) -> Dict[str, Any]:
+        """Projector configuration."""
+        return self.tracking.get('projector', {})
+    
+    @property
+    def bytetracker(self) -> Dict[str, Any]:
+        """ByteTracker configuration."""
+        return self.tracking.get('bytetracker', {})
+    
+    @property
+    def ball(self) -> Dict[str, Any]:
+        """Ball tracking configuration."""
+        return self.tracking.get('ball', {})
     
     @property
     def teams(self) -> Dict[str, Any]:
@@ -177,11 +197,6 @@ class Config:
     def finetuning(self) -> Dict[str, Any]:
         """Fine-tuning configuration."""
         return self._config.get('finetuning', {})
-    
-    @property
-    def color_clustering(self) -> Dict[str, Any]:
-        """Color clustering configuration."""
-        return self._config.get('color_clustering', {})
     
     @property
     def logging_config(self) -> Dict[str, Any]:
