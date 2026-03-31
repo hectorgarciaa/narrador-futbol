@@ -45,6 +45,24 @@ def save_summary(summary, output_path, logger):
         logger.error(f"Error saving tracking summary to {output_path}: {e}")
 
 
+def save_debug_frames(debug_frames, output_path, logger):
+    """Save per-frame debug metadata (four-panel discarded detections, reasons, etc.)."""
+    try:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(
+                convert_to_serializable(debug_frames),
+                f,
+                indent=2,
+                ensure_ascii=False,
+                sort_keys=False,
+            )
+        logger.info(f"Debug frames saved to: {output_path}")
+    except Exception as e:
+        logger.error(f"Error saving debug frames to {output_path}: {e}")
+
+
 def _read_csv_rows(csv_path):
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)

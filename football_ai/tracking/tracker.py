@@ -206,6 +206,9 @@ class Tracker(TrackerLogicMixin):
                 )
             raw_detections = []
             accepted_raw_detection_indexes = set()
+            bytetrack_raw_detection_indexes = set()
+            bytetrack_discard_reason_by_raw_idx = {}
+            bytetrack_id_by_raw_idx = {}
             if collect_visual_debug and detections.boxes is not None and len(detections.boxes) > 0:
                 raw_xyxy = detections.boxes.xyxy.cpu().numpy()
                 raw_conf = detections.boxes.conf.cpu().numpy()
@@ -289,6 +292,18 @@ class Tracker(TrackerLogicMixin):
                     -float(item[2]),
                 ),
             )
+            if collect_visual_debug:
+                for object_detected in sorted_tracked_detections:
+                    _, _, _, _, tracker_id, metadata = object_detected
+                    raw_detection_idx = metadata.get("raw_det_idx")
+                    if raw_detection_idx is None:
+                        continue
+                    try:
+                        raw_idx_int = int(raw_detection_idx)
+                        bytetrack_raw_detection_indexes.add(raw_idx_int)
+                        bytetrack_id_by_raw_idx[raw_idx_int] = int(tracker_id)
+                    except (TypeError, ValueError):
+                        continue
             pending_detections = []
             ball_candidates = []
 
@@ -434,6 +449,15 @@ class Tracker(TrackerLogicMixin):
                 bbox, _, confidence, _, tracker_id, metadata = object_detected
                 class_name = metadata["class_name"]
                 if class_name not in tracks:
+                    if collect_visual_debug:
+                        raw_detection_idx = metadata.get("raw_det_idx")
+                        if raw_detection_idx is not None:
+                            try:
+                                bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                                    "reason_pre": "class_not_supported",
+                                }
+                            except (TypeError, ValueError):
+                                pass
                     continue
                 bbox = self._bbox_to_list(bbox)
                 confidence = float(confidence)
@@ -459,21 +483,41 @@ class Tracker(TrackerLogicMixin):
                 if canonical_id is not None:
                     previous_state = canonical_state.get(canonical_id)
                     if previous_state is None:
+                        if collect_visual_debug and raw_detection_idx is not None:
+                            bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                                "reason_pre": "canonical_state_missing",
+                            }
                         canonical_id = None
                     elif canonical_id in used_canonical_ids_in_frame:
+                        if collect_visual_debug and raw_detection_idx is not None:
+                            bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                                "reason_pre": "canonical_id_used_in_frame",
+                            }
                         canonical_id = None
                     else:
                         output_class_name = previous_state["class_name"]
                         if output_class_name not in tracks:
+                            if collect_visual_debug and raw_detection_idx is not None:
+                                bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                                    "reason_pre": "canonical_class_unsupported",
+                                }
                             canonical_id = None
-                        elif self._resolve_candidate_class_for_detection(
-                            previous_state,
-                            class_name,
-                            detected_team,
-                            bbox,
-                            field_position,
-                            n_frame,
-                        ) is None:
+                        else:
+                            resolved_class, resolved_reason = (
+                                self._resolve_candidate_class_for_detection_debug(
+                                    previous_state,
+                                    class_name,
+                                    detected_team,
+                                    bbox,
+                                    field_position,
+                                    n_frame,
+                                )
+                            )
+                            if resolved_class is None:
+                                if collect_visual_debug and raw_detection_idx is not None:
+                                    bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
+                                        "reason_pre": str(resolved_reason or "canonical_gate_failed"),
+                                    }
                             canonical_id = None
 
                 if class_name in {"player", "goalkeeper"}:
@@ -538,6 +582,12 @@ class Tracker(TrackerLogicMixin):
 
                 if canonical_id is None:
                     output_class_name = class_name
+                    if collect_visual_debug and raw_detection_idx is not None:
+                        entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                            int(raw_detection_idx),
+                            {},
+                        )
+                        entry.setdefault("reason_pre", "raw_tracker_id_unmapped_or_rejected")
                     pending_detections.append(
                         {
                             "raw_tracker_id": raw_tracker_id,
@@ -590,9 +640,21 @@ class Tracker(TrackerLogicMixin):
                             current_frame=n_frame,
                         )
                         if class_count >= int(class_limit):
+                            if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                                entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                                    int(pending["raw_detection_idx"]),
+                                    {},
+                                )
+                                entry["reason_post"] = "canonical_class_limit_reached"
                             continue
                     next_free_id = self._next_free_canonical_id(canonical_state)
                     if next_free_id is None:
+                        if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                            entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                                int(pending["raw_detection_idx"]),
+                                {},
+                            )
+                            entry["reason_post"] = "canonical_no_free_id"
                         continue
                     canonical_id = next_free_id
 
@@ -607,6 +669,15 @@ class Tracker(TrackerLogicMixin):
                     pending["metadata"],
                     raw_detection_idx=pending.get("raw_detection_idx"),
                 )
+                if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                    # Mark as accepted if it came from YOLO index.
+                    try:
+                        bytetrack_discard_reason_by_raw_idx.pop(
+                            int(pending["raw_detection_idx"]),
+                            None,
+                        )
+                    except (TypeError, ValueError):
+                        pass
 
             for canonical_id, state in canonical_state.items():
                 if canonical_id in used_canonical_ids_in_frame:
@@ -682,10 +753,31 @@ class Tracker(TrackerLogicMixin):
                     for raw_detection in raw_detections
                     if int(raw_detection["raw_det_idx"]) not in accepted_raw_detection_indexes
                 ]
+                discarded_not_tracked = []
+                discarded_tracked_no_canonical = []
+                for det in discarded:
+                    raw_idx = int(det.get("raw_det_idx"))
+                    if raw_idx in bytetrack_raw_detection_indexes:
+                        payload = dict(det)
+                        payload["bytetrack_id"] = bytetrack_id_by_raw_idx.get(raw_idx)
+                        reason_info = bytetrack_discard_reason_by_raw_idx.get(raw_idx, {})
+                        reason_pre = reason_info.get("reason_pre")
+                        reason_post = reason_info.get("reason_post")
+                        if reason_pre and reason_post:
+                            payload["discard_reason"] = f"{reason_pre}|{reason_post}"
+                        elif reason_post:
+                            payload["discard_reason"] = str(reason_post)
+                        elif reason_pre:
+                            payload["discard_reason"] = str(reason_pre)
+                        discarded_tracked_no_canonical.append(payload)
+                    else:
+                        discarded_not_tracked.append(det)
                 visual_debug_frames.append(
                     {
                         "raw_detections": raw_detections,
                         "discarded_detections": discarded,
+                        "discarded_yolo_not_tracked": discarded_not_tracked,
+                        "discarded_bytetrack_not_canonical": discarded_tracked_no_canonical,
                     }
                 )
 

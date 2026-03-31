@@ -923,6 +923,141 @@ class TrackerLogicMixin:
 
         return None
 
+    def _resolve_candidate_class_for_detection_debug(
+        self,
+        candidate_state,
+        detection_class,
+        detection_team,
+        detection_bbox,
+        detection_field_position,
+        current_frame,
+    ):
+        """
+        Debug helper for canonical reassignment decisions.
+
+        Returns:
+            (resolved_class_name, reason)
+            - resolved_class_name: same value that `_resolve_candidate_class_for_detection` would return.
+            - reason: None when resolved_class_name is not None, otherwise a short reason code.
+        """
+        candidate_class = candidate_state.get("class_name")
+        if candidate_class is None:
+            return None, "candidate_class_missing"
+
+        if (
+            candidate_state.get("special_penalty_seed")
+            and candidate_class in {"player", "goalkeeper"}
+            and detection_class in {"player", "goalkeeper"}
+        ):
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
+            ):
+                return None, "motion_incompatible_special_seed"
+            return candidate_class, None
+
+        if (
+            candidate_state.get("reserved_seed")
+            and candidate_class == "player"
+            and detection_class in {"player", "goalkeeper"}
+        ):
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=detection_class,
+                new_field_position=detection_field_position,
+            ):
+                return None, "motion_incompatible_reserved_seed"
+            return detection_class, None
+
+        if self._is_compatible_class(candidate_class, detection_class):
+            if not self._is_team_compatible(
+                candidate_state.get("team"),
+                detection_team,
+                candidate_class,
+            ):
+                return None, "team_incompatible"
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
+            ):
+                return None, "motion_incompatible"
+
+            if candidate_class == "referee":
+                distance_sq = self._bbox_distance_sq(
+                    candidate_state.get("bbox"),
+                    detection_bbox,
+                    class_name=candidate_class,
+                    field_position_a=candidate_state.get("field_position"),
+                    field_position_b=detection_field_position,
+                )
+                if distance_sq is None:
+                    return None, "referee_distance_unknown"
+                if distance_sq > (self.referee_recovery_max_distance ** 2):
+                    return None, "referee_distance_too_large"
+            return candidate_class, None
+
+        if candidate_class == "referee" and detection_class == "player":
+            last_frame = int(candidate_state.get("last_frame", current_frame))
+            lost_frames = max(0, current_frame - last_frame)
+            if lost_frames > self.referee_recovery_max_lost_frames:
+                return None, "referee_recovery_too_late"
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
+            ):
+                return None, "referee_recovery_motion_incompatible"
+            distance_sq = self._bbox_distance_sq(
+                candidate_state.get("bbox"),
+                detection_bbox,
+                class_name=candidate_class,
+                field_position_a=candidate_state.get("field_position"),
+                field_position_b=detection_field_position,
+            )
+            if distance_sq is None:
+                return None, "referee_recovery_distance_unknown"
+            if distance_sq > (self.referee_recovery_max_distance ** 2):
+                return None, "referee_recovery_distance_too_large"
+            return "referee", None
+
+        if candidate_class == "player" and detection_class == "referee":
+            last_frame = int(candidate_state.get("last_frame", current_frame))
+            lost_frames = max(0, current_frame - last_frame)
+            if lost_frames > self.referee_recovery_max_lost_frames:
+                return None, "referee_migration_too_late"
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name="referee",
+                new_field_position=detection_field_position,
+            ):
+                return None, "referee_migration_motion_incompatible"
+            distance_sq = self._bbox_distance_sq(
+                candidate_state.get("bbox"),
+                detection_bbox,
+                class_name="referee",
+                field_position_a=candidate_state.get("field_position"),
+                field_position_b=detection_field_position,
+            )
+            if distance_sq is None:
+                return None, "referee_migration_distance_unknown"
+            if distance_sq > (self.referee_recovery_max_distance ** 2):
+                return None, "referee_migration_distance_too_large"
+            return "referee", None
+
+        return None, "class_incompatible"
+
     def _assign_pending_by_lost_order(
         self,
         pending_detections,

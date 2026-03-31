@@ -650,25 +650,54 @@ class Drawer:
 
     def _draw_discarded_panel(self, base_frame, debug_frame):
         panel = base_frame.copy()
-        discarded = (debug_frame or {}).get("discarded_detections", [])
-        for det in discarded:
-            bbox = det.get("bbox")
-            if not isinstance(bbox, list) or len(bbox) < 4:
-                continue
-            x1, y1, x2, y2 = map(int, bbox)
-            cls = self._short_class_label(det.get("class_name", ""))
-            conf = float(det.get("confidence", 0.0))
-            cv2.rectangle(panel, (x1, y1), (x2, y2), (0, 165, 255), 1)
-            cv2.putText(
-                panel,
-                f"{cls} {conf:.2f}",
-                (x1, max(12, y1 - 3)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                self.compact_font_scale,
-                (0, 165, 255),
-                1,
-                cv2.LINE_AA,
-            )
+        debug_frame = debug_frame or {}
+        show_reasons = bool(self.visualization_conf.get("discarded_panel_show_reasons", False))
+        color_not_tracked = self._parse_bgr_color(
+            self.visualization_conf.get("discarded_panel_color_not_tracked", (0, 165, 255))
+        ) or (0, 165, 255)
+        color_tracked_no_canonical = self._parse_bgr_color(
+            self.visualization_conf.get("discarded_panel_color_tracked_no_canonical", (255, 0, 255))
+        ) or (255, 0, 255)
+
+        # Backwards compatible: if new keys aren't present, use the legacy list.
+        yolo_not_tracked = debug_frame.get("discarded_yolo_not_tracked")
+        bytetrack_no_canonical = debug_frame.get("discarded_bytetrack_not_canonical")
+        legacy = debug_frame.get("discarded_detections", [])
+        if not isinstance(yolo_not_tracked, list) and not isinstance(bytetrack_no_canonical, list):
+            yolo_not_tracked = legacy
+            bytetrack_no_canonical = []
+
+        def draw_list(items, color):
+            for det in items or []:
+                bbox = det.get("bbox")
+                if not isinstance(bbox, list) or len(bbox) < 4:
+                    continue
+                x1, y1, x2, y2 = map(int, bbox)
+                cls = self._short_class_label(det.get("class_name", ""))
+                conf = float(det.get("confidence", 0.0))
+                label = f"{cls} {conf:.2f}".strip()
+                bt_id = det.get("bytetrack_id")
+                if bt_id is not None and bt_id != -1:
+                    label = f"{label} bt#{bt_id}"
+                if show_reasons:
+                    reason = str(det.get("discard_reason") or "").strip()
+                    if reason:
+                        # Keep label compact to avoid unreadable overlays.
+                        label = f"{label} {reason[:28]}"
+                cv2.rectangle(panel, (x1, y1), (x2, y2), color, 1)
+                cv2.putText(
+                    panel,
+                    label,
+                    (x1, max(12, y1 - 3)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    self.compact_font_scale,
+                    color,
+                    1,
+                    cv2.LINE_AA,
+                )
+
+        draw_list(yolo_not_tracked, color_not_tracked)
+        draw_list(bytetrack_no_canonical, color_tracked_no_canonical)
         return panel
 
     @staticmethod

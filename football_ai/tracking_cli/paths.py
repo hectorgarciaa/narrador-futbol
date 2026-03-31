@@ -91,3 +91,17 @@ def build_tracking_metrics_output_paths(config, video_path):
     sanitized_stem = sanitize_video_stem(Path(video_path).stem)
     summary_path = tracks_dir / f"{sanitized_stem}_summary.json"
     return str(summary_path), str(dataset_path)
+
+
+def build_debug_frames_output_path(config, video_path):
+    """
+    Build output path for per-frame debug metadata used by the four-panel drawer.
+    """
+    tracks_dir = config.get_path(
+        "paths", "output", "tracks_json", create_if_missing=True
+    ) / "tracker"
+    tracks_dir.mkdir(parents=True, exist_ok=True)
+
+    sanitized_stem = sanitize_video_stem(Path(video_path).stem)
+    debug_path = tracks_dir / f"{sanitized_stem}_debug_frames.json"
+    return str(debug_path)

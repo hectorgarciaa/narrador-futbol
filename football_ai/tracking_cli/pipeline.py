@@ -25,11 +25,12 @@ from football_ai.visualization import Drawer
 
 from .paths import (
     build_output_video_path,
+    build_debug_frames_output_path,
     build_tracking_metrics_output_paths,
     build_tracks_output_paths,
     resolve_video_path,
 )
-from .persistence import save_result, save_summary, upsert_tracking_metrics_dataset
+from .persistence import save_debug_frames, save_result, save_summary, upsert_tracking_metrics_dataset
 
 COLOR_NAME_TO_RGB = {
     "white": (255, 255, 255),
@@ -272,6 +273,10 @@ def run_tracking_pipeline(args):
             frame_hook=online_special_seed_role_assigner.on_frame,
             collect_visual_debug=four_panel_enabled,
         )
+
+        if four_panel_enabled:
+            debug_frames_path = build_debug_frames_output_path(config, video_path)
+            save_debug_frames(tracker.visualization_debug_frames, debug_frames_path, logger)
         
         role_postprocess_result = online_special_seed_role_assigner.summary() if online_special_seed_role_assigner.enabled else None
         if role_postprocess_result is not None:

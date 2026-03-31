@@ -77,6 +77,12 @@ Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
    - banner `POS: <equipo>`.
    - El tamaño de círculo se controla con `visualization.pitch_marker_radius` (por defecto 12).
 3. `C) YOLO descartadas`: detecciones crudas de YOLO que no acabaron en un track canónico en ese frame.
+   - Se separan en dos tipos (colores configurables en `config.yaml/visualization`):
+     - `discarded_panel_color_not_tracked`: YOLO no devueltas por ByteTrack.
+     - `discarded_panel_color_tracked_no_canonical`: devueltas por ByteTrack pero descartadas en el mapeo a ID canónico.
+   - Para las detecciones devueltas por ByteTrack pero descartadas en canónico, el panel incluye también `bt#<id>` (el `tracker_id` devuelto por ByteTrack).
+   - Si `visualization.discarded_panel_show_reasons=true`, el panel añade un código corto `discard_reason` en la etiqueta (útil para depurar gates/límites).
+   - Cuando `four_panel_enabled=true`, el pipeline guarda además un JSON `*_debug_frames.json` junto al `*_tracks.json` con estas listas y motivos, para análisis offline.
 4. `D) Tracking con continuidad`: overlay compacto con relleno de continuidad (usa la última posición conocida por ID cuando falta detección en el frame) y mantiene el resaltado de posesión.
    - Si `visualization.continuity_keep_all_seen_ids=true`, mantiene visibles todos los IDs ya observados en el clip para cada clase (no corta al cupo esperado).
 
