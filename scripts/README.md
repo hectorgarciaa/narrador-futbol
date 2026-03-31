@@ -74,9 +74,18 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto `auto-bootstrap`, toma los 
 3. Guarda los tracks en JSON con `json.dump` + `convert_to_serializable` en:
    - `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (ruta principal para `experiments/positions`)
    - `output/tracks_json/tracker/tracks.json` (legacy, compatibilidad)
+   - Si `visualization.four_panel_enabled=true`, también guarda:
+     - `output/tracks_json/tracker/<video_sanitizado>_debug_frames.json` (metadatos por frame para depuración)
 4. Genera el video anotado con `Drawer.draw_tracks()` e incluye `field_position_m` bajo los `player` cuando está disponible.
+   - Si `visualization.four_panel_enabled=true`, la salida pasa a mosaico 2x2 (tracking compacto, mapa de campo, detecciones YOLO descartadas y vista con continuidad).
+   - Si `tracking.possession.enabled=true`, resalta al poseedor con un segundo recuadro amarillo y muestra `POS: <equipo>` en overlays (modo 1 panel y 4 paneles).
 5. El nombre del MP4 de salida se construye con el nombre del vídeo de entrada + `_tracking.mp4`.
 6. Llama a `Evaluator` para imprimir métricas en consola.
+
+**Análisis offline de descartes (four-panel):**
+```bash
+python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video_sanitizado>_debug_frames.json
+```
 
 **Nota Linux/headless:** si `visualization.show_output=true` pero no hay entorno gráfico (`DISPLAY`/`WAYLAND_DISPLAY`), la ventana en tiempo real se desactiva automáticamente y el script sigue generando el MP4 de salida.
 **Nota anti-ID-switch:** `track.py` aplica gate estadístico (`motion_std_*`) y reglas estrictas de reasignación desde `config.yaml`; con `require_field_position_for_reassign=true` no hay fallback a píxeles en reasignación y con `use_field_position_as_primary_cost=true` el matching base de `player/goalkeeper` se hace por campo.
@@ -85,7 +94,7 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto `auto-bootstrap`, toma los 
 **Salidas extra de roles:** cuando esa lógica online está activa, `track.py` escribe además los CSV y PNG de roles dentro de `output/tracker/<video>_role_artifacts/`. Ahí quedan `<video>_frame_role_predictions.csv`, `<video>_player_role_summary.csv`, `<video>_greedy_role_diagnostics.csv`, `<video>_role_assignment_vs_detected_pre<frame>.png` y, si la estrategia es `ratio_priority`, un PNG paso a paso por equipo con la simulación snapshot. También deja una copia de compatibilidad en `output/tracks_json/tracker/`.
 Si la ejecución viene de la interfaz, `track.py` copia además el `lineup_spec.json` usado dentro de ese mismo directorio de artefactos.
 **Nota reapariciones tardías:** para `player/goalkeeper` con homografía, la reasignación canónica usa exactamente el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), sin suelo extra ni expansión por velocidad en la capa 2. `reassign_motion_growth_cap_frames` queda solo para clases sin homografía.
-**Nota balón:** además del matching normal, `track.py` filtra el balón con restricciones específicas de trayectoria esperada y tamaño (`ball_expected_position_*`, `ball_size_*`) para rechazar detecciones que se teletransportan o cambian de escala sin plausibilidad física, intentando mantener la cobertura original del detector. El umbral mínimo de confianza del balón se toma de `detection.ball_min_conf` en `config.yaml` y puede bajarse más que el general porque el filtro posterior ya elimina candidatas imposibles. Si el balón sale por un borde de la imagen, la búsqueda posterior queda anclada a ese límite; solo tras `ball_max_reassign_lost_frames` frames sin detección se permite redetección libre por confianza máxima. En el resumen final añade también `ball_coverage`.
+**Nota balón:** además del matching normal, `track.py` filtra el balón con restricciones específicas de trayectoria esperada y tamaño (configuradas en `tracking.ball.*`) para rechazar detecciones que se teletransportan o cambian de escala sin plausibilidad física, intentando mantener la cobertura original del detector. El umbral mínimo de confianza del balón se toma de `detection.ball_min_conf` en `config.yaml` y puede bajarse más que el general porque el filtro posterior ya elimina candidatas imposibles. Si el balón sale por un borde de la imagen, la búsqueda posterior queda anclada a ese límite; solo tras `tracking.ball.max_reassign_lost_frames` frames sin detección se permite redetección libre por confianza máxima. En el resumen final añade también `ball_coverage`.
 
 Es el script principal del proyecto y sirve como referencia de cómo usar el paquete `football_ai` completo.
 
@@ -110,7 +119,7 @@ python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/p
 1. Lee el `tracks.json` generado por `scripts/track.py`.
 2. Fusiona `player` y `goalkeeper` en 22 slots fijos (`home_1..11`, `away_1..11`) y conserva 3 árbitros (`referee_1..3`).
 3. Interpola huecos internos con coordenadas de campo (`field_position_m`) y rellena los slots que nunca aparecen con una plantilla simple de formación alineada al equipo visible.
-4. Genera una trayectoria aproximada del balón y del portador actual a partir del bbox del balón y el jugador más cercano visible.
+4. Genera una trayectoria aproximada del balón y del portador actual. Si `tracks.json` trae posesión (`player_id`/`ball_owning_player_id`), se usa ese portador como señal principal; si no, cae al fallback por jugador más cercano visible.
 5. Exporta:
    - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.parquet`
    - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.summary.json`

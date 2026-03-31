@@ -99,6 +99,27 @@ narrador-futbol/
     └── visualization/
 ```
 
+Nota de arquitectura: el runtime productivo vive en `football_ai/` y `experiments/` actúa como capa de experimentación sobre ese runtime (sin dependencias inversas desde `football_ai` hacia `experiments`).
+
+---
+
+## 🧪 Depuración de tracking (four-panel)
+
+Cuando `visualization.four_panel_enabled=true`, el vídeo de salida se genera como mosaico 2x2. En ese modo, el pipeline guarda además un JSON con metadatos por frame para depurar por qué se pierden IDs:
+
+- `output/tracks_json/tracker/<video>_debug_frames.json`
+
+Incluye, por frame:
+- detecciones crudas YOLO,
+- detecciones YOLO descartadas porque ByteTrack no las devolvió,
+- detecciones devueltas por ByteTrack pero descartadas en el mapeo a IDs canónicos (incluye `bt#<id>` y opcionalmente un `discard_reason`).
+
+Para un resumen offline rápido puedes usar:
+
+```bash
+python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video>_debug_frames.json
+```
+
 ---
 
 ## 🛠️ Tecnologías
@@ -380,13 +401,14 @@ El JSON de tracks se guarda en `output/tracks_json/tracker/<video_sanitizado>_tr
 También se guarda el resumen por vídeo en `output/tracks_json/tracker/<video_sanitizado>_summary.json`.
 Si el tracking online de roles está activo, `track.py` exporta además los CSV y PNG canónicos en `output/tracker/<video_sanitizado>_role_artifacts/`, incluyendo `<video_sanitizado>_frame_role_predictions.csv`, `<video_sanitizado>_player_role_summary.csv` y `<video_sanitizado>_greedy_role_diagnostics.csv`. El CSV por frame conserva la predicción cruda del modelo antes del congelado estable, y el CSV del greedy guarda las métricas acumuladas que usó la estabilización para elegir slot por slot. En `ratio_priority`, si tras la asignación fuerte y la residual todavía quedan slots esperados libres, el tracker completa esas plazas con los jugadores ya congelados que seguían sin `expected_role_slot`, escogiendo la mejor combinación restante. Además, cuando el once esperado contiene dos `MC` o dos `DC`, el tracker desdobla visualmente esos slots a `MC_IZQ/MC_DCHO` o `DC_IZQ/DC_DCHO` usando la media acumulada de distancia a las bandas hasta el frame de congelado, en coordenadas orientadas por dirección de ataque. También deja una copia de compatibilidad en `output/tracks_json/tracker/`.
 Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `data/posiciones_etiquetadas/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`). Ese resumen incluye también `ball_coverage`, para medir en qué fracción del clip el balón quedó trackeado.
+El tracking también calcula posesión online con `tracking.possession` (equipo + jugador poseedor por frame). Ese dato se inyecta en los payloads de `tracks.json` (`ball_owning_team_id`, `ball_owning_player_id`, `player_id`, `is_possession_player`, `possession_reason`), se guarda también por frame en `tracks["possession"]` y se visualiza en el vídeo con un segundo recuadro amarillo en el jugador poseedor y un banner `POS: <equipo>`.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría. Mientras no se absorban, también se escriben en el JSON con `synthetic_seed=true`.
 Si `tracking.special_seed_role_team_assignment_enabled=true`, el tracking principal ejecuta además el modelo de `position_role` frame a frame durante el tracking para los jugadores normales y usa a los defensas detectados en ese frame para asignar equipo a los IDs reservados `1-2` por defensa más cercano. Esos dos IDs no entran al Set Transformer: se etiquetan manualmente como `POR`. Si defines `tracking.expected_roles_by_team`, ese once esperado ya no fuerza la etiqueta frame a frame: solo se usa cuando el track alcanza la ventana de estabilización (`role_stabilization_*`) para congelar la posición estable a partir de la evidencia acumulada del propio jugador. El histórico previo ya no se reescribe al estabilizarse, así que el JSON conserva la predicción original de esos frames anteriores. Esos IDs no usan color de camiseta para recuperar identidad ni para fijar su equipo.
 Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa exactamente el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), sin suelo extra ni expansión por velocidad en la capa 2. Así un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
-En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida.
+En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida. También puedes activar `visualization.four_panel_enabled=true` para generar una salida 2x2 de depuración (tracking compacto, mapa de campo, YOLO descartadas y continuidad), incluyendo el indicador de posesión en los paneles.
 Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `models/reference_points/pnlcalib_repo/` y descarga sus pesos automáticamente. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
 
 ### Detección básica (sin fine-tuning)
@@ -563,7 +585,7 @@ python scripts/train/finetune_player.py
 ```bash
 python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
 ```
-Este paso genera un parquet ancho en `football_ai/actions/pathcrf/data/narrador/tracking_processed/` con 22 slots fijos de jugadores, 3 árbitros, balón aproximado y variables de estado por frame. Si faltan tracks en algún frame, el adaptador interpola huecos internos y rellena ausencias persistentes con una plantilla simple de formación alineada al equipo visible.
+Este paso genera un parquet ancho en `football_ai/actions/pathcrf/data/narrador/tracking_processed/` con 22 slots fijos de jugadores, 3 árbitros, balón aproximado y variables de estado por frame. Si faltan tracks en algún frame, el adaptador interpola huecos internos y rellena ausencias persistentes con una plantilla simple de formación alineada al equipo visible. Para estimar el portador, prioriza `player_id`/`ball_owning_player_id` cuando el tracker ya trae posesión online; si no, usa el fallback por jugador visible más cercano.
 
 ### Grid search de hiperparámetros del tracker
 ```bash
@@ -631,15 +653,16 @@ tracking:
   motion_std_factor: 4.0
   motion_std_min_samples: 5
   motion_std_floor: 0.5
-  ball_expected_position_gate_px: 90.0
-  ball_expected_position_gate_growth_per_frame: 35.0
-  ball_expected_position_confidence_relax: 1.4
-  ball_size_ratio_per_frame: 1.8
-  ball_size_min_samples: 5
-  ball_size_std_factor: 3.0
-  ball_size_std_floor: 1.0
-  ball_max_reassign_lost_frames: 30
-  ball_high_conf_override: 0.6
+  ball:
+    expected_position_gate_px: 90.0
+    expected_position_gate_growth_per_frame: 35.0
+    expected_position_confidence_relax: 1.4
+    size_ratio_per_frame: 1.8
+    size_min_samples: 5
+    size_std_factor: 3.0
+    size_std_floor: 1.0
+    max_reassign_lost_frames: 30
+    high_conf_override: 0.6
 
 teams:
   Real Madrid:

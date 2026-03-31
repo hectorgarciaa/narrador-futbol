@@ -7,7 +7,7 @@ from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
-from experiments.reference_points.pnlcalib_reference_points import (
+from football_ai.reference_points.pnlcalib_runtime import (
     PitchGeometry,
     StreamingPnLCalibEstimator,
     ensure_pnlcalib_repo,

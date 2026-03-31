@@ -54,11 +54,14 @@ Por cada frame del vídeo:
 5. **Seeds canónicos opcionales en punto de penalti**: si `reserve_penalty_spot_seed_players=true`, el tracker crea dos tracks semilla sintéticos de clase `player` en los puntos de penalti. No pasan por `TeamDetector`, así que no contaminan el clustering de colores ni tienen equipo asignado. Sí participan en la reasignación canónica por posición de campo, reservando dos IDs para jugadores no visibles al inicio. Mientras no absorban una detección real, también se escriben en el JSON final con `synthetic_seed=true`.
 6. **Lógica especial para los IDs reservados**: esos dos IDs no exigen coincidencia `player/goalkeeper` para recuperar una detección real y no fijan equipo por color durante el tracking. Su equipo se asigna frame a frame durante el propio tracking con el modelo de roles posicionales y el defensa más cercano. Como ya se consideran porteros conocidos, no entran al Set Transformer y se etiquetan manualmente como `POR`. Si defines `tracking.expected_roles_by_team`, o pasas un `lineup_spec.json` desde la interfaz, ese once esperado se usa solo al congelar el `role` estable, no para imponer una plaza táctica distinta en cada frame. El congelado se decide con la evidencia acumulada del jugador durante la ventana de estabilización y luego se asigna una plaza esperada por equipo con la estrategia configurada en `tracking.role_stabilization_expected_roles_assignment` (`hungarian`, `greedy` o `ratio_priority`). El modo `ratio_priority` hace una foto global al llegar a `role_stabilization_window_frames`: con esa evidencia fija intenta asignar plazas esperadas por equipo, y si un rol dominante no es válido para la alineación esperada o una plaza válida ya quedó ocupada, transfiere esa masa a la siguiente plaza válida libre del ranking del jugador. Después exige un ratio acumulado mínimo para esa plaza válida y, además, un ratio mínimo en la propia plaza final. Si aún quedan plazas libres tras ese filtro, resuelve los descartes restantes con una asignación óptima entre jugadores pendientes y slots disponibles y, si todavía queda algún slot del once sin cubrir, completa esas plazas con los tracks ya congelados que seguían sin `expected_role_slot` usando la mejor combinación restante. Cuando un once esperado contiene dos `MC` o dos `DC`, tras congelar ambos slots el sistema los desdobla a `MC_IZQ/MC_DCHO` o `DC_IZQ/DC_DCHO` usando la media acumulada de distancia a las bandas hasta ese instante, en coordenadas ya orientadas por dirección de ataque. Si existe un `lineup_spec.json`, en ese mismo instante también intenta resolver `player_name` combinando `team + display_role_slot`. Los jugadores con menos de `role_stabilization_expected_roles_min_count` observaciones no compiten por plaza táctica en la fase fuerte y primero se congelan con su rol dominante de esa foto. El histórico previo ya no se backfillea: los frames anteriores mantienen la predicción original que tuvieron. Si una detección reaparece con un `raw_tracker_id` ya arrastrando otro canónico, los IDs especiales solo pueden reclamarla si ese canónico no estaba realmente activo y además la geometría favorece al ID especial.
 7. **Reasignación canónica coherente con ByteTrack**: para `player/goalkeeper` con `field_position_m`, la segunda capa de IDs canónicos usa exactamente el mismo gate geométrico que ByteTrack (`field_position_match_distance_*`). No añade un suelo extra ni expansión por velocidad en esa capa, así que no puede reusar un ID final con un salto de campo mayor que el permitido por la capa base.
+   - Los IDs canónicos de personas se limitan al rango `1..N_personas` (el balón no consume ese rango y siempre usa `id=0`).
+   - Se permite corrección controlada `player -> referee` cuando una detección de árbitro encaja espacial/temporalmente con un ID que nació mal como jugador.
 8. **Selección robusta del balón**: las candidatas de balón, tanto las devueltas por ByteTrack como las detecciones YOLO crudas, pasan por un gate específico de continuidad. A diferencia de `player/goalkeeper`, aquí no se aplica además el gate genérico de reasignación: se usa solo la lógica propia del balón para no perder cobertura. Se valida que el balón:
    - no salte a una posición incompatible con su trayectoria reciente;
    - no cambie de tamaño de forma abrupta entre frames;
    - y, si hay varias candidatas plausibles, se prioriza la más coherente con la posición esperada y la confianza.
-   Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Cuando la trayectoria prevista saca el balón fuera de la imagen, la búsqueda queda anclada al borde por el que salió; no se aceptan reapariciones “hacia atrás” dentro de la pantalla. Solo tras `ball_max_reassign_lost_frames` frames perdidos se permite una redetección libre por máxima confianza.
+   Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Cuando la trayectoria prevista saca el balón fuera de la imagen, la búsqueda queda anclada al borde por el que salió; no se aceptan reapariciones “hacia atrás” dentro de la pantalla. Solo tras `tracking.ball.max_reassign_lost_frames` frames perdidos se permite una redetección libre por máxima confianza.
+9. **Estimación de posesión online**: tras cerrar el frame, se ejecuta una heurística temporal de posesión (`TeamPossessionEstimator`) que decide `equipo + jugador` en control del balón usando distancia balón-pie, contacto estricto/flexible y señales de movimiento del balón (cambio de dirección, caída de velocidad, continuidad del portador y cambios de equipo). El resultado se inyecta en el propio `tracks` de ese frame para consumo posterior (PathCRF, visualización, análisis).
 
 ### Formato de salida
 
@@ -67,7 +70,8 @@ tracks = {
     "player":     [frame_0_dict, frame_1_dict, ...],  # lista de len = n_frames
     "goalkeeper": [...],
     "referee":    [...],
-    "ball":       [...]
+    "ball":       [...],
+    "possession": [frame_0_possession, frame_1_possession, ...]
 }
 ```
 
@@ -82,7 +86,25 @@ Cada `frame_N_dict` es `{track_id: datos_objeto}` donde `track_id` es un entero 
     "team":        str | None,         # nombre del equipo asignado
     "distances":   {"Equipo A": float, "Equipo B": float} | None,
     "shirt_color": [L, A, B] | None,   # color en espacio LAB
-    "bbox_size":   float               # área del bounding box en píxeles²
+    "bbox_size":   float,              # área del bounding box en píxeles²
+    "is_possession_player": bool,      # true en el jugador/portero poseedor del frame
+    "ball_owning_team_id": str | None, # equipo con posesión en ese frame
+    "ball_owning_player_id": int | None, # id canónico del jugador poseedor
+    "player_id": int | None,           # alias del poseedor para consumidores downstream
+    "possession_reason": str | None    # razón heurística (ej. start_touch, last_touch_hold)
+}
+```
+
+Y para `tracks["possession"][frame_id]`:
+
+```python
+{
+    "team_id": str | None,
+    "player_id": int | None,
+    "reason": str | None,
+    "ball_detected": bool,
+    "nearest_track_id": int | None,
+    "nearest_team_id": str | None
 }
 ```
 
@@ -154,15 +176,15 @@ Parámetros en `config.yaml`:
 - `motion_std_factor`
 - `motion_std_min_samples`
 - `motion_std_floor`
-- `ball_expected_position_gate_px`
-- `ball_expected_position_gate_growth_per_frame`
-- `ball_expected_position_confidence_relax`
-- `ball_size_ratio_per_frame`
-- `ball_size_min_samples`
-- `ball_size_std_factor`
-- `ball_size_std_floor`
-- `ball_max_reassign_lost_frames`
-- `ball_high_conf_override`
+- `ball.expected_position_gate_px`
+- `ball.expected_position_gate_growth_per_frame`
+- `ball.expected_position_confidence_relax`
+- `ball.size_ratio_per_frame`
+- `ball.size_min_samples`
+- `ball.size_std_factor`
+- `ball.size_std_floor`
+- `ball.max_reassign_lost_frames`
+- `ball.high_conf_override`
 - `strict_person_class_separation` (si `true`, no mezcla `player` y `goalkeeper`)
 - `reserve_penalty_spot_seed_players` (si `true`, reserva dos IDs sintéticos en los puntos de penalti)
 - `reserve_penalty_spot_seed_match_distance_m` (radio máximo en metros para absorber una detección real sobre cada seed)

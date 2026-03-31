@@ -499,7 +499,15 @@ class PathCRFTracksAdapter:
         for frame_id in range(frame_count):
             ball_payload = self._first_payload(tracks.get("ball", []), frame_id)
             ball_center = self._bbox_center(self._safe_bbox(ball_payload.get("bbox") if ball_payload else None))
-            carrier_slot = self._nearest_visible_slot(ball_center, tracks, frame_id, raw_to_slot)
+            carrier_slot = None
+            if isinstance(ball_payload, Mapping):
+                owning_player_id = ball_payload.get("player_id")
+                if owning_player_id is None:
+                    owning_player_id = ball_payload.get("ball_owning_player_id")
+                if owning_player_id is not None:
+                    carrier_slot = raw_to_slot.get(str(owning_player_id))
+            if carrier_slot is None:
+                carrier_slot = self._nearest_visible_slot(ball_center, tracks, frame_id, raw_to_slot)
 
             if carrier_slot is None:
                 carrier_slot = previous_carrier

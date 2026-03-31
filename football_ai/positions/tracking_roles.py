@@ -1515,7 +1515,7 @@ def apply_special_seed_role_team_assignment(
         return tracks, None
 
     try:
-        from experiments.positions.set_transformer_pipeline import (
+        from football_ai.positions.set_transformer_pipeline import (
             predict_roles_for_tracks_payload,
         )
     except Exception as exc:
@@ -1685,7 +1685,7 @@ class OnlineSpecialSeedRoleAssigner:
             return
 
         try:
-            from experiments.positions.set_transformer_pipeline import (
+            from football_ai.positions.set_transformer_pipeline import (
                 OnlineRoleInferenceSession,
             )
         except Exception as exc:
