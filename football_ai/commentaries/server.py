@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +17,18 @@ from .voice import CommentaryAudioPipeline
 
 DEFAULT_SERVER_HOST = "127.0.0.1"
 DEFAULT_SERVER_PORT = 8788
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def append_jsonl(path: str | Path, payload: dict[str, Any]) -> None:
+    output_path = Path(path).expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=False))
+        f.write("\n")
 
 
 @dataclass(slots=True)
@@ -61,6 +74,11 @@ class CommentaryHTTPService:
 
         event_payload = payload.get("event", payload)
         audio_out = payload.get("audio_out")
+        manifest_path = payload.get("manifest_path")
+        requested_mode = str(payload.get("mode") or "").strip().lower() or None
+        metadata = payload.get("metadata")
+        if metadata is not None and not isinstance(metadata, dict):
+            metadata = {"raw_metadata": metadata}
         text_only = bool(payload.get("text_only", self.default_text_only))
 
         try:
@@ -102,6 +120,28 @@ class CommentaryHTTPService:
             return CommentaryServiceResult(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                 payload={"error": str(exc)},
+            )
+
+        if manifest_path:
+            append_jsonl(
+                manifest_path,
+                {
+                    "generated_at_utc": now_iso(),
+                    "event": event.to_prompt_payload(),
+                    "mode": requested_mode,
+                    "metadata": metadata or {},
+                    "commentary": response_payload.get("commentary"),
+                    "audio_path": response_payload.get("audio_path"),
+                    "model": response_payload.get("model"),
+                    "tts_model": self.tts_model,
+                    "text_only": text_only,
+                    "llm_seconds": response_payload.get("llm_seconds"),
+                    "tts_seconds": response_payload.get("tts_seconds"),
+                    "total_seconds": response_payload.get("total_seconds"),
+                },
+            )
+            response_payload["manifest_path"] = str(
+                Path(manifest_path).expanduser().resolve()
             )
 
         return CommentaryServiceResult(

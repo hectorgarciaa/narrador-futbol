@@ -19,6 +19,19 @@ Tomar un evento estructurado en JSON y convertirlo en un comentario corto de nar
 
 `event_time_s` se interpreta desde el inicio del video, suponiendo que el clip empieza en el minuto `0`.
 
+Para la accion especial `intro`, no hace falta pasar `player_name` ni `player_position`:
+
+```json
+{
+  "action": "intro",
+  "event_time_s": 0.0,
+  "team_name": "Real Madrid",
+  "opponent_team_name": "Wolfsburgo"
+}
+```
+
+Si el `intro` se genera desde la interfaz y la respuesta del modelo parece una plantilla legacy o menciona placeholders, la interfaz lo regenera automaticamente para dejar una bienvenida util.
+
 ## Campos opcionales utiles
 
 - `team_name`: equipo del jugador. Obligatorio en `gol`.
@@ -62,6 +75,14 @@ Generar comentario pasando un evento inline:
 ```bash
 python -m football_ai.commentaries \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}'
+```
+
+Generar un comentario de apertura antes de empezar el partido:
+
+```bash
+python -m football_ai.commentaries \
+  --event-json '{"action":"intro","event_time_s":0.0,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo"}' \
+  --text-only
 ```
 
 Evaluar solo el LLM, sin TTS, viendo prompts y salida cruda:
@@ -175,15 +196,40 @@ Tambien puedes pasar un objeto con `event`, `audio_out` y `text_only`:
 }
 ```
 
+Si quieres que el servidor vaya dejando un manifiesto listo para `live` o `deferred`, puedes añadir `manifest_path`, `mode` y `metadata`:
+
+```json
+{
+  "event": {
+    "action": "gol",
+    "player_name": "Bellingham",
+    "player_position": "MC",
+    "event_time_s": 132.4,
+    "team_name": "Real Madrid",
+    "opponent_team_name": "Wolfsburgo"
+  },
+  "audio_out": "output/interfaz/runs/demo/commentaries/audio/gol_0001.wav",
+  "manifest_path": "output/interfaz/runs/demo/commentaries/events_manifest.jsonl",
+  "mode": "live",
+  "metadata": {
+    "run_id": "demo",
+    "source": "action-listener"
+  }
+}
+```
+
+Ese manifiesto se puede convertir después en una pista completa y muxear dentro del MP4 final del tracking. La interfaz usa ese flujo automáticamente al cerrar un run en modo `deferred`.
+
 ## Comportamiento del prompt
 
 El prompt esta pensado para:
 
 - sonar a retransmision futbolera;
-- ser corto y conciso;
+- ser corto y conciso salvo en `gol`, donde puede ser algo mas largo y mucho mas emocional;
 - obligar a incluir literalmente la accion del evento en el comentario;
 - mantener los comentarios cortos y en una sola frase;
 - mencionar el minuto solo en `gol`;
+- permitir una apertura breve y libre cuando la accion es `intro`;
 - tratar las acciones de pase como acciones del jugador que da el pase, no del que lo recibe;
 - reservar la mencion del equipo contrario para `gol`;
 - dejar clarisimo que en `gol` el jugador marca para un equipo y se lo hace al otro;

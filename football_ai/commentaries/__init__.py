@@ -19,6 +19,13 @@ from .server import (
     CommentaryServiceResult,
     create_http_server,
 )
+from .deferred_media import (
+    DeferredCommentaryAssemblyResult,
+    assemble_deferred_commentary_video,
+    build_commentary_track_from_manifest,
+    mux_commentary_track_into_video,
+    probe_video_duration_seconds,
+)
 from .voice import (
     CommentaryAudioPipeline,
     CommentaryAudioResult,
@@ -41,6 +48,11 @@ __all__ = [
     "CommentaryHTTPService",
     "CommentaryServiceResult",
     "create_http_server",
+    "DeferredCommentaryAssemblyResult",
+    "assemble_deferred_commentary_video",
+    "build_commentary_track_from_manifest",
+    "mux_commentary_track_into_video",
+    "probe_video_duration_seconds",
     "CommentaryAudioPipeline",
     "CommentaryAudioResult",
     "XTTSVoiceSynthesizer",

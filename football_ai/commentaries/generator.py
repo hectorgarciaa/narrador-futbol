@@ -15,6 +15,7 @@ SPECIAL_TEAM_FAVOR_ACTIONS = {
     "corner",
 }
 
+INTRO_ACTION = "intro"
 PASS_ACTION_PREFIX = "pase"
 
 TEAM_NAME_REQUIRED_ACTIONS = {
@@ -88,9 +89,9 @@ def _format_match_minute(event_time_s: float) -> str:
 @dataclass(slots=True)
 class CommentaryEvent:
     action: str
-    player_name: str
-    player_position: str
     event_time_s: float
+    player_name: str = ""
+    player_position: str = ""
     team_name: str | None = None
     opponent_team_name: str | None = None
     team_in_favor: str | None = None
@@ -118,9 +119,9 @@ class CommentaryEvent:
         if self.action_index is not None:
             self.action_index = int(self.action_index)
 
-        if not self.player_name:
+        if not self.is_intro and not self.player_name:
             raise ValueError("`player_name` no puede ir vacio.")
-        if not self.player_position:
+        if not self.is_intro and not self.player_position:
             raise ValueError("`player_position` no puede ir vacio.")
         if self.event_time_s < 0:
             raise ValueError("`event_time_s` debe ser >= 0.")
@@ -152,8 +153,16 @@ class CommentaryEvent:
             )
 
     @property
-    def should_mention_minute(self) -> bool:
+    def is_intro(self) -> bool:
+        return self.action == INTRO_ACTION
+
+    @property
+    def is_goal(self) -> bool:
         return self.action == "gol"
+
+    @property
+    def should_mention_minute(self) -> bool:
+        return self.is_goal
 
     @property
     def match_minute_text(self) -> str:
@@ -165,7 +174,7 @@ class CommentaryEvent:
             for key, value in asdict(self).items()
             if value is not None and value != ""
         }
-        if self.action != "gol":
+        if self.action not in {"gol", INTRO_ACTION}:
             payload.pop("opponent_team_name", None)
         payload["should_mention_minute"] = self.should_mention_minute
         if self.should_mention_minute:
@@ -208,7 +217,23 @@ class CommentaryPromptBuilder:
     def __init__(self, voice: str = "narrador_tv") -> None:
         self.voice = _clean_text(voice) or "narrador_tv"
 
-    def build_system_prompt(self) -> str:
+    def build_system_prompt(self, event: CommentaryEvent | None = None) -> str:
+        if event is not None and event.is_intro:
+            return (
+                "Eres un narrador de futbol de television en espanol de Espana. "
+                "Estas abriendo la retransmision antes de que empiece el partido. "
+                "Debe sonar claramente a bienvenida de retransmision. "
+                "Puedes sonar cercano, ilusionado y natural. "
+                "Hazlo breve y sin inventar sucesos que aun no han pasado. "
+                "No uses emojis."
+            )
+        if event is not None and event.is_goal:
+            return (
+                "Eres un narrador de futbol de television en espanol de Espana. "
+                "Si hay un gol, puedes sonar mas emocional, mas expresivo y algo mas largo que en el resto de acciones. "
+                "Debe quedar clarisimo quien marca y a quien se lo marca, sin inventar jugadas que no esten en el evento ni consecuencias posteriores. "
+                "No uses emojis."
+            )
         return (
             "Eres un narrador de futbol de television en espanol de Espana. "
             "Devuelve una sola frase corta, natural y directa. "
@@ -217,32 +242,73 @@ class CommentaryPromptBuilder:
         )
 
     def build_user_prompt(self, event: CommentaryEvent) -> str:
-        rules = [
-            f"Usa literalmente esta accion: {event.action}.",
-            f"El jugador es {event.player_name}.",
-            "Escribe una sola frase corta.",
-        ]
-
-        if event.should_mention_minute:
-            rules.append(f"Menciona exactamente una vez el {event.match_minute_text}.")
+        if event.is_intro:
+            rules = [
+                "Es el comentario de apertura del partido, antes de que ruede el balon.",
+                "Escribe una apertura breve de retransmision, con una o dos frases como maximo y entre 16 y 30 palabras.",
+                "Lo natural es una bienvenida tipo bienvenidos, buenas tardes o ya esta todo listo.",
+                "Puedes sonar ilusionado, cercano y natural.",
+                "No menciones minuto ni una accion de juego que ya haya ocurrido.",
+                "No menciones jugador, posicion, dorsal, rol tactico ni placeholders.",
+                "No predigas el resultado ni digas que el gol va a caer seguro.",
+                "No exageres con frases como historia, legendario, los mejores del mundo o similares.",
+                "No uses emojis.",
+            ]
+            if event.team_name and event.opponent_team_name:
+                rules.append(
+                    f"Si encaja, menciona que hoy juegan {event.team_name} contra {event.opponent_team_name}."
+                )
+            elif event.team_name:
+                rules.append(f"Si encaja, menciona a {event.team_name}.")
+            if event.play_context:
+                rules.append(f"Si ayuda, menciona {event.play_context}.")
+            if event.match_score:
+                rules.append("No inventes marcador si el partido todavia no ha empezado.")
+        elif event.is_goal:
+            rules = [
+                f"El autor del gol es {event.player_name}.",
+                "Tiene que sonar claramente a gol.",
+                "Puedes escribir una narracion mas larga y emocionante que en el resto de acciones.",
+                "Se permiten una o dos frases, con tono de retransmision, y entre 20 y 45 palabras.",
+                f"Menciona exactamente una vez el {event.match_minute_text}.",
+                "No inventes que decide el partido, que es el mejor gol del ano, ni la respuesta del rival.",
+                "No inventes asistencia, remate concreto, jugada previa ni consecuencias si no vienen en el evento.",
+                "Usa solo los datos del evento: autor, equipo que marca, equipo que encaja, minuto y zona si existe.",
+                "No uses emojis.",
+            ]
+            if event.team_name and event.opponent_team_name:
+                rules.append(f"{event.team_name} marca y {event.opponent_team_name} encaja.")
+            if event.field_zone:
+                rules.append(f"Si ayuda, menciona {event.field_zone}.")
+            if event.play_context:
+                rules.append(f"Si ayuda, menciona {event.play_context}.")
+            if event.action_target:
+                rules.append(f"Si ayuda, menciona {event.action_target}.")
         else:
-            rules.append("No menciones el minuto.")
-            rules.append("No menciones al equipo contrario.")
+            rules = [
+                f"Usa literalmente esta accion: {event.action}.",
+                f"El jugador es {event.player_name}.",
+                "Escribe una sola frase corta.",
+            ]
 
-        if event.action.startswith(PASS_ACTION_PREFIX):
-            rules.append("En un pase, el jugador lo da, no lo recibe.")
-            rules.append("No inventes receptor ni jugada posterior.")
+            if event.should_mention_minute:
+                rules.append(f"Menciona exactamente una vez el {event.match_minute_text}.")
+            else:
+                rules.append("No menciones el minuto.")
+                rules.append("No menciones al equipo contrario.")
 
-        if event.action in SPECIAL_TEAM_FAVOR_ACTIONS and event.team_in_favor:
-            rules.append(f"La accion es a favor de {event.team_in_favor}.")
-        if event.action == "gol" and event.team_name and event.opponent_team_name:
-            rules.append(f"{event.team_name} marca a {event.opponent_team_name}.")
-        if event.field_zone:
-            rules.append(f"Si encaja, menciona {event.field_zone}.")
-        if event.action_target:
-            rules.append(f"Si ayuda, menciona {event.action_target}.")
-        if event.play_context:
-            rules.append(f"Si ayuda, menciona {event.play_context}.")
+            if event.action.startswith(PASS_ACTION_PREFIX):
+                rules.append("En un pase, el jugador lo da, no lo recibe.")
+                rules.append("No inventes receptor ni jugada posterior.")
+
+            if event.action in SPECIAL_TEAM_FAVOR_ACTIONS and event.team_in_favor:
+                rules.append(f"La accion es a favor de {event.team_in_favor}.")
+            if event.field_zone:
+                rules.append(f"Si encaja, menciona {event.field_zone}.")
+            if event.action_target:
+                rules.append(f"Si ayuda, menciona {event.action_target}.")
+            if event.play_context:
+                rules.append(f"Si ayuda, menciona {event.play_context}.")
 
         payload_json = json.dumps(
             event.to_prompt_payload(),
@@ -335,7 +401,7 @@ class OllamaCommentaryGenerator:
         event: CommentaryEvent | dict[str, Any],
     ) -> tuple[CommentaryEvent, str, str]:
         commentary_event = self.normalize_event(event)
-        system_prompt = self.prompt_builder.build_system_prompt()
+        system_prompt = self.prompt_builder.build_system_prompt(commentary_event)
         user_prompt = self.prompt_builder.build_user_prompt(commentary_event)
         return commentary_event, system_prompt, user_prompt
 

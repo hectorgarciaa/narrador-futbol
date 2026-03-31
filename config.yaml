@@ -14,7 +14,7 @@ paths:
     yolo_v11_l: "models/yolo/v11/yolo11l.pt"
     yolo_v11_x: "models/yolo/v11/yolo11x.pt"
 
-    modelo_base: "models/finetuning/best.pt"
+    modelo_base: "models/finetuning/yolov11m/weights/best.pt"
     # modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_ball: "models/finetuning-balon/v11/yolo11m/weights/best.pt"

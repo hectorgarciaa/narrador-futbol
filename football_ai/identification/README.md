@@ -70,7 +70,7 @@ Cuando `team_assignment_mode=auto-bootstrap`:
 3. Si un cluster es demasiado pequeño (`auto_min_cluster_samples`), se trata como ruido y se reintenta sobre el cluster mayor.
 4. La referencia final de cada equipo se calcula con la **mediana** LAB de cada cluster.
 
-Si además se usa un `lineup_spec.json` generado por la interfaz, el bootstrap sigue aprendiendo los centroides reales del vídeo, pero renombra los clusters según los colores de equipo introducidos por el usuario.
+Si además se usa un `lineup_spec.json` generado por la interfaz, por defecto se usan los colores de equipo introducidos por el usuario como referencias directas. Solo si se fuerza `auto-bootstrap` se arranca sin referencias y se aprenden centroides neutrales del propio vídeo.
 
 Hasta que el bootstrap queda fijado, `detect_teams` puede devolver `team=None` para las detecciones candidatas.
 
