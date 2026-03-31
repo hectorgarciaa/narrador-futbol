@@ -15,6 +15,7 @@ paths:
     yolo_v11_x: "models/yolo/v11/yolo11x.pt"
 
     modelo_base: "models/finetuning/best.pt"
+    # modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_ball: "models/finetuning-balon/v11/yolo11m/weights/best.pt"
   
@@ -72,88 +73,136 @@ paths:
 
 # Configuración de detección
 detection:
-  # Umbral de confianza para detecciones generales
-  conf_threshold: 0.01
-  # Umbral mínimo de confianza para detección de balón
-  ball_min_conf: 0.0035
+  conf: 0.01              # Umbral de confianza para detecciones generales
+  verbose: true          # Si true, muestra logs detallados durante la detección
+
+# Configuración de clustering de colores
+team_detector:
+  n_teams: 2                      # Número de clusters para KMeans
+  with_ref: true                 # Si true, usa colores de referencia (config.yaml/teams) para inicializar KMeans y asignar equipos.
+  min_samples: 60                 # Muestras mínimas para considerar calcular cluster
+  min_size_cluster: 4             # Tamaño mínimo de cluster para considerarlo válido (evita clusters muy pequeños por outliers)
+  candidate_classes: ["player"]   # Clases que participan en la detección de color de equipo
+  team_colors: 
+    Real Madrid: [255, 127, 127]    # Color de referencia en lab_opencv
+    Wolfsburgo: [224, 77, 196]      # Color de referencia en lab_opencv
 
 # Configuración de tracking (ByteTrack)
 tracking:
-  # Umbral de activación de tracks (mayor = más estricto, menos falsos positivos)
-  track_thresh: 0.15
-  # Frames que se mantiene un track perdido antes de eliminarlo
-  track_buffer: 90
-  # Umbral de matching IoU (mayor = requiere más solapamiento para matching)
-  match_thresh: 0.945
-  # Frame rate del video
-  frame_rate: 25
-  # Frames consecutivos mínimos para confirmar un track
-  minimum_consecutive_frames: 5
-  # Límite global de IDs canónicos visibles
-  max_total_tracks: 25
-  # Si es false, el límite por clase se aplica en reasignación final, no dentro de ByteTrack
-  enforce_internal_class_limits: false
-  # Límite de tracks por clase en la salida final del tracker
-  max_tracks_per_class:
-    player: 22
-    ball: 1
-    referee: 3
-  # Penalización de distancia cuando el equipo detectado difiere del track
-  team_mismatch_penalty: 1000.0
-  # Modo de asignación de equipo por color:
-  # - reference: usa colores de teams (config.yaml/--team-colors) y ajuste adaptativo.
-  # - auto-bootstrap: aprende 2 clusters al inicio del vídeo y fija la mediana de cada uno para todo el run.
-  team_assignment_mode: reference
-  # Frames iniciales para bootstrap en modo auto-bootstrap.
-  # 1 = usa el primer frame, valores 10-30 suelen ser más robustos.
-  team_bootstrap_frames: 1
-  # Muestras mínimas de color para cerrar bootstrap.
-  team_bootstrap_min_samples: 12
-  # Número de equipos/clusters a separar en auto-bootstrap (dataset partido normal = 2).
-  team_bootstrap_num_teams: 2
-  # Tamaño mínimo por cluster en bootstrap (4 => obliga a >3 nodos por cluster).
-  # Si sale un cluster <=3, se re-clusteriza sobre el cluster grande.
-  team_bootstrap_min_cluster_samples: 4
-  # Prefijo para los nombres automáticos (ej. "Equipo 1", "Equipo 2").
-  team_auto_name_prefix: "Equipo"
-  # Clases que participan en la detección de color de equipo.
-  team_candidate_classes: ["player", "goalkeeper"]
-  # Umbral para segunda asociación (detecciones de baja confianza)
-  second_match_threshold: 0.9
-  # Umbral para tracks no confirmados
-  unconfirmed_match_threshold: 0.8
-  # Parámetros de reasignación y control de movimiento
-  reassign_motion_factor: 0.75
-  reassign_min_distance: 10.0
-  reassign_min_samples: 3
-  # Máximo número de frames perdidos que se usa para extrapolar movimiento
-  # en la reasignación canónica. Evita que un ID ausente durante mucho tiempo
-  # vuelva a ser válido por permitir saltos demasiado grandes.
-  reassign_motion_growth_cap_frames: 12
-  # Matching de ByteTrack para player/goalkeeper:
-  # - false: combina IoU + penalización por distancia en campo (recomendado si
-  #   quieres usar señal visual y geométrica a la vez).
-  # - true: usa como coste principal la distancia en campo.
-  use_field_position_as_primary_cost: false
-  use_bbox_center_for_matching: false
-  bbox_center_distance_weight: 0.7
-  bbox_center_distance_gate_px: 120.0
-  # Prioriza tracks más recientes en matching (penaliza IDs más tiempo perdidos)
-  lost_time_penalty_weight: 0.12
-  lost_time_penalty_max_frames: 10
-  # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
-  strict_person_class_separation: true
-  # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos
-  # de penalti. No participan en TeamDetector y quedan disponibles hasta que
-  # una detección real compatible por geometría herede ese track. Mientras eso
-  # no ocurra, se escriben también en el JSON de salida como seeds sintéticas.
-  reserve_penalty_spot_seed_players: true
-  # Distancia máxima en metros desde el punto de penalti para absorber una
-  # detección real sobre cada track semilla reservado.
-  reserve_penalty_spot_seed_match_distance_m: 12.0
-  # Postproceso especial para los IDs reservados (por defecto 1 y 2):
-  # usa el modelo de roles posicionales para estimar qué jugadores son defensas
-  # y asignar equipo a esos tracks por el defensa más cercano, sin usar color.
+  projector:
+    enabled: true     # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching
+    classes: ["player", "goalkeeper"]
+    reassign_min_field_distance_m: 1.2
+    match_distance_gate_m: 2.1
+    match_distance_cap_m: 8.0
+    match_distance_max_lost_frames: 10
+    match_distance_growth_mode: linear_decay
+    match_distance_lost_exponent: 0.5
+    match_distance_decay_per_frame: 0.3
+
+    constructor:
+      field_length_m: 106.0
+      field_width_m: 68.0
+      max_width: 1280
+      bottom_offset_ratio: 0.04
+      keypoint_threshold: 0.3434
+      line_threshold: 0.7867
+      pnl_refine: true
+      temporal_blend: 0.20
+      pixels_per_meter: 8
+      device: null
+
+  bytetracker:
+    track_activation_threshold: 0.15
+    lost_track_buffer: 90
+    minimum_matching_threshold: 0.945
+    frame_rate: 25
+    minimum_consecutive_frames: 5
+    team_mismatch_penalty: 1000.0
+    second_match_threshold: 0.9
+    unconfirmed_match_threshold: 0.8
+    use_field_positions: true
+    field_position_classes: ["player", "goalkeeper"]
+    
+    field_distance_gate_m: 8.0
+    field_distance_weight: 0.5
+    field_distance_weight: 0.25 # 0.5
+    field_distance_gate_max_lost_frames: 10
+    field_distance_gate_cap_m: 8.0
+    field_distance_growth_mode: linear_decay
+    field_distance_lost_exponent: 0.5
+    field_distance_decay_per_frame: 0.3
+    lost_time_penalty_weight: 0.12  # Peso de la penalización por tiempo perdido en el coste de matching
+    lost_time_penalty_max_frames: 10  # Máximo número de frames perdidos para aplicar penalización en el coste de matching
+    use_field_position_as_primary_cost: false  # Si true, usa como coste principal la distancia en campo en lugar de IoU para player/goalkeeper. Recomendado si quieres usar señal visual y geométrica a la vez.
+    use_bbox_center_for_matching: false  # Si true, usa BB-Overlap en lugar de IoU para el coste de matching. Recomendado para detecciones con bounding boxes muy ajustados al jugador.
+    bbox_center_distance_weight: 0.7  # Peso de la distancia entre centros de bounding box en el coste de matching (si use_bbox_center_for_matching es false)
+    bbox_center_distance_gate_px: 120.0  # Distancia máxima en píxeles entre centros de bounding box para considerar un match (si use_bbox_center_for_matching es false)
+    max_tracks_per_class:   # Límite de tracks por clase en la salida final del tracker
+      player: 22
+      ball: 1
+      referee: 3
+  
+  # Parámetros específicos de la lógica del balón (filtro temporal + tamaño + gates).
+  # Esta sección controla la heurística de `_select_ball_candidate` y el `ball_state`.
+  ball:
+    ball_min_conf: 0.0035   # Umbral mínimo de confianza para detección de balón
+    ball_expected_position_gate_px: 90.0  # Radio base (px) desde posición esperada para aceptar candidato
+    ball_expected_position_gate_growth_per_frame: 35.0  # Crecimiento del radio por frame perdido
+    ball_expected_position_confidence_relax: 1.4  # Relaja gates si la confianza es alta
+    ball_size_ratio_per_frame: 1.8  # Ratio máximo de cambio de tamaño por frame
+    ball_size_min_samples: 5  # Muestras mínimas para estadística de tamaño
+    ball_size_std_factor: 3.0  # k sigmas para límites de tamaño
+    ball_size_std_floor: 1.0  # Suelo de sigma (evita gates demasiado estrechos)
+    ball_max_reassign_lost_frames: 30  # Frames máximos para considerar que el ball_state sigue activo
+    ball_high_conf_override: 0.6  # Confianza alta que relaja gates/ratio
+
+  # Heurística online de posesión (equipo y jugador portador).
+  possession:
+    enabled: true
+    strict_control_distance_px: 60.0
+    strict_control_distance_ratio_to_height: 0.65
+    loose_control_distance_px: 95.0
+    loose_control_distance_ratio_to_height: 1.0
+    continuation_distance_px: 35.0
+    immediate_opponent_switch_distance_px: 24.0
+    opponent_switch_confirmation_frames: 2
+    opponent_switch_window_frames: 4
+    slow_ball_speed_px: 14.0
+    same_player_control_speed_px: 18.0
+    speed_drop_threshold_px: 8.0
+    direction_change_threshold_deg: 35.0
+    opponent_takeover_margin_px: 12.0
+    ball_missing_release_frames: 10
+    touch_timeout_frames: 90
+
+  
+  
+  
+  
+  reassign_motion_factor: 0.75  # Factor de penalización de distancia para reasignación
+  reassign_min_distance: 10.0  # Distancia mínima en metros para considerar una reasignación de ID
+  reassign_min_samples: 3  # Muestras mínimas para considerar una reasign
+  reassign_motion_growth_cap_frames: 12  # Máximo número de frames perdidos que se usa para extrapolar movimiento en la reasignación canónica
+  motion_std_gate_enabled: true  # Gate estadístico anti-saltos de ID (distancia por frame)
+  motion_std_factor: 4.0  # Factor de desviación típica para calcular el límite del gate estadístico
+  motion_std_min_samples: 5  # Muestras mínimas para calcular estadísticas de movimiento
+  motion_std_floor: 0.5  # Límite mínimo del gate estadístico
+  referee_recovery_max_lost_frames: 3  # Máximo número de frames perdidos para intentar una recuperación específica de árbitros
+  referee_recovery_max_distance: 45.0  # Distancia máxima en metros para
+  strict_person_class_separation: true  # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
+  require_field_position_for_reassign: true  # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles. Si falta field_position, la reasignación se rechaza.
+  max_reassign_lost_frames: null  # Tope opcional de frames perdidos para reasignar un ID. null/0/desactivado => un track puede reaparecer tras muchos frames.
+  max_reassign_lost_frames_by_class:  # Tope específico por clase para evitar IDs "zombie"
+    player: 30
+    goalkeeper: 30
+    referee: 20
+    ball: 30
+  reserve_penalty_spot_seed_players: true  # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos de penalti.
+  reserve_penalty_spot_seed_match_distance_m: 12.0  # Distancia máxima en metros desde el punto de penalti para absorber una detección real sobre cada track semilla reservado.    
+  
+  
+
   special_seed_role_team_assignment_enabled: true
   special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
   special_seed_canonical_ids: [1, 2]
@@ -183,65 +232,6 @@ tracking:
   role_stabilization_window_frames: 600
   role_stabilization_min_observations: 600
   role_stabilization_vote_ratio: 0.7
-  # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles.
-  # Si falta field_position, la reasignación se rechaza.
-  require_field_position_for_reassign: true
-  # Límite opcional de frames perdidos para reasignar un ID.
-  # null/0/desactivado => un track puede reaparecer tras muchos frames.
-  max_reassign_lost_frames: null
-  max_reassign_lost_frames_by_class: {}
-  # Gate estadístico anti-saltos de ID (distancia por frame)
-  # límite = media_historica + motion_std_factor * desviacion_tipica
-  motion_std_gate_enabled: true
-  motion_std_factor: 4.0
-  motion_std_min_samples: 5
-  motion_std_floor: 0.5
-  # Restricciones específicas del balón en imagen:
-  # - posición esperada según la trayectoria reciente
-  # - cambio de tamaño acotado entre frames
-  ball_expected_position_gate_px: 90.0
-  ball_expected_position_gate_growth_per_frame: 35.0
-  ball_expected_position_confidence_relax: 1.4
-  ball_size_ratio_per_frame: 1.8
-  ball_size_min_samples: 5
-  ball_size_std_factor: 3.0
-  ball_size_std_floor: 1.0
-  ball_max_reassign_lost_frames: 30
-  ball_high_conf_override: 0.6
-  # Recuperación específica de árbitros
-  referee_recovery_max_lost_frames: 3
-  referee_recovery_max_distance: 45.0
-  # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching
-  use_field_positions: true
-  field_position_method: "pnlcalib"
-  field_position_classes: ["player", "goalkeeper"]
-  field_length_m: 106.0
-  field_width_m: 68.0
-  field_position_max_width: 1280
-  field_position_bottom_offset_ratio: 0.04
-  field_position_keypoint_threshold: 0.3434
-  field_position_line_threshold: 0.7867
-  field_position_pnl_refine: true
-  field_position_temporal_blend: 0.20
-  field_position_pixels_per_meter: 8
-  field_position_device: null
-  field_position_match_distance_gate_m: 2.1
-  # Tope absoluto del radio de matching en campo (metros), incluso con acumulación por frames perdidos
-  field_position_match_distance_cap_m: 8.0
-  # Gate espacial en campo para matching:
-  # Modo linear_decay:
-  #   distancia_max = sum_{k=0..lost-1} max(gate_m - k*decay_per_frame, 0)
-  # y se satura con max_lost_frames. Ejemplo: 2.0, 1.9, 1.8, ...
-  field_position_match_distance_max_lost_frames: 10
-  field_position_match_distance_growth_mode: linear_decay
-  field_position_match_distance_lost_exponent: 0.5
-  field_position_match_distance_decay_per_frame: 0.3
-  field_position_match_distance_weight: 0.25
-  reassign_min_field_distance_m: 1.2
-  # Penalización de distancia cuando el equipo detectado difiere del track
-  team_penalty: 1000
-  # Frames consecutivos con equipo distinto para confirmar cambio real
-  team_switch_threshold: 5
 
 # Configuración de equipos
 teams:
@@ -252,17 +242,6 @@ teams:
     color_lab_opencv: [224, 77, 196]  # Color de referencia en lab_opencv
     name: "Wolfsburgo"
 
-# Configuración de clustering de colores
-color_clustering:
-  n_teams: 2                      # Número de clusters para KMeans
-  with_ref: false                 # Si true, usa colores de referencia (config.yaml/teams) para inicializar KMeans y asignar equipos.
-  min_samples: 60                 # Muestras mínimas para considerar calcular cluster
-  min_size_cluster: 4             # Tamaño mínimo de cluster para considerarlo válido (evita clusters muy pequeños por outliers)
-  candidate_classes: ["player"]   # Clases que participan en la detección de color de equipo
-  team_colors: 
-    Real Madrid: [255, 127, 127]    # Color de referencia en lab_opencv
-    Wolfsburgo: [224, 77, 196]      # Color de referencia en lab_opencv
-
 # Configuración de visualización
 visualization:
   # Colores para dibujar bounding boxes (BGR para OpenCV)
@@ -271,15 +250,29 @@ visualization:
     goalkeeper: [0, 255, 255] # Amarillo
     referee: [255, 0, 0]      # Azul
     ball: [0, 0, 255]         # Rojo
+  # Colores de relleno por equipo para el panel de campo (BGR).
+  # Si falta un equipo, el drawer usa fallback determinista.
+  team_colors:
+    Real Madrid: [240, 240, 240]
+    Wolfsburgo: [0, 80, 220]
   
   # Configuración de visualización de KMeans
   show_kmeans: false
   # Mostrar salida en tiempo real durante procesamiento
   show_output: true
+  # Si true, renderiza salida en mosaico 2x2 con paneles de depuración.
+  four_panel_enabled: true
+  # Si true, en el panel D mantiene visibles todos los IDs ya observados
+  # (no solo hasta el cupo esperado por clase).
+  continuity_keep_all_seen_ids: true
   # Grosor de las líneas de bounding boxes
   line_thickness: 2
   # Tamaño de fuente para etiquetas
   font_scale: 0.5
+  # Escala de fuente usada en etiquetas compactas del modo 2x2.
+  compact_font_scale: 0.65
+  # Radio de los círculos en el panel 2D del campo.
+  pitch_marker_radius: 12
 
 # Configuración de fine-tuning (Pipeline secuencial)
 finetuning:
