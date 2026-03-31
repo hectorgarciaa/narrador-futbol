@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 from pathlib import Path
 import re
+import time
 from typing import Any, Sequence
 
 from .generator import (
@@ -16,6 +18,7 @@ from .generator import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMMENTARIES_ROOT = Path(__file__).resolve().parent
 DEFAULT_AUDIO_OUTPUT_DIR = PROJECT_ROOT / "output" / "commentaries" / "audio"
+DEFAULT_VOICE_CACHE_DIR = PROJECT_ROOT / "output" / "commentaries" / "voices"
 
 
 def _slugify(value: str) -> str:
@@ -121,6 +124,9 @@ class CommentaryAudioResult:
     speaker_wavs: tuple[Path, ...]
     tts_model: str
     language: str
+    llm_seconds: float | None = None
+    tts_seconds: float | None = None
+    total_seconds: float | None = None
 
     @property
     def commentary(self) -> str:
@@ -137,12 +143,14 @@ class XTTSVoiceSynthesizer:
         language: str = "es",
         use_gpu: bool | None = None,
         split_sentences: bool = True,
+        voice_cache_dir: str | Path = DEFAULT_VOICE_CACHE_DIR,
     ) -> None:
         self.model_name = str(model_name).strip()
         self.speaker_wavs = resolve_speaker_wavs(speaker_wavs)
         self.language = str(language).strip() or "es"
         self.use_gpu = _detect_gpu() if use_gpu is None else bool(use_gpu)
         self.split_sentences = bool(split_sentences)
+        self.voice_cache_dir = Path(voice_cache_dir).expanduser().resolve()
 
     def _load_model(self):
         cache_key = (self.model_name, self.use_gpu)
@@ -166,6 +174,21 @@ class XTTSVoiceSynthesizer:
         self._MODEL_CACHE[cache_key] = model
         return model
 
+    def prepare(self) -> "XTTSVoiceSynthesizer":
+        self._load_model()
+        return self
+
+    def _voice_cache_speaker_id(self, speaker_wavs: Sequence[Path]) -> str:
+        digest = hashlib.sha1()
+        digest.update(self.model_name.encode("utf-8"))
+        digest.update(self.language.encode("utf-8"))
+        for path in speaker_wavs:
+            stat = path.stat()
+            digest.update(str(path).encode("utf-8"))
+            digest.update(str(stat.st_size).encode("utf-8"))
+            digest.update(str(stat.st_mtime_ns).encode("utf-8"))
+        return f"voice-{digest.hexdigest()[:16]}"
+
     def synthesize_to_file(
         self,
         text: str,
@@ -184,17 +207,38 @@ class XTTSVoiceSynthesizer:
             speaker_wavs or self.speaker_wavs
         )
         model = self._load_model()
-        model.tts_to_file(
-            text=clean_text,
-            file_path=str(output_path),
-            speaker_wav=[str(path) for path in resolved_speaker_wavs],
-            language=(language or self.language),
-            split_sentences=(
+        self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
+        speaker_id = self._voice_cache_speaker_id(resolved_speaker_wavs)
+        voice_cache_path = self.voice_cache_dir / f"{speaker_id}.pth"
+        tts_kwargs = {
+            "text": clean_text,
+            "file_path": str(output_path),
+            "speaker": speaker_id,
+            "voice_dir": str(self.voice_cache_dir),
+            "language": (language or self.language),
+            "split_sentences": (
                 self.split_sentences
                 if split_sentences is None
                 else bool(split_sentences)
             ),
-        )
+        }
+        speaker_wav_paths = [str(path) for path in resolved_speaker_wavs]
+        try:
+            if voice_cache_path.exists():
+                model.tts_to_file(
+                    speaker_wav=None,
+                    **tts_kwargs,
+                )
+            else:
+                model.tts_to_file(
+                    speaker_wav=speaker_wav_paths,
+                    **tts_kwargs,
+                )
+        except Exception:
+            model.tts_to_file(
+                speaker_wav=speaker_wav_paths,
+                **tts_kwargs,
+            )
         if not output_path.exists():
             raise RuntimeError(
                 f"XTTS no genero el fichero de salida esperado: {output_path}"
@@ -229,20 +273,29 @@ class CommentaryAudioPipeline:
         event: CommentaryEvent | dict[str, Any],
         audio_path: str | Path | None = None,
     ) -> CommentaryAudioResult:
+        total_start = time.perf_counter()
+        llm_start = time.perf_counter()
         commentary_result = self.commentary_generator.generate(event)
+        llm_seconds = time.perf_counter() - llm_start
         output_path = (
             Path(audio_path).expanduser().resolve()
             if audio_path is not None
             else self.build_output_path(commentary_result.event)
         )
+        tts_start = time.perf_counter()
         audio_path = self.voice_synthesizer.synthesize_to_file(
             commentary_result.commentary,
             output_path,
         )
+        tts_seconds = time.perf_counter() - tts_start
+        total_seconds = time.perf_counter() - total_start
         return CommentaryAudioResult(
             commentary_result=commentary_result,
             audio_path=audio_path,
             speaker_wavs=self.voice_synthesizer.speaker_wavs,
             tts_model=self.voice_synthesizer.model_name,
             language=self.voice_synthesizer.language,
+            llm_seconds=llm_seconds,
+            tts_seconds=tts_seconds,
+            total_seconds=total_seconds,
         )
