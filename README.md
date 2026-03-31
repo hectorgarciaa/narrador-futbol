@@ -287,19 +287,36 @@ Ejemplo rápido:
 
 ```bash
 python -m football_ai.commentaries \
-  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"frontal del area","action_index":30}'
+  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}'
 ```
 
-El modelo por defecto es `tinyllama:1.1b`. En `gol` se exige `team_name`, y el minuto solo se menciona cuando `action_index` es múltiplo de `30`.
+El modelo por defecto es `qwen3:1.7b` con temperatura `0.4`. El comentario se genera como una sola frase corta, debe incluir literalmente la accion del evento, en `gol` se exigen `team_name` y `opponent_team_name`, y el minuto solo se menciona en `gol`.
+
+Si quieres evaluar solo el LLM sin pasar por TTS:
+
+```bash
+python -m football_ai.commentaries.eval_llm \
+  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}' \
+  --show-prompts \
+  --show-raw-response
+```
 
 Ese mismo módulo puede convertir el comentario a audio con clonación de voz basada en XTTS:
 
 ```bash
 python -m football_ai.commentaries \
-  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"frontal del area","action_index":30}' \
+  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}' \
   --speaker-wav "football_ai/commentaries/mi_Voz.wav" \
   --audio-out output/commentaries/audio/demo.wav
 ```
+
+Para baja latencia, puedes mantener XTTS en caliente con un servidor HTTP local:
+
+```bash
+python -m football_ai.commentaries --http-server
+```
+
+El servidor escucha por defecto en `http://127.0.0.1:8788` y acepta `POST /api/commentaries`.
 
 ---
 

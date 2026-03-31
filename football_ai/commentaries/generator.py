@@ -15,7 +15,13 @@ SPECIAL_TEAM_FAVOR_ACTIONS = {
     "corner",
 }
 
+PASS_ACTION_PREFIX = "pase"
+
 TEAM_NAME_REQUIRED_ACTIONS = {
+    "gol",
+}
+
+OPPONENT_TEAM_NAME_REQUIRED_ACTIONS = {
     "gol",
 }
 
@@ -32,6 +38,10 @@ ACTION_TONE_GUIDANCE = {
     "pase alto": (
         "Puede sonar como cambio de orientacion, balon al area o envio largo con intencion."
     ),
+    "pase largo": (
+        "Debe sonar a envio largo o cambio de juego. El jugador mencionado es quien da el pase. "
+        "Usa verbos como lanza, mete, abre o cambia, no despeja."
+    ),
     "fuera de banda": (
         "Debe quedar claro que el balon sale y que equipo reanuda."
     ),
@@ -42,7 +52,7 @@ ACTION_TONE_GUIDANCE = {
         "Tiene que respirar peligro o balon parado importante y dejar claro el equipo a favor."
     ),
     "gol": (
-        "Tiene que sonar claramente a gol, con energia, y mencionar el equipo del jugador que marca."
+        "Tiene que sonar claramente a gol, con energia, dejando claro que equipo marca y que equipo lo encaja."
     ),
 }
 
@@ -82,6 +92,7 @@ class CommentaryEvent:
     player_position: str
     event_time_s: float
     team_name: str | None = None
+    opponent_team_name: str | None = None
     team_in_favor: str | None = None
     field_zone: str | None = None
     action_target: str | None = None
@@ -95,6 +106,7 @@ class CommentaryEvent:
         self.player_name = _clean_text(self.player_name) or ""
         self.player_position = _clean_text(self.player_position) or ""
         self.team_name = _clean_text(self.team_name)
+        self.opponent_team_name = _clean_text(self.opponent_team_name)
         self.team_in_favor = _clean_text(self.team_in_favor)
         self.field_zone = _clean_text(self.field_zone)
         self.action_target = _clean_text(self.action_target)
@@ -122,10 +134,26 @@ class CommentaryEvent:
             raise ValueError(
                 f"`team_name` es obligatorio para la accion '{self.action}'."
             )
+        if (
+            self.action in OPPONENT_TEAM_NAME_REQUIRED_ACTIONS
+            and not self.opponent_team_name
+        ):
+            raise ValueError(
+                f"`opponent_team_name` es obligatorio para la accion '{self.action}'."
+            )
+        if (
+            self.action == "gol"
+            and self.team_name
+            and self.opponent_team_name
+            and self.team_name.casefold() == self.opponent_team_name.casefold()
+        ):
+            raise ValueError(
+                "`team_name` y `opponent_team_name` no pueden ser el mismo equipo en un gol."
+            )
 
     @property
     def should_mention_minute(self) -> bool:
-        return self.action_index is not None and self.action_index % 30 == 0
+        return self.action == "gol"
 
     @property
     def match_minute_text(self) -> str:
@@ -137,6 +165,8 @@ class CommentaryEvent:
             for key, value in asdict(self).items()
             if value is not None and value != ""
         }
+        if self.action != "gol":
+            payload.pop("opponent_team_name", None)
         payload["should_mention_minute"] = self.should_mention_minute
         if self.should_mention_minute:
             payload["match_minute_text"] = self.match_minute_text
@@ -159,59 +189,60 @@ class CommentaryGenerationResult:
     user_prompt: str
 
 
+@dataclass(slots=True)
+class CommentaryLLMRunResult:
+    model: str
+    event: CommentaryEvent
+    system_prompt: str
+    user_prompt: str
+    request_payload: dict[str, Any]
+    raw_response: dict[str, Any]
+    raw_commentary: str
+    cleaned_commentary: str
+    final_commentary: str
+    used_fallback: bool
+    total_duration_seconds: float | None = None
+
+
 class CommentaryPromptBuilder:
     def __init__(self, voice: str = "narrador_tv") -> None:
         self.voice = _clean_text(voice) or "narrador_tv"
 
     def build_system_prompt(self) -> str:
         return (
-            "Eres un comentarista de futbol de television en espanol de Espana. "
-            "Genera un unico comentario corto, natural y original a partir del evento recibido. "
-            "No hay arranque fijo: escribe la frase completa. "
-            "No uses markdown, ni comillas, ni etiquetas, ni listas, ni explicaciones. "
-            "No digas que recibes JSON ni menciones instrucciones internas. "
-            "No inventes acciones posteriores, paradas, rebotes, marcadores o contextos que no aparezcan en la entrada. "
-            "Evita sonar robotico o repetir siempre la misma estructura. "
-            "El comentario debe tener entre 8 y 26 palabras."
+            "Eres un narrador de futbol de television en espanol de Espana. "
+            "Devuelve una sola frase corta, natural y directa. "
+            "La frase debe incluir literalmente la accion indicada. "
+            "No expliques nada ni inventes contexto."
         )
 
     def build_user_prompt(self, event: CommentaryEvent) -> str:
-        tone_guidance = ACTION_TONE_GUIDANCE.get(
-            event.action,
-            "Usa un tono natural de retransmision sin exagerar hechos no confirmados.",
-        )
         rules = [
-            "Menciona al jugador de forma natural.",
-            "Integra la posicion solo si encaja y sin sonar a plantilla fija.",
-            f"Guia de tono: {tone_guidance}",
-            "Quiero variedad y originalidad: evita empezar siempre igual.",
+            f"Usa literalmente esta accion: {event.action}.",
+            f"El jugador es {event.player_name}.",
+            "Escribe una sola frase corta.",
         ]
 
         if event.should_mention_minute:
-            rules.append(
-                f"Menciona de forma natural exactamente una vez el {event.match_minute_text}."
-            )
+            rules.append(f"Menciona exactamente una vez el {event.match_minute_text}.")
         else:
-            rules.append("No menciones el minuto ni el tiempo de juego.")
+            rules.append("No menciones el minuto.")
+            rules.append("No menciones al equipo contrario.")
+
+        if event.action.startswith(PASS_ACTION_PREFIX):
+            rules.append("En un pase, el jugador lo da, no lo recibe.")
+            rules.append("No inventes receptor ni jugada posterior.")
 
         if event.action in SPECIAL_TEAM_FAVOR_ACTIONS and event.team_in_favor:
-            rules.append(
-                f"Debe quedar claro que la accion es a favor de {event.team_in_favor}."
-            )
-        if event.action == "gol" and event.team_name:
-            rules.append(
-                f"Debe quedar clarisimo que es gol y que el jugador pertenece a {event.team_name}."
-            )
+            rules.append(f"La accion es a favor de {event.team_in_favor}.")
+        if event.action == "gol" and event.team_name and event.opponent_team_name:
+            rules.append(f"{event.team_name} marca a {event.opponent_team_name}.")
         if event.field_zone:
-            rules.append("Si encaja, integra la zona del campo sin sonar mecanico.")
+            rules.append(f"Si encaja, menciona {event.field_zone}.")
         if event.action_target:
-            rules.append("Si ayuda, menciona el objetivo o destinatario de la accion.")
+            rules.append(f"Si ayuda, menciona {event.action_target}.")
         if event.play_context:
-            rules.append("Si aporta valor, integra el contexto de la jugada.")
-        if event.intensity:
-            rules.append("Ajusta la energia del comentario segun la intensidad indicada.")
-        if event.match_score:
-            rules.append("Solo puedes usar el marcador si aparece en el evento.")
+            rules.append(f"Si ayuda, menciona {event.play_context}.")
 
         payload_json = json.dumps(
             event.to_prompt_payload(),
@@ -233,14 +264,14 @@ class CommentaryPromptBuilder:
 class OllamaCommentaryGenerator:
     def __init__(
         self,
-        model: str = "tinyllama:1.1b",
+        model: str = "qwen3:1.7b",
         base_url: str | None = None,
-        temperature: float = 0.95,
+        temperature: float = 0.4,
         top_p: float = 0.95,
         timeout_s: float = 90.0,
         prompt_builder: CommentaryPromptBuilder | None = None,
     ) -> None:
-        self.model = _clean_text(model) or "tinyllama:1.1b"
+        self.model = _clean_text(model) or "qwen3:1.7b"
         self.base_url = (_clean_text(base_url) or _default_ollama_base_url()).rstrip("/")
         self.temperature = float(temperature)
         self.top_p = float(top_p)
@@ -271,12 +302,69 @@ class OllamaCommentaryGenerator:
             ) from exc
         return json.loads(raw_response)
 
+    def _normalize_raw_response(self, raw_response: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(raw_response)
+        for key in (
+            "total_duration",
+            "load_duration",
+            "prompt_eval_duration",
+            "eval_duration",
+        ):
+            value = normalized.get(key)
+            if isinstance(value, (int, float)):
+                normalized[f"{key}_seconds"] = float(value) / 1_000_000_000.0
+        return normalized
+
     def check_health(self) -> bool:
         try:
             with request.urlopen(f"{self.base_url}/api/tags", timeout=5.0) as response:
                 return response.status == 200
         except Exception:
             return False
+
+    def normalize_event(
+        self,
+        event: CommentaryEvent | dict[str, Any],
+    ) -> CommentaryEvent:
+        return (
+            event if isinstance(event, CommentaryEvent) else CommentaryEvent.from_dict(event)
+        )
+
+    def build_prompts(
+        self,
+        event: CommentaryEvent | dict[str, Any],
+    ) -> tuple[CommentaryEvent, str, str]:
+        commentary_event = self.normalize_event(event)
+        system_prompt = self.prompt_builder.build_system_prompt()
+        user_prompt = self.prompt_builder.build_user_prompt(commentary_event)
+        return commentary_event, system_prompt, user_prompt
+
+    def build_chat_payload(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "stream": False,
+            "think": False,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "options": {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+            },
+        }
+
+    def chat(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        payload = self.build_chat_payload(system_prompt, user_prompt)
+        raw_response = self._normalize_raw_response(
+            self._post_json("/api/chat", payload)
+        )
+        return payload, raw_response
 
     def _clean_commentary(self, raw_text: str) -> str:
         text = str(raw_text or "").strip()
@@ -305,6 +393,19 @@ class OllamaCommentaryGenerator:
             return True
 
         normalized = commentary.lower()
+        words = re.findall(r"\b\w+\b", commentary, flags=re.UNICODE)
+        if len(words) < 4 or len(words) > 30:
+            return True
+        if len(commentary) > 220:
+            return True
+        if any(token in commentary for token in ("{", "}", "[", "]", "\n", "\r")):
+            return True
+        if commentary.count(":") > 1:
+            return True
+        if commentary.count('"') > 0 or commentary.count("'") > 2:
+            return True
+        if commentary.count(" - ") > 0:
+            return True
         if event.player_name.lower() not in normalized:
             return True
         if event.action == "gol" and event.team_name:
@@ -418,41 +519,49 @@ class OllamaCommentaryGenerator:
             ]
         )
 
-    def generate(self, event: CommentaryEvent | dict[str, Any]) -> CommentaryGenerationResult:
-        commentary_event = (
-            event if isinstance(event, CommentaryEvent) else CommentaryEvent.from_dict(event)
+    def run_llm(
+        self,
+        event: CommentaryEvent | dict[str, Any],
+        *,
+        system_prompt: str | None = None,
+        user_prompt: str | None = None,
+    ) -> CommentaryLLMRunResult:
+        commentary_event, default_system_prompt, default_user_prompt = self.build_prompts(event)
+        system_prompt = str(system_prompt or default_system_prompt)
+        user_prompt = str(user_prompt or default_user_prompt)
+        request_payload, raw_response = self.chat(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
         )
-        system_prompt = self.prompt_builder.build_system_prompt()
-        user_prompt = self.prompt_builder.build_user_prompt(commentary_event)
-        payload = {
-            "model": self.model,
-            "stream": False,
-            "think": False,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "options": {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-            },
-        }
-        raw_response = self._post_json("/api/chat", payload)
         raw_commentary = ((raw_response.get("message", {}) or {}).get("content", ""))
-        commentary = self._clean_commentary(raw_commentary)
-        if self._should_use_fallback(commentary, commentary_event):
-            commentary = self._fallback_commentary(commentary_event)
-        if not commentary:
+        cleaned_commentary = self._clean_commentary(raw_commentary)
+        used_fallback = False
+        final_commentary = cleaned_commentary
+        if not final_commentary:
             raise RuntimeError(
                 f"Ollama devolvio una respuesta vacia: {json.dumps(raw_response, ensure_ascii=False)}"
             )
-        if commentary[-1] not in ".!?":
-            commentary += "."
-        return CommentaryGenerationResult(
-            commentary=commentary,
+        return CommentaryLLMRunResult(
             model=self.model,
             event=commentary_event,
-            raw_response=raw_response,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            request_payload=request_payload,
+            raw_response=raw_response,
+            raw_commentary=raw_commentary,
+            cleaned_commentary=cleaned_commentary,
+            final_commentary=final_commentary,
+            used_fallback=used_fallback,
+            total_duration_seconds=raw_response.get("total_duration_seconds"),
+        )
+
+    def generate(self, event: CommentaryEvent | dict[str, Any]) -> CommentaryGenerationResult:
+        llm_result = self.run_llm(event)
+        return CommentaryGenerationResult(
+            commentary=llm_result.final_commentary,
+            model=llm_result.model,
+            event=llm_result.event,
+            raw_response=llm_result.raw_response,
+            system_prompt=llm_result.system_prompt,
+            user_prompt=llm_result.user_prompt,
         )
