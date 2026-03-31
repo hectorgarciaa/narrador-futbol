@@ -232,167 +232,17 @@ class Tracker(TrackerLogicMixin):
             bytetrack_discard_reason_by_raw_idx = {}
             accepted_raw_detection_indexes = set()
 
-            def commit_assignment(
-                raw_tracker_id,
-                canonical_id,
-                output_class_name,
-                bbox,
-                confidence,
-                detected_team,
-                field_position,
-                metadata,
-                raw_detection_idx=None,
-            ):
-                previous_owner_raw_id = canonical_to_raw_id.get(canonical_id)
-                previous_canonical_id = raw_to_canonical_id.get(raw_tracker_id)
-                if (
-                    previous_canonical_id is not None
-                    and previous_canonical_id != canonical_id
-                ):
-                    canonical_to_raw_id.pop(previous_canonical_id, None)
-                if (
-                    previous_owner_raw_id is not None
-                    and previous_owner_raw_id != raw_tracker_id
-                ):
-                    raw_to_canonical_id.pop(previous_owner_raw_id, None)
-
-                raw_to_canonical_id[raw_tracker_id] = canonical_id
-                canonical_to_raw_id[canonical_id] = raw_tracker_id
-                previous_state = canonical_state.get(canonical_id, {})
-                prev_samples = int(previous_state.get("movement_samples", 0))
-                prev_mean = float(previous_state.get("mean_step_distance", 0.0))
-                prev_last_frame = int(previous_state.get("last_frame", n_frame))
-                frame_gap = max(1, n_frame - prev_last_frame)
-                prev_step_pf_count = int(
-                    previous_state.get("step_per_frame_count", 0)
-                )
-                prev_step_pf_mean = float(
-                    previous_state.get("step_per_frame_mean", 0.0)
-                )
-                prev_step_pf_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
-                step_distance = self._step_distance(
-                    previous_state.get("bbox"),
-                    bbox,
-                    class_name=output_class_name,
-                    previous_field_position=previous_state.get("field_position"),
-                    new_field_position=field_position,
-                )
-                if step_distance is not None:
-                    movement_samples = prev_samples + 1
-                    if prev_samples <= 0:
-                        mean_step_distance = step_distance
-                    else:
-                        mean_step_distance = (
-                            (prev_mean * prev_samples) + step_distance
-                        ) / movement_samples
-                else:
-                    movement_samples = prev_samples
-                    mean_step_distance = prev_mean
-
-                if step_distance is not None:
-                    step_per_frame = step_distance / frame_gap
-                    (
-                        step_per_frame_count,
-                        step_per_frame_mean,
-                        step_per_frame_m2,
-                    ) = self._update_running_stats(
-                        prev_step_pf_count,
-                        prev_step_pf_mean,
-                        prev_step_pf_m2,
-                        step_per_frame,
-                    )
-                    class_stats = self.class_motion_stats.setdefault(
-                        output_class_name,
-                        {"count": 0, "mean": 0.0, "m2": 0.0},
-                    )
-                    (
-                        class_stats["count"],
-                        class_stats["mean"],
-                        class_stats["m2"],
-                    ) = self._update_running_stats(
-                        class_stats["count"],
-                        class_stats["mean"],
-                        class_stats["m2"],
-                        step_per_frame,
-                    )
-                else:
-                    step_per_frame_count = prev_step_pf_count
-                    step_per_frame_mean = prev_step_pf_mean
-                    step_per_frame_m2 = prev_step_pf_m2
-                special_penalty_seed = bool(previous_state.get("special_penalty_seed", False))
-                resolved_team = (
-                    detected_team
-                    if detected_team is not None
-                    else previous_state.get("team")
-                )
-                if special_penalty_seed:
-                    resolved_team = None
-                resolved_field_position = (
-                    self._field_position_to_tuple(field_position)
-                    or previous_state.get("field_position")
-                )
-                canonical_state[canonical_id] = {
-                    "bbox": bbox,
-                    "class_name": output_class_name,
-                    "last_frame": n_frame,
-                    "team": resolved_team,
-                    "field_position": resolved_field_position,
-                    "movement_samples": movement_samples,
-                    "mean_step_distance": mean_step_distance,
-                    "step_per_frame_count": step_per_frame_count,
-                    "step_per_frame_mean": step_per_frame_mean,
-                    "step_per_frame_m2": step_per_frame_m2,
-                    "reserved_seed": False,
-                    "special_penalty_seed": special_penalty_seed,
-                }
-                used_canonical_ids_in_frame.add(canonical_id)
-
-                tracks[output_class_name][n_frame][canonical_id] = {
-                    "bbox": bbox,
-                    "confidence": confidence,
-                    "team": resolved_team,
-                    "distances": metadata.get("distances"),
-                    "shirt_color": metadata.get("shirt_color"),
-                    "bbox_size": metadata.get("bbox_size"),
-                    "field_position_m": (
-                        list(self._field_position_to_tuple(field_position))
-                        if self._field_position_to_tuple(field_position) is not None
-                        else None
-                    ),
-                    "ground_point_image": (
-                        metadata.get("ground_point_image").tolist()
-                        if hasattr(metadata.get("ground_point_image"), "tolist")
-                        else metadata.get("ground_point_image")
-                    ),
-                    "reserved_seed": False,
-                    "special_penalty_seed": special_penalty_seed,
-                }
-
-                if collect_visual_debug and raw_detection_idx is not None:
-                    accepted_raw_detection_indexes.add(int(raw_detection_idx))
-
             pending_detections = []
             ball_candidates = []
             
             for object_detected in sorted_tracked_detections:
                 bbox, _, confidence, _, tracker_id, metadata = object_detected
-                class_name = metadata["class_name"]
-                if class_name not in tracks:
-                    if collect_visual_debug:
-                        raw_detection_idx = metadata.get("raw_det_idx")
-                        if raw_detection_idx is not None:
-                            try:
-                                bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
-                                    "reason_pre": "class_not_supported",
-                                }
-                            except (TypeError, ValueError):
-                                pass
-                    continue
                 bbox = self._bbox_to_list(bbox)
                 confidence = float(confidence)
-                detected_team = metadata.get("team")
-                field_position = metadata.get("field_position")
-                raw_detection_idx = metadata.get("raw_det_idx")
+                class_name = metadata["class_name"]
+                detected_team = metadata["team"]
+                field_position = metadata["field_position"]
+                raw_detection_idx = metadata["raw_det_idx"]
 
                 if class_name == "ball":
                     ball_candidates.append(
@@ -531,8 +381,16 @@ class Tracker(TrackerLogicMixin):
                     )
                     continue
 
-                commit_assignment(
+                self._commit_assignment(
+                    canonical_to_raw_id,
+                    raw_to_canonical_id,
                     raw_tracker_id,
+                    canonical_state,
+                    n_frame,
+                    used_canonical_ids_in_frame,
+                    tracks,
+                    accepted_raw_detection_indexes,
+                    collect_visual_debug,
                     canonical_id,
                     output_class_name,
                     bbox,
@@ -587,14 +445,22 @@ class Tracker(TrackerLogicMixin):
                         continue
                     canonical_id = next_free_id
 
-                commit_assignment(
+                self._commit_assignment(
+                    canonical_to_raw_id,
+                    raw_to_canonical_id,
                     pending["raw_tracker_id"],
+                    canonical_state,
+                    n_frame,
+                    used_canonical_ids_in_frame,
+                    tracks,
+                    accepted_raw_detection_indexes,
+                    collect_visual_debug,
                     canonical_id,
                     output_class_name,
                     pending["bbox"],
                     pending["confidence"],
                     pending["detected_team"],
-                    pending.get("field_position"),
+                    pending["field_position"],
                     pending["metadata"],
                     raw_detection_idx=pending.get("raw_detection_idx"),
                 )
@@ -798,3 +664,152 @@ class Tracker(TrackerLogicMixin):
                 except (TypeError, ValueError):
                     continue
         return bytetrack_raw_detection_indexes, bytetrack_id_by_raw_idx
+
+    def _commit_assignment(
+        self,
+        canonical_to_raw_id,
+        raw_to_canonical_id,
+        raw_tracker_id,
+        canonical_state,
+        n_frame,
+        used_canonical_ids_in_frame,
+        tracks,
+        accepted_raw_detection_indexes,
+        collect_visual_debug,
+        canonical_id,
+        output_class_name,
+        bbox,
+        confidence,
+        detected_team,
+        field_position,
+        metadata,
+        raw_detection_idx=None,
+    ):
+        previous_owner_raw_id = canonical_to_raw_id.get(canonical_id)
+        previous_canonical_id = raw_to_canonical_id.get(raw_tracker_id)
+        if (
+            previous_canonical_id is not None
+            and previous_canonical_id != canonical_id
+        ):
+            canonical_to_raw_id.pop(previous_canonical_id, None)
+        if (
+            previous_owner_raw_id is not None
+            and previous_owner_raw_id != raw_tracker_id
+        ):
+            raw_to_canonical_id.pop(previous_owner_raw_id, None)
+
+        raw_to_canonical_id[raw_tracker_id] = canonical_id
+        canonical_to_raw_id[canonical_id] = raw_tracker_id
+        previous_state = canonical_state.get(canonical_id, {})
+        prev_samples = int(previous_state.get("movement_samples", 0))
+        prev_mean = float(previous_state.get("mean_step_distance", 0.0))
+        prev_last_frame = int(previous_state.get("last_frame", n_frame))
+        frame_gap = max(1, n_frame - prev_last_frame)
+        prev_step_pf_count = int(
+            previous_state.get("step_per_frame_count", 0)
+        )
+        prev_step_pf_mean = float(
+            previous_state.get("step_per_frame_mean", 0.0)
+        )
+        prev_step_pf_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
+        step_distance = self._step_distance(
+            previous_state.get("bbox"),
+            bbox,
+            class_name=output_class_name,
+            previous_field_position=previous_state.get("field_position"),
+            new_field_position=field_position,
+        )
+        if step_distance is not None:
+            movement_samples = prev_samples + 1
+            if prev_samples <= 0:
+                mean_step_distance = step_distance
+            else:
+                mean_step_distance = (
+                    (prev_mean * prev_samples) + step_distance
+                ) / movement_samples
+        else:
+            movement_samples = prev_samples
+            mean_step_distance = prev_mean
+
+        if step_distance is not None:
+            step_per_frame = step_distance / frame_gap
+            (
+                step_per_frame_count,
+                step_per_frame_mean,
+                step_per_frame_m2,
+            ) = self._update_running_stats(
+                prev_step_pf_count,
+                prev_step_pf_mean,
+                prev_step_pf_m2,
+                step_per_frame,
+            )
+            class_stats = self.class_motion_stats.setdefault(
+                output_class_name,
+                {"count": 0, "mean": 0.0, "m2": 0.0},
+            )
+            (
+                class_stats["count"],
+                class_stats["mean"],
+                class_stats["m2"],
+            ) = self._update_running_stats(
+                class_stats["count"],
+                class_stats["mean"],
+                class_stats["m2"],
+                step_per_frame,
+            )
+        else:
+            step_per_frame_count = prev_step_pf_count
+            step_per_frame_mean = prev_step_pf_mean
+            step_per_frame_m2 = prev_step_pf_m2
+        special_penalty_seed = bool(previous_state.get("special_penalty_seed", False))
+        resolved_team = (
+            detected_team
+            if detected_team is not None
+            else previous_state.get("team")
+        )
+        if special_penalty_seed:
+            resolved_team = None
+        resolved_field_position = (
+            self._field_position_to_tuple(field_position)
+            or previous_state.get("field_position")
+        )
+        canonical_state[canonical_id] = {
+            "bbox": bbox,
+            "class_name": output_class_name,
+            "last_frame": n_frame,
+            "team": resolved_team,
+            "field_position": resolved_field_position,
+            "movement_samples": movement_samples,
+            "mean_step_distance": mean_step_distance,
+            "step_per_frame_count": step_per_frame_count,
+            "step_per_frame_mean": step_per_frame_mean,
+            "step_per_frame_m2": step_per_frame_m2,
+            "reserved_seed": False,
+            "special_penalty_seed": special_penalty_seed,
+        }
+        used_canonical_ids_in_frame.add(canonical_id)
+
+        tracks[output_class_name][n_frame][canonical_id] = {
+            "bbox": bbox,
+            "confidence": confidence,
+            "team": resolved_team,
+            "distances": metadata.get("distances"),
+            "shirt_color": metadata.get("shirt_color"),
+            "bbox_size": metadata.get("bbox_size"),
+            "field_position_m": (
+                list(self._field_position_to_tuple(field_position))
+                if self._field_position_to_tuple(field_position) is not None
+                else None
+            ),
+            "ground_point_image": (
+                metadata.get("ground_point_image").tolist()
+                if hasattr(metadata.get("ground_point_image"), "tolist")
+                else metadata.get("ground_point_image")
+            ),
+            "reserved_seed": False,
+            "special_penalty_seed": special_penalty_seed,
+        }
+
+        if collect_visual_debug and raw_detection_idx is not None:
+            accepted_raw_detection_indexes.add(int(raw_detection_idx))
+
