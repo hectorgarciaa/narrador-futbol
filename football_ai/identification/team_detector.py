@@ -5,6 +5,23 @@ from football_ai.identification.shirt_detector import ShirtDetector
 from football_ai.evaluation.cluster_visualizer import visualize_shirt_clusters
 
 class TeamDetector:
+    @staticmethod
+    def _normalize_class_name(class_name):
+        token = str(class_name or "").strip().lower()
+        aliases = {
+            "player": "player",
+            "players": "player",
+            "goalkeeper": "goalkeeper",
+            "gk": "goalkeeper",
+            "keeper": "goalkeeper",
+            "referee": "referee",
+            "ref": "referee",
+            "refs": "referee",
+            "ball": "ball",
+            "balls": "ball",
+        }
+        return aliases.get(token, token)
+
     def __init__(self, n_teams=2, with_ref=False, team_colors=None, min_samples=60, min_size_cluster=4,
                  candidate_classes=["player"]):
         self.n_teams = n_teams
@@ -13,7 +30,10 @@ class TeamDetector:
         self.min_samples = min_samples
         self.min_size_cluster = min_size_cluster
         self.shirt_detector = ShirtDetector()
-        self.candidate_classes = candidate_classes
+        self.candidate_classes = [
+            self._normalize_class_name(class_name)
+            for class_name in candidate_classes
+        ]
         self.team_colors = { team: np.asarray(team_colors[team], dtype=np.float32) for team in team_colors.keys() } if with_ref else {}
 
         self.updated = False
@@ -23,9 +43,12 @@ class TeamDetector:
         teams_of_detected_objects = []
         
         for object_detected in frame_detections:
-            class_name = object_detected.names[object_detected.boxes.cls.item()]
+            class_name = self._normalize_class_name(
+                object_detected.names[object_detected.boxes.cls.item()]
+            )
+            bbox_size = self._extract_bbox_size(object_detected)
             if class_name in self.candidate_classes:
-                shirt, shirt_color, bbox_size = self.get_shirt_color(object_detected)
+                shirt, shirt_color = self.get_shirt_color(object_detected)
                 if show_plot:
                     shirts.append(shirt)
                 if shirt_color is not None:
@@ -65,17 +88,24 @@ class TeamDetector:
             return None
         return [float(channel) for channel in np.asarray(shirt_color, dtype=np.float32).reshape(-1).tolist()]
 
+    @staticmethod
+    def _extract_bbox_size(object_detected):
+        try:
+            x1, y1, x2, y2 = map(int, object_detected.boxes.xyxy[0])
+        except Exception:
+            return 0.0
+        return max(0, x2 - x1) * max(0, y2 - y1)
+
     
     def get_shirt_color(self, object_detected):
         x1, y1, x2, y2 = map(int, object_detected.boxes.xyxy[0])
-        bbox_size = max(0, x2 - x1) * max(0, y2 - y1)
         player_pixels = object_detected.orig_img[y1:y2, x1:x2]
         if player_pixels.size > 0:
             h = player_pixels.shape[0]
             shirt = player_pixels[:int(0.5*h), :]
             shirt_color = self.shirt_detector.get_color_kmeans(shirt)
-            return shirt, shirt_color, bbox_size
-        return None, None, bbox_size
+            return shirt, shirt_color
+        return None, None
     
     def update_team_colors(self):
         samples = np.asarray(self.samples, dtype=np.float32)
