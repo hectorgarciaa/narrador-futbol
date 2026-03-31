@@ -1,6 +1,9 @@
 # visualization
 
-Generación de video anotado con los resultados del tracking: bounding boxes por clase, etiquetas con el ID del track, equipo asignado y distancias a los colores de referencia.
+Generación de video anotado con los resultados del tracking.
+Soporta dos modos:
+- `single`: overlay clásico sobre el frame original.
+- `four_panel`: mosaico 2x2 con paneles de depuración por frame.
 
 ---
 
@@ -26,6 +29,7 @@ drawer = Drawer(
 ```
 
 Los colores se leen de `config.yaml` vía `config.get_visualization_colors()` en los scripts.
+En modo campo (`four_panel` panel B), el color de relleno por equipo se lee de `visualization.team_colors` (BGR).
 
 ### Método principal: `draw_tracks`
 
@@ -34,7 +38,10 @@ drawer.draw_tracks(
     tracks=tracks,          # dict de Tracker.get_tracks()
     video="partido.mp4",    # video original para leer los frames
     output_path="output/resultado.mp4",
-    show=False              # si True, muestra en ventana en tiempo real
+    show=False,             # si True, muestra en ventana en tiempo real
+    four_panel=False,       # si True, genera mosaico 2x2
+    debug_frames=None,      # metadata cruda/descartada (solo four_panel)
+    expected_counts=None    # límites por clase para panel de continuidad
 )
 ```
 
@@ -44,14 +51,37 @@ En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=Tru
 1. `create_writer(video, output_path)`: abre el video con `cv2.VideoCapture`, extrae FPS, ancho y alto, y crea un `cv2.VideoWriter` con codec `mp4v`. Crea el directorio de salida si no existe.
 2. Itera frame a frame con `cap.read()`.
 3. Para cada clase y frame, llama a `draw_all_detections_in_frame`, que itera sobre todos los tracks del frame.
-4. `draw_detection` pinta el bounding box con `cv2.rectangle` y la etiqueta con `cv2.putText`. La etiqueta incluye:
+4. `draw_detection` pinta el bounding box con `cv2.rectangle` y la etiqueta con `cv2.putText`. En modo clásico incluye:
    - Clase y track_id (`"player #7"`)
    - Si hay información de equipo: el equipo asignado y las distancias a cada equipo dinámicamente (`"Real Madrid: [12.3, 45.6]"`)
    - Si hay `predicted_role_frame` o `predicted_role`: una línea adicional bajo el bbox con el rol
    - Si existe `assignment_method`/`expected_role_slot` por una asignación restringida (por ejemplo Hungarian con once esperado), prioriza mostrar el `predicted_role` estable
    - Si hay `field_position_m` en `player`: otra línea bajo el bbox con `pos(m): x, y`
+   - Si el track coincide con el jugador en posesión: dibuja un segundo recuadro amarillo alrededor del bbox
+   - Además pinta un banner `POS: <equipo>` en el frame
 5. Escribe el frame anotado con `out.write(frame)`.
 6. En el bloque `finally`, libera `cap` y `out` siempre, incluso si hubo error.
+
+### Modo `four_panel`
+
+Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
+1. `A) Tracking compact`: video anotado en formato compacto (`p`, `gk`, `ref`, sin distancias de equipo, roles sin prefijo, posición `x, y` sin decimales y texto más pequeño).
+   - En `player/gk`, el color de `bbox` se toma del equipo (`visualization.team_colors`) en lugar del color fijo por clase.
+2. `B) Campo + IDs + rol`: representación 2D del campo con:
+   - círculo por track final (relleno por equipo),
+   - borde por tipo (`player`, `goalkeeper`, `referee`),
+   - `track_id` dentro y rol debajo,
+   - balón como cuadrado rojo,
+   - anillo amarillo para el jugador en posesión,
+   - banner `POS: <equipo>`.
+   - El tamaño de círculo se controla con `visualization.pitch_marker_radius` (por defecto 12).
+3. `C) YOLO descartadas`: detecciones crudas de YOLO que no acabaron en un track canónico en ese frame.
+4. `D) Tracking con continuidad`: overlay compacto con relleno de continuidad (usa la última posición conocida por ID cuando falta detección en el frame) y mantiene el resaltado de posesión.
+   - Si `visualization.continuity_keep_all_seen_ids=true`, mantiene visibles todos los IDs ya observados en el clip para cada clase (no corta al cupo esperado).
+
+Compatibilidad de clases en `tracks`:
+- El drawer dibuja con clases canónicas (`player`, `goalkeeper`, `referee`, `ball`).
+- También normaliza aliases legacy (`ref`, `refs`, `referees`, `gk`, `players`, `balls`) para evitar perder renderizado por naming histórico.
 
 ### Manejo de errores
 
@@ -67,6 +97,6 @@ En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=Tru
 | `create_writer(video, output_path)` | Prepara `VideoCapture` y `VideoWriter`, añade `.mp4` si falta extensión |
 | `draw_detection(frame, class_name, data, color, track_id)` | Dibuja un único bbox con etiqueta |
 | `draw_all_detections_in_frame(frame, class_name, class_tracks, frame_id)` | Dibuja todos los tracks de una clase en un frame |
-| `draw_tracks(tracks, video, output_path, show, window_name)` | Pipeline completo |
+| `draw_tracks(tracks, video, output_path, show, window_name, four_panel, debug_frames, expected_counts)` | Pipeline completo (clásico o 2x2) |
 
 > **Nota:** El método `draw_detection` itera dinámicamente sobre las claves del diccionario `distances` para formatear las distancias, por lo que es compatible con cualquier configuración de equipos en config.yaml.
