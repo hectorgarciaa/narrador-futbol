@@ -265,6 +265,13 @@ visualization:
   # Si true, en el panel D mantiene visibles todos los IDs ya observados
   # (no solo hasta el cupo esperado por clase).
   continuity_keep_all_seen_ids: true
+  # Panel C (YOLO descartadas): muestra el motivo de descarte en la etiqueta.
+  discarded_panel_show_reasons: true
+  # Panel C (YOLO descartadas): colores BGR por tipo de descarte.
+  # - not_tracked: detecciones YOLO que no fueron devueltas por ByteTrack.
+  # - tracked_no_canonical: detecciones devueltas por ByteTrack pero descartadas en el mapeo canónico.
+  discarded_panel_color_not_tracked: [0, 165, 255]
+  discarded_panel_color_tracked_no_canonical: [255, 0, 255]
   # Grosor de las líneas de bounding boxes
   line_thickness: 2
   # Tamaño de fuente para etiquetas
