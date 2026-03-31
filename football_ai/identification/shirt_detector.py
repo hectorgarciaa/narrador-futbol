@@ -3,7 +3,19 @@ import numpy as np
 from sklearn.cluster import KMeans
 
 class ShirtDetector:
-    def __init__(self, n_clusters=2, init='k-means++', n_init=5, random_state=0):
+    def __init__(
+        self,
+        n_clusters=2,
+        init='k-means++',
+        n_init=3,
+        random_state=0,
+        downsample=1.0,
+    ):
+        self.downsample = float(downsample)
+        if not np.isfinite(self.downsample) or self.downsample <= 0.0:
+            self.downsample = 1.0
+        self.downsample = min(self.downsample, 1.0)
+        self._rng = np.random.default_rng(int(random_state))
         self.km = KMeans(n_clusters=n_clusters, init=init, n_init=n_init,
                          random_state=random_state)
 
@@ -13,8 +25,19 @@ class ShirtDetector:
         pixels = lab.reshape(-1, 3)
         if len(pixels) < 2:
             return np.array([0, 0, 0])
-        
-        self.km.fit(pixels)
+
+        pixels_to_fit = pixels
+        if self.downsample < 1.0:
+            sample_size = max(2, int(round(len(pixels) * self.downsample)))
+            if sample_size < len(pixels):
+                sampled_indexes = self._rng.choice(
+                    len(pixels),
+                    size=sample_size,
+                    replace=False,
+                )
+                pixels_to_fit = pixels[sampled_indexes]
+
+        self.km.fit(pixels_to_fit)
         centers = self.km.cluster_centers_
         
         height, width = image.shape[:2]

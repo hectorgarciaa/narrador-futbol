@@ -167,6 +167,34 @@ def _normalize_team_detector_runtime_conf(team_detector_conf, team_mode=None):
     return runtime_conf
 
 
+def _resolve_runtime_device_label(raw_device):
+    normalized = str(raw_device or "cpu").strip().lower()
+    if normalized.startswith("cuda"):
+        return f"{normalized} (cuda gpu)"
+    return f"{normalized} (cpu)"
+
+
+def _resolve_pnlcalib_device(tracker):
+    field_projector = getattr(tracker, "field_projector", None)
+    if field_projector is None:
+        return "cpu (pnlcalib disabled)"
+    estimator = getattr(field_projector, "estimator", None)
+    runtime = getattr(estimator, "runtime", None)
+    runtime_device = getattr(runtime, "device", "cpu")
+    return _resolve_runtime_device_label(runtime_device)
+
+
+def _resolve_frame_hook_device(frame_hook):
+    if frame_hook is None:
+        return "cpu (frame_hook disabled)"
+    hook_owner = getattr(frame_hook, "__self__", None)
+    role_session = getattr(hook_owner, "role_session", None)
+    if role_session is None:
+        return "cpu (frame_hook sin backend torch)"
+    runtime_device = getattr(role_session, "device", "cpu")
+    return _resolve_runtime_device_label(runtime_device)
+
+
 def run_tracking_pipeline(args):
     # Load configuration
     config = get_config()
@@ -279,6 +307,17 @@ def run_tracking_pipeline(args):
             expected_roles_by_team_override=lineup_expected_roles_by_team,
             lineup_matcher=lineup_matcher,
         )
+        frame_hook = online_special_seed_role_assigner.on_frame
+
+        if bool(tracker_conf.get("print_runtime_devices", True)):
+            print(
+                f"[runtime] pnlcalib: {_resolve_pnlcalib_device(tracker)}",
+                flush=True,
+            )
+            print(
+                f"[runtime] frame_hook: {_resolve_frame_hook_device(frame_hook)}",
+                flush=True,
+            )
 
         profile_phases_enabled = bool(getattr(args, "profile_phases", False))
         if not profile_phases_enabled:
@@ -290,7 +329,7 @@ def run_tracking_pipeline(args):
         tracks = tracker.get_tracks(
             video_path,
             show_kmeans,
-            frame_hook=online_special_seed_role_assigner.on_frame,
+            frame_hook=frame_hook,
             collect_visual_debug=four_panel_enabled,
             profile_phases=profile_phases_enabled,
         )

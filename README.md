@@ -646,7 +646,16 @@ detection:
   conf_threshold: 0.01
   ball_min_conf: 0.0035
 
+team_detector:
+  shirt_detector_conf:
+    n_init: 3
+    downsample: 0.6
+
 tracking:
+  print_runtime_devices: true  # print de dispositivo para PnLCalib y frame_hook (cuda/cpu)
+  projector:
+    constructor:
+      pnl_refine: false
   track_thresh: 0.15          # Confianza mínima para activar un track
   track_buffer: 90            # Frames que sobrevive un track sin ser visto
   match_thresh: 0.945         # IoU mínimo para asociar detección a track

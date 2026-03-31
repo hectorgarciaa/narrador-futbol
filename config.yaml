@@ -87,11 +87,13 @@ team_detector:
     n_clusters: 2
     init: "k-means++"
     n_init: 3
+    downsample: 0.6
     random_state: 0
 
 
 # Configuración de tracking (ByteTrack)
 tracking:
+  print_runtime_devices: true  # Si true, imprime dispositivo de PnLCalib y frame hook (cuda/cpu)
   projector:
     enabled: true     # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching
     classes: ["player", "goalkeeper"]
@@ -110,7 +112,7 @@ tracking:
       bottom_offset_ratio: 0.04
       keypoint_threshold: 0.3434
       line_threshold: 0.7867
-      pnl_refine: true
+      pnl_refine: false
       temporal_blend: 0.20
       pixels_per_meter: 8
       device: null
