@@ -14,16 +14,10 @@ class Tracker(TrackerLogicMixin):
     def _normalize_detection_class_name(class_name):
         token = str(class_name or "").strip().lower()
         aliases = {
-            "player": "player",
-            "players": "player",
-            "goalkeeper": "goalkeeper",
-            "gk": "goalkeeper",
-            "keeper": "goalkeeper",
-            "referee": "referee",
-            "ref": "referee",
-            "refs": "referee",
-            "ball": "ball",
-            "balls": "ball",
+            "player": "player", "players": "player",
+            "goalkeeper": "goalkeeper", "gk": "goalkeeper", "keeper": "goalkeeper",
+            "referee": "referee", "ref": "referee", "refs": "referee",
+            "ball": "ball", "balls": "ball",
         }
         return aliases.get(token, token)
 
@@ -40,8 +34,7 @@ class Tracker(TrackerLogicMixin):
         return normalized
 
     def __init__(self, model_path, detector_conf, team_detector_conf, bytetracker_conf,
-                 ball_conf, tracker_conf, projector_conf, project_root,
-    ):
+                 ball_conf, tracker_conf, projector_conf, project_root):
 
         self.model = Detector(model_path, **detector_conf)
         self.team_detector = TeamDetector(**team_detector_conf)
@@ -204,6 +197,7 @@ class Tracker(TrackerLogicMixin):
         self._initialize_reserved_penalty_spot_players(canonical_state)
         ball_state = None
         for n_frame, detections in enumerate(model_detections):
+            detections.names = {k: self._normalize_detection_class_name(v) for k, v in detections.items()}
             detections_sv = sv.Detections.from_ultralytics(detections)
             frame_size = None
             original_frame_bgr = getattr(detections, "orig_img", None)
@@ -274,6 +268,9 @@ class Tracker(TrackerLogicMixin):
             )
             detections_sv.data["bbox_size"] = np.array(
                 [dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float
+            )
+            detections_sv.data["class"] = np.array(
+                [dicc["class"] for dicc in teams_of_detected_objects], dtype=object
             )
             detections_sv.data["field_position"] = np.asarray(
                 field_positions, dtype=np.float32
