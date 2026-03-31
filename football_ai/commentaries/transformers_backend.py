@@ -147,7 +147,7 @@ class TransformersCommentaryGenerator:
         event: CommentaryEvent | dict[str, Any],
     ) -> tuple[CommentaryEvent, str, str]:
         commentary_event = self.normalize_event(event)
-        system_prompt = self.prompt_builder.build_system_prompt()
+        system_prompt = self.prompt_builder.build_system_prompt(commentary_event)
         user_prompt = self.prompt_builder.build_user_prompt(commentary_event)
         return commentary_event, system_prompt, user_prompt
 

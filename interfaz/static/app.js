@@ -1,6 +1,11 @@
 const state = {
   formations: {},
   videos: [],
+  commentaryMode: "live",
+  currentCommentaryMode: "live",
+  commentaryCursor: -1,
+  commentaryQueue: [],
+  commentaryAudio: null,
   teams: [
     {
       team_name: "Equipo 1",
@@ -21,6 +26,7 @@ const state = {
 
 const teamsGrid = document.getElementById("teams-grid");
 const videoSelect = document.getElementById("video-source");
+const commentaryModeSelect = document.getElementById("commentary-mode");
 const runBadge = document.getElementById("run-badge");
 const runSummary = document.getElementById("run-summary");
 const runLog = document.getElementById("run-log");
@@ -215,16 +221,77 @@ function renderRunStatus(statusPayload) {
   const status = statusPayload.status || "idle";
   const runId = statusPayload.run_id || "-";
   const videoSource = statusPayload.video_source || "-";
+  const outputVideoPath = statusPayload.output_video_path || "-";
   const teams = Array.isArray(statusPayload.teams) ? statusPayload.teams : [];
+  const commentary = statusPayload.commentary || {};
   setRunStatus(status, status.toUpperCase());
   runSummary.innerHTML = `
     <strong>Run:</strong> ${runId}<br />
     <strong>Vídeo:</strong> ${videoSource}<br />
+    <strong>Salida:</strong> ${outputVideoPath}<br />
     <strong>Equipos:</strong> ${teams.map((team) => team.team_name).join(" vs ")}<br />
+    <strong>Comentarios:</strong> ${commentary.mode || "-"} · intro ${commentary.intro_status || "-"}<br />
+    <strong>Mix diferido:</strong> ${commentary.deferred_mux_status || "-"}<br />
     <strong>Spec:</strong> ${statusPayload.spec_path || "-"}<br />
-    <strong>Log:</strong> ${statusPayload.log_path || "-"}
+    <strong>Log:</strong> ${statusPayload.log_path || "-"}<br />
+    <strong>Manifest:</strong> ${commentary.manifest_path || "-"}
   `;
   runLog.textContent = (statusPayload.log_tail || []).join("\n") || "Sin salida todavía.";
+}
+
+function resetCommentaryPlayback() {
+  state.commentaryCursor = -1;
+  state.commentaryQueue = [];
+  if (state.commentaryAudio) {
+    state.commentaryAudio.pause();
+    state.commentaryAudio = null;
+  }
+}
+
+function playNextCommentary() {
+  if (state.commentaryAudio || state.commentaryQueue.length === 0) {
+    return;
+  }
+  const nextItem = state.commentaryQueue.shift();
+  if (!nextItem?.audio_url) {
+    playNextCommentary();
+    return;
+  }
+  const audio = new Audio(nextItem.audio_url);
+  state.commentaryAudio = audio;
+  const releaseAudio = () => {
+    state.commentaryAudio = null;
+    playNextCommentary();
+  };
+  audio.addEventListener("ended", releaseAudio, { once: true });
+  audio.addEventListener("error", releaseAudio, { once: true });
+  audio.play().catch(() => {
+    releaseAudio();
+  });
+}
+
+function enqueueCommentaryEvents(events) {
+  for (const eventItem of events) {
+    if (eventItem?.audio_url) {
+      state.commentaryQueue.push(eventItem);
+    }
+  }
+  playNextCommentary();
+}
+
+async function pollCommentaryEvents() {
+  if (!state.currentRunId || state.currentCommentaryMode !== "live") {
+    return;
+  }
+  const response = await fetch(
+    `/api/runs/${state.currentRunId}/commentary-events?after=${state.commentaryCursor}`,
+  );
+  const payload = await response.json();
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  if (events.length > 0) {
+    state.commentaryCursor = events[events.length - 1].index;
+    enqueueCommentaryEvents(events);
+  }
 }
 
 async function pollRunStatus() {
@@ -234,6 +301,9 @@ async function pollRunStatus() {
   const response = await fetch(`/api/runs/${state.currentRunId}`);
   const payload = await response.json();
   renderRunStatus(payload);
+  if (state.currentCommentaryMode === "live") {
+    await pollCommentaryEvents();
+  }
   if (!["queued", "running"].includes(payload.status)) {
     clearInterval(state.pollTimer);
     state.pollTimer = null;
@@ -243,6 +313,7 @@ async function pollRunStatus() {
 async function submitRun() {
   const payload = {
     video_source: videoSelect.value,
+    commentary_mode: state.commentaryMode,
     teams: state.teams.map((teamState) => ({
       team_name: teamState.team_name,
       team_color: teamState.team_color,
@@ -266,8 +337,24 @@ async function submitRun() {
     if (!response.ok) {
       throw new Error(result.error || "No se pudo lanzar la ejecución.");
     }
+    resetCommentaryPlayback();
     state.currentRunId = result.run_id;
+    state.currentCommentaryMode = result.commentary?.mode || state.commentaryMode;
+    const introEventIndex = Number(result.commentary?.intro_event_index);
+    if (Number.isFinite(introEventIndex)) {
+      state.commentaryCursor = introEventIndex;
+    }
     renderRunStatus(result);
+    if (
+      state.currentCommentaryMode === "live" &&
+      result.commentary?.intro_audio_url
+    ) {
+      enqueueCommentaryEvents([
+        {
+          audio_url: result.commentary.intro_audio_url,
+        },
+      ]);
+    }
     if (state.pollTimer) {
       clearInterval(state.pollTimer);
     }
@@ -296,6 +383,7 @@ async function loadBootstrapData() {
 
   state.formations = formationsPayload.formations || {};
   state.videos = videosPayload.videos || [];
+  commentaryModeSelect.value = state.commentaryMode;
 
   for (const teamState of state.teams) {
     ensureSlots(teamState);
@@ -310,6 +398,10 @@ launchButton.addEventListener("click", () => {
   submitRun().catch((error) => {
     runSummary.textContent = error.message;
   });
+});
+
+commentaryModeSelect.addEventListener("change", (event) => {
+  state.commentaryMode = event.target.value;
 });
 
 loadBootstrapData().catch((error) => {

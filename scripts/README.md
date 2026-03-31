@@ -66,7 +66,7 @@ También admite:
 
 `auto-bootstrap` aprende dos clusters de color de camiseta en los frames iniciales y fija esos equipos para todo el vídeo (nombres neutrales, p. ej. `Equipo 1`, `Equipo 2`). El color final de cada equipo se toma como la **mediana por cluster**.
 Además, exige un mínimo de muestras por cluster (`--team-bootstrap-min-cluster-samples`, por defecto 4): si aparece un cluster pequeño (<=3), se re-clusteriza sobre el cluster grande.
-Si pasas `--lineup-spec`, `track.py` usa por defecto `auto-bootstrap`, toma los colores de camiseta introducidos por el usuario como referencia y, cuando se cierran los clusters, nombra cada equipo por cercanía de color a esas referencias. A partir de ahí también sobreescribe `expected_roles_by_team` con la formación elegida en la interfaz y, cuando un slot queda estable, intenta resolver `player_name` con el spec.
+Si pasas `--lineup-spec`, `track.py` usa por defecto el mismo comportamiento que el tracking normal: toma los colores de camiseta introducidos por el usuario como referencias directas de equipo. Si quieres bootstrap automático también con `lineup_spec`, pídeselo explícitamente con `--team-mode auto-bootstrap`. En ambos casos, el spec sobreescribe `expected_roles_by_team` con la formación elegida en la interfaz y, cuando un slot queda estable, intenta resolver `player_name` con el spec.
 
 **Flujo:**
 1. Carga toda la configuración de `config.yaml` (modelo, video, output, confianza, tracker, equipos).

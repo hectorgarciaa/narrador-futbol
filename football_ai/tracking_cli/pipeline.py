@@ -151,6 +151,22 @@ def _apply_team_color_overrides(base_team_colors, raw_overrides, logger):
     return updated
 
 
+def _normalize_team_detector_runtime_conf(team_detector_conf, team_mode=None):
+    runtime_conf = dict(team_detector_conf or {})
+    runtime_conf.pop("with_ref", None)
+
+    normalized_team_mode = None
+    if team_mode is not None:
+        normalized_team_mode = str(team_mode).strip().lower()
+
+    if normalized_team_mode == "auto-bootstrap":
+        runtime_conf.pop("team_colors", None)
+    elif not runtime_conf.get("team_colors"):
+        runtime_conf.pop("team_colors", None)
+
+    return runtime_conf
+
+
 def run_tracking_pipeline(args):
     # Load configuration
     config = get_config()
@@ -213,8 +229,6 @@ def run_tracking_pipeline(args):
                 team: [float(channel) for channel in color]
                 for team, color in lineup_colors.items()
             }
-            # Con spec de interfaz interesa arrancar sin referencias duras del config.
-            team_detector_conf["with_ref"] = False
 
         if getattr(args, "team_colors", None):
             base_colors = {
@@ -226,17 +240,18 @@ def run_tracking_pipeline(args):
                 team_name: [float(channel) for channel in color]
                 for team_name, color in override_colors.items()
             }
-            team_detector_conf["with_ref"] = True
 
         team_mode = getattr(args, "team_mode", None)
-        if team_mode is not None:
-            # TeamDetector "legacy": reference => with_ref=True ; auto-bootstrap => with_ref=False
-            team_detector_conf["with_ref"] = bool(team_mode == "reference")
 
         if getattr(args, "team_bootstrap_min_samples", None) is not None:
             team_detector_conf["min_samples"] = int(args.team_bootstrap_min_samples)
         if getattr(args, "team_bootstrap_min_cluster_samples", None) is not None:
             team_detector_conf["min_size_cluster"] = int(args.team_bootstrap_min_cluster_samples)
+
+        team_detector_conf = _normalize_team_detector_runtime_conf(
+            team_detector_conf,
+            team_mode=team_mode,
+        )
 
         logger.info(f"Model: {model_path}")
         logger.info(f"Video: {video_path}")

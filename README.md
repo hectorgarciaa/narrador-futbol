@@ -252,10 +252,12 @@ Este script verifica:
 Ahora el proyecto incluye una interfaz web ligera en `interfaz/` para:
 
 - introducir el nombre de cada equipo
-- indicar el color de camiseta que servirá para renombrar los clusters del bootstrap
+- indicar el color de camiseta que se usará como referencia de equipo durante el tracking
 - elegir la formación (`4-3-3`, `5-3-2`, `4-4-2`)
 - escribir el jugador asociado a cada slot táctico
+- elegir modo de comentarios `live` o `deferred` (por defecto `live`)
 - lanzar `scripts/track.py` automáticamente con un `lineup_spec.json`
+- arrancar automáticamente el servidor local de comentarios y precalentar un `intro` al abrir la interfaz
 
 Ejecución:
 
@@ -270,10 +272,11 @@ http://127.0.0.1:8767
 ```
 
 La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/lineup_spec.json` y llama a `scripts/track.py --lineup-spec ...`.
+También deja el manifiesto de comentarios en `output/interfaz/runs/<run_id>/commentaries/events_manifest.jsonl`; en `live` intenta reproducir el `intro` precalentado nada más guardar y, cuando el tracking termina, ensambla una pista diferida desde ese manifiesto para incrustarla en el MP4 final.
 
 Cuando el tracker estabiliza los slots:
 
-- el equipo se resuelve por color de cluster contra los colores introducidos por el usuario
+- el equipo se resuelve con los colores introducidos por el usuario, igual que en el tracking normal
 - la formación seleccionada sustituye el once esperado fijo de `config.yaml` para esa ejecución
 - si existe un slot único o ya desdoblado (`MC_IZQ`, `MC_DCHO`, `DC_IZQ`, `DC_DCHO`), se asigna también `player_name` al track y al resumen final
 
@@ -290,7 +293,15 @@ python -m football_ai.commentaries \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}'
 ```
 
-El modelo por defecto es `qwen3:1.7b` con temperatura `0.4`. El comentario se genera como una sola frase corta, debe incluir literalmente la accion del evento, en `gol` se exigen `team_name` y `opponent_team_name`, y el minuto solo se menciona en `gol`.
+El modelo por defecto es `qwen3:1.7b` con temperatura `0.4`. En general el comentario sale corto, debe incluir literalmente la accion del evento y el minuto solo se menciona en `gol`. Para `gol`, el prompt deja ahora mas libertad para una narracion mas larga y emocionante. Tambien existe una accion especial `intro` para abrir la retransmision sin jugador asociado.
+
+Ejemplo de apertura:
+
+```bash
+python -m football_ai.commentaries \
+  --event-json '{"action":"intro","event_time_s":0.0,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo"}' \
+  --text-only
+```
 
 Si quieres evaluar solo el LLM sin pasar por TTS:
 
