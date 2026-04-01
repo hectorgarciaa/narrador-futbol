@@ -684,6 +684,8 @@ tracking:
   reserve_penalty_spot_seed_players: true
   reserve_penalty_spot_seed_match_distance_m: 12.0
   special_seed_role_team_assignment_enabled: true
+  # La capa canónica preserva el mismo ID si ByteTrack mantiene el mismo
+  # raw_tracker_id y la continuidad geométrica básica sigue siendo válida.
   special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]

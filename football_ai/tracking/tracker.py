@@ -399,7 +399,7 @@ class Tracker(TrackerLogicMixin):
                         canonical_id = None
                     else:
                         resolved_class, resolved_reason = (
-                            self._resolve_candidate_class_for_detection_debug(
+                            self._resolve_raw_tracker_continuity_for_detection_debug(
                                 previous_state,
                                 class_name,
                                 detected_team,
@@ -415,9 +415,30 @@ class Tracker(TrackerLogicMixin):
                                 bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
                                     "reason_pre": str(resolved_reason or "canonical_gate_failed"),
                                 }
+                            canonical_id = None
                         else:
                             output_class_name = resolved_class
-                        canonical_id = None
+                            self._commit_assignment(
+                                canonical_to_raw_id,
+                                raw_to_canonical_id,
+                                raw_tracker_id,
+                                canonical_state,
+                                n_frame,
+                                used_canonical_ids_in_frame,
+                                tracks,
+                                accepted_raw_detection_indexes,
+                                collect_visual_debug,
+                                canonical_id,
+                                output_class_name,
+                                bbox,
+                                confidence,
+                                detected_team,
+                                field_position,
+                                metadata,
+                                raw_detection_idx=raw_detection_idx,
+                                detection_class_candidates=detection_class_candidates,
+                            )
+                            continue
 
             if class_name in {"player", "goalkeeper"}:
                 (

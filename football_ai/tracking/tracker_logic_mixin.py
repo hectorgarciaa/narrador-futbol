@@ -425,6 +425,7 @@ class TrackerLogicMixin:
         current_frame,
         class_name=None,
         new_field_position=None,
+        apply_statistical_gate=True,
     ):
         effective_class = class_name or previous_state.get("class_name")
         previous_bbox = previous_state.get("bbox")
@@ -495,7 +496,11 @@ class TrackerLogicMixin:
 
         # Gate estadístico por velocidad (distancia por frame):
         # bloquea saltos extremos respecto al histórico del propio track.
-        if self.motion_std_gate_enabled and not uses_field_position:
+        if (
+            apply_statistical_gate
+            and self.motion_std_gate_enabled
+            and not uses_field_position
+        ):
             limits_per_frame = []
 
             track_stats_count = int(previous_state.get("step_per_frame_count", 0))
@@ -535,6 +540,202 @@ class TrackerLogicMixin:
                 max_allowed_jump = min(max_allowed_jump, stats_jump_limit)
 
         return step_distance <= max_allowed_jump
+
+    def _resolve_raw_tracker_continuity_for_detection(
+        self,
+        candidate_state,
+        detection_class,
+        detection_team,
+        detection_bbox,
+        detection_field_position,
+        current_frame,
+        detection_class_candidates=None,
+        detection_shirt_color=None,
+    ):
+        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        if candidate_class is None:
+            return None
+        detection_class = self._select_detection_class_for_candidate(
+            candidate_state,
+            detection_class,
+            detection_class_candidates=detection_class_candidates,
+        )
+        if detection_class is None:
+            return None
+
+        if (
+            candidate_state.get("special_penalty_seed")
+            and candidate_class in {"player", "goalkeeper"}
+            and detection_class in {"player", "goalkeeper"}
+        ):
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
+                apply_statistical_gate=False,
+            ):
+                return None
+            return candidate_class
+
+        if (
+            candidate_state.get("reserved_seed")
+            and candidate_class == "player"
+            and detection_class in {"player", "goalkeeper"}
+        ):
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=detection_class,
+                new_field_position=detection_field_position,
+                apply_statistical_gate=False,
+            ):
+                return None
+            return detection_class
+
+        if self._is_compatible_class(candidate_class, detection_class):
+            if not self._is_team_compatible(
+                candidate_state.get("team"),
+                detection_team,
+                candidate_class,
+            ):
+                return None
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
+                apply_statistical_gate=False,
+            ):
+                return None
+
+            if candidate_class == "referee":
+                distance_sq = self._bbox_distance_sq(
+                    candidate_state.get("bbox"),
+                    detection_bbox,
+                    class_name=candidate_class,
+                    field_position_a=candidate_state.get("field_position"),
+                    field_position_b=detection_field_position,
+                )
+                if distance_sq is None:
+                    return None
+                if distance_sq > (self.referee_recovery_max_distance ** 2):
+                    return None
+            return candidate_class
+
+        if candidate_class == "referee" and detection_class == "player":
+            last_frame = int(candidate_state.get("last_frame", current_frame))
+            lost_frames = max(0, current_frame - last_frame)
+            if lost_frames > self.referee_recovery_max_lost_frames:
+                return None
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name=candidate_class,
+                new_field_position=detection_field_position,
+                apply_statistical_gate=False,
+            ):
+                return None
+            distance_sq = self._bbox_distance_sq(
+                candidate_state.get("bbox"),
+                detection_bbox,
+                class_name=candidate_class,
+                field_position_a=candidate_state.get("field_position"),
+                field_position_b=detection_field_position,
+            )
+            if distance_sq is None:
+                return None
+            if distance_sq > (self.referee_recovery_max_distance ** 2):
+                return None
+            return "referee"
+
+        if candidate_class == "player" and detection_class == "referee":
+            last_frame = int(candidate_state.get("last_frame", current_frame))
+            lost_frames = max(0, current_frame - last_frame)
+            if lost_frames > self.referee_recovery_max_lost_frames:
+                return None
+            if not self._is_motion_compatible(
+                candidate_state,
+                detection_bbox,
+                current_frame,
+                class_name="referee",
+                new_field_position=detection_field_position,
+                apply_statistical_gate=False,
+            ):
+                return None
+            distance_sq = self._bbox_distance_sq(
+                candidate_state.get("bbox"),
+                detection_bbox,
+                class_name="referee",
+                field_position_a=candidate_state.get("field_position"),
+                field_position_b=detection_field_position,
+            )
+            if distance_sq is None:
+                return None
+            if distance_sq > (self.referee_recovery_max_distance ** 2):
+                return None
+            return "referee"
+
+        return None
+
+    def _resolve_raw_tracker_continuity_for_detection_debug(
+        self,
+        candidate_state,
+        detection_class,
+        detection_team,
+        detection_bbox,
+        detection_field_position,
+        current_frame,
+        detection_class_candidates=None,
+        detection_shirt_color=None,
+    ):
+        resolved_class = self._resolve_raw_tracker_continuity_for_detection(
+            candidate_state,
+            detection_class,
+            detection_team,
+            detection_bbox,
+            detection_field_position,
+            current_frame,
+            detection_class_candidates=detection_class_candidates,
+            detection_shirt_color=detection_shirt_color,
+        )
+        if resolved_class is not None:
+            return resolved_class, None
+
+        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        if candidate_class is None:
+            return None, "candidate_class_missing"
+        detection_class = self._select_detection_class_for_candidate(
+            candidate_state,
+            detection_class,
+            detection_class_candidates=detection_class_candidates,
+        )
+        if detection_class is None:
+            return None, "detection_class_missing"
+        if not self._is_team_compatible(
+            candidate_state.get("team"),
+            detection_team,
+            candidate_class,
+        ):
+            return None, "team_incompatible"
+        if not self._is_motion_compatible(
+            candidate_state,
+            detection_bbox,
+            current_frame,
+            class_name=(
+                "referee"
+                if candidate_class == "player" and detection_class == "referee"
+                else candidate_class
+            ),
+            new_field_position=detection_field_position,
+            apply_statistical_gate=False,
+        ):
+            return None, "continuity_motion_incompatible"
+        return None, "continuity_gate_failed"
 
     def _bbox_distance_sq(
         self,
