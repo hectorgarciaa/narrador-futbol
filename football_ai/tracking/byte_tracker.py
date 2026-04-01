@@ -75,6 +75,9 @@ class ByteTrack:
         class_consensus_switch_margin: float = 2.0,
         shirt_color_distance_weight: float = 0.0,
         shirt_color_distance_gate: float = 45.0,
+        bbox_size_mismatch_penalty: float = 1000.0,
+        bbox_height_ratio_threshold: float = 0.20,
+        bbox_width_ratio_threshold: float = 0.30,
         team_vote_weight: float = 1.0,
         team_consensus_switch_margin: float = 2.0,
         new_track_active_overlap_iou: float = 0.0,
@@ -147,6 +150,9 @@ class ByteTrack:
         self.class_consensus_switch_margin = float(max(0.0, class_consensus_switch_margin))
         self.shirt_color_distance_weight = float(max(0.0, shirt_color_distance_weight))
         self.shirt_color_distance_gate = float(max(1.0, shirt_color_distance_gate))
+        self.bbox_size_mismatch_penalty = float(max(0.0, bbox_size_mismatch_penalty))
+        self.bbox_height_ratio_threshold = float(max(0.0, bbox_height_ratio_threshold))
+        self.bbox_width_ratio_threshold = float(max(0.0, bbox_width_ratio_threshold))
         self.team_vote_weight = float(max(0.0, team_vote_weight))
         self.team_consensus_switch_margin = float(max(0.0, team_consensus_switch_margin))
         self.new_track_active_overlap_iou = float(
@@ -390,6 +396,49 @@ class ByteTrack:
         color_distance = float(np.linalg.norm(track_color - det_color))
         normalized = min(color_distance / gate, 1.0)
         return self.shirt_color_distance_weight * normalized
+
+    @staticmethod
+    def _bbox_size_from_tlbr(tlbr) -> tuple[Optional[float], Optional[float]]:
+        if tlbr is None:
+            return None, None
+        tlbr = np.asarray(tlbr, dtype=np.float32).reshape(-1)
+        if tlbr.size < 4 or not np.all(np.isfinite(tlbr[:4])):
+            return None, None
+        x1, y1, x2, y2 = tlbr[:4]
+        width = float(x2 - x1)
+        height = float(y2 - y1)
+        if width <= 0.0 or height <= 0.0:
+            return None, None
+        return width, height
+
+    def _bbox_size_pair_penalty(self, track: STrack, det: STrack) -> float:
+        if self.bbox_size_mismatch_penalty <= 0.0:
+            return 0.0
+
+        track_width, track_height = self._bbox_size_from_tlbr(getattr(track, "tlbr", None))
+        det_width, det_height = self._bbox_size_from_tlbr(getattr(det, "tlbr", None))
+        if (
+            track_width is None
+            or track_height is None
+            or det_width is None
+            or det_height is None
+        ):
+            return 0.0
+
+        penalty = 0.0
+        if self.bbox_height_ratio_threshold > 0.0:
+            min_height = track_height * (1.0 - self.bbox_height_ratio_threshold)
+            max_height = track_height * (1.0 + self.bbox_height_ratio_threshold)
+            if det_height < min_height or det_height > max_height:
+                penalty += self.bbox_size_mismatch_penalty
+
+        if self.bbox_width_ratio_threshold > 0.0:
+            min_width = track_width * (1.0 - self.bbox_width_ratio_threshold)
+            max_width = track_width * (1.0 + self.bbox_width_ratio_threshold)
+            if det_width < min_width or det_width > max_width:
+                penalty += self.bbox_size_mismatch_penalty
+
+        return penalty
 
     def _update_track_class_consensus(self, track: STrack, det: STrack) -> None:
         votes = getattr(track, "class_votes", None)
@@ -735,6 +784,10 @@ class ByteTrack:
                         penalty = self._class_mismatch_pair_penalty(track_like, det_like)
                         if penalty > 0.0:
                             iou_costs[i_detection, i_track] += penalty
+                        iou_costs[i_detection, i_track] += self._bbox_size_pair_penalty(
+                            tracks[i_track],
+                            SimpleNamespace(tlbr=detection_bounding_boxes[i_detection]),
+                        )
             if field_positions is not None:
                 detection_field_positions = np.asarray(field_positions, dtype=np.float32)
                 for i_detection, det_class in enumerate(class_labels if class_labels is not None else []):
@@ -920,6 +973,7 @@ class ByteTrack:
                     if track.equipo != det.equipo:
                         dists[i, j] += self.team_mismatch_penalty
                 dists[i, j] += self._class_mismatch_pair_penalty(track, det)
+                dists[i, j] += self._bbox_size_pair_penalty(track, det)
 
         dists = self._apply_field_position_costs(dists, strack_pool, detections)
         dists = matching.fuse_score(dists, detections)
@@ -1007,6 +1061,7 @@ class ByteTrack:
         for i, track in enumerate(r_tracked_stracks):
             for j, det in enumerate(detections_second):
                 dists[i, j] += self._class_mismatch_pair_penalty(track, det)
+                dists[i, j] += self._bbox_size_pair_penalty(track, det)
         dists = self._apply_field_position_costs(
             dists,
             r_tracked_stracks,
@@ -1041,6 +1096,7 @@ class ByteTrack:
         for i, track in enumerate(unconfirmed):
             for j, det in enumerate(detections):
                 dists[i, j] += self._class_mismatch_pair_penalty(track, det)
+                dists[i, j] += self._bbox_size_pair_penalty(track, det)
 
         dists = self._apply_field_position_costs(dists, unconfirmed, detections)
         dists = matching.fuse_score(dists, detections)

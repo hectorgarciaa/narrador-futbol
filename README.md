@@ -678,6 +678,9 @@ tracking:
   use_bbox_center_for_matching: false
   bbox_center_distance_weight: 0.7
   bbox_center_distance_gate_px: 120.0
+  bbox_size_mismatch_penalty: 1000.0
+  bbox_height_ratio_threshold: 0.20
+  bbox_width_ratio_threshold: 0.30
   lost_time_penalty_weight: 0.12
   lost_time_penalty_max_frames: 10
   field_position_match_distance_gate_m: 1.5
@@ -758,6 +761,9 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `use_bbox_center_for_matching`
 - `bbox_center_distance_weight`
 - `bbox_center_distance_gate_px`
+- `bbox_size_mismatch_penalty`
+- `bbox_height_ratio_threshold`
+- `bbox_width_ratio_threshold`
 - `lost_time_penalty_weight`
 - `lost_time_penalty_max_frames`
 - `field_position_match_distance_gate_m`
