@@ -84,7 +84,7 @@ Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
    - Ambas etiquetas muestran `tr:<cls>`, `y:<cls>` y `td:<cls>` (track/YOLO/TeamDetector), además de una abreviatura compacta y la confianza.
    - En las detecciones que nunca llegaron a salir de ByteTrack, `tr:-` indica explícitamente que no hubo clase de track disponible.
    - Para las detecciones devueltas por ByteTrack pero descartadas en canónico, el panel incluye también `bt#<id>` (el `tracker_id` devuelto por ByteTrack).
-   - Si `visualization.discarded_panel_show_reasons=true`, el panel añade un código corto `discard_reason` en la etiqueta (útil para depurar gates/límites).
+   - Si `visualization.discarded_panel_show_reasons=true`, el panel añade una abreviatura compacta del `discard_reason` en la etiqueta (útil para depurar gates/límites sin desbordar el overlay). El JSON `*_debug_frames.json` sigue guardando el motivo completo.
    - Cuando `four_panel_enabled=true`, el pipeline guarda además un JSON `*_debug_frames.json` junto al `*_tracks.json` con estas listas y motivos, para análisis offline.
 4. `D) Tracking con continuidad`: overlay compacto con relleno de continuidad (usa la última posición conocida por ID cuando falta detección en el frame) y mantiene el resaltado de posesión.
    - Igual que el panel A, muestra `tr:<cls>`, `y:<cls>` y `td:<cls>` de cada track.

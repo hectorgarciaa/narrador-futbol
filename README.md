@@ -116,7 +116,7 @@ Incluye, por frame:
 - detecciones YOLO descartadas porque ByteTrack no las devolvió,
 - detecciones devueltas por ByteTrack pero descartadas en el mapeo a IDs canónicos (incluye `bt#<id>` y opcionalmente un `discard_reason`).
 
-En la salida 2x2, los paneles compacto/continuidad muestran además `tr:<cls>`, `y:<cls>` y `td:<cls>` para distinguir la clase actual del track, la clase YOLO y la clase relabelada por `TeamDetector`. El panel inferior izquierdo usa ese mismo trío de etiquetas en las detecciones descartadas junto a la confianza; cuando una detección no llegó a salir de ByteTrack, aparece como `tr:-`.
+En la salida 2x2, los paneles compacto/continuidad muestran además `tr:<cls>`, `y:<cls>` y `td:<cls>` para distinguir la clase actual del track, la clase YOLO y la clase relabelada por `TeamDetector`. El panel inferior izquierdo usa ese mismo trío de etiquetas en las detecciones descartadas junto a la confianza; cuando una detección no llegó a salir de ByteTrack, aparece como `tr:-`. Si activas `visualization.discarded_panel_show_reasons`, el vídeo muestra una versión compacta del `discard_reason` para que quepa en overlay, mientras que el JSON `*_debug_frames.json` conserva el motivo completo.
 
 Para un resumen offline rápido puedes usar:
 

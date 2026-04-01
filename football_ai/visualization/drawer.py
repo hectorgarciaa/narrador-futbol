@@ -177,6 +177,42 @@ class Drawer:
             label_parts.append("td:-")
         return " ".join(label_parts)
 
+    @staticmethod
+    def _short_discard_reason(reason):
+        token = str(reason or "").strip()
+        if not token:
+            return ""
+        short_map = {
+            "canonical_state_missing": "st_miss",
+            "canonical_id_used_in_frame": "id_used",
+            "canonical_class_unsupported": "cls_unsup",
+            "canonical_gate_failed": "gate_fail",
+            "raw_tracker_id_unmapped_or_rejected": "bt_unmap",
+            "canonical_class_limit_reached": "cls_full",
+            "canonical_no_free_id": "no_id",
+            "candidate_class_missing": "cand_cls",
+            "detection_class_missing": "det_cls",
+            "referee_class_incompatible": "ref_cls",
+            "team_incompatible": "team",
+            "referee_candidate_zone_unknown": "ref_z?",
+            "referee_detection_zone_unknown": "det_z?",
+            "referee_zone_incompatible": "ref_zone",
+            "referee_detection_outside_player_lane": "ref_lane",
+            "continuity_motion_incompatible": "mot",
+            "continuity_gate_failed": "cont_fail",
+            "motion_incompatible_special_seed": "seed_mot",
+            "motion_incompatible_reserved_seed": "resv_mot",
+            "motion_incompatible": "mot",
+            "class_incompatible": "cls",
+        }
+        compact_parts = []
+        for part in token.split("|"):
+            part = part.strip()
+            if not part:
+                continue
+            compact_parts.append(short_map.get(part, part[:10]))
+        return "|".join(compact_parts)
+
     def _detection_draw_color(self, class_name, data, fallback_color):
         if class_name in {"player", "goalkeeper"}:
             return self._team_fill_color(data.get("team"))
@@ -738,7 +774,9 @@ class Drawer:
                     reason = str(det.get("discard_reason") or "").strip()
                     if reason:
                         # Keep label compact to avoid unreadable overlays.
-                        label = f"{label} {reason[:28]}"
+                        compact_reason = self._short_discard_reason(reason)
+                        if compact_reason:
+                            label = f"{label} {compact_reason[:28]}"
                 cv2.rectangle(panel, (x1, y1), (x2, y2), color, 1)
                 cv2.putText(
                     panel,

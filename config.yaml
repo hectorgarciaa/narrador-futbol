@@ -301,9 +301,9 @@ visualization:
   # Tamaño de fuente para etiquetas
   font_scale: 0.5
   # Escala de fuente usada en etiquetas compactas del modo 2x2.
-  compact_font_scale: 0.65
+  compact_font_scale: 0.5
   # Radio de los círculos en el panel 2D del campo.
-  pitch_marker_radius: 12
+  pitch_marker_radius: 10
 
 # Configuración de fine-tuning (Pipeline secuencial)
 finetuning:
