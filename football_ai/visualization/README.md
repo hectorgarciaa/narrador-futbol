@@ -56,7 +56,7 @@ En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=Tru
    - Si hay información de equipo: el equipo asignado y las distancias a cada equipo dinámicamente (`"Real Madrid: [12.3, 45.6]"`)
    - Si el tracking viene de un `lineup_spec.json` y el slot ya se ha estabilizado: el `player_name` resuelto y su `lineup_slot`
    - Si hay `predicted_role_frame` o `predicted_role`: una línea adicional bajo el bbox con el rol
-   - Si existe `assignment_method`/`expected_role_slot`/`display_role_slot` por una asignación restringida (por ejemplo Hungarian con once esperado), prioriza mostrar el slot estable
+   - Si existe `segment_majority_expected_role_slot`, prioriza mostrar ese slot mayoritario del segmento; si no, cae a `segment_majority_role` y después a la asignación restringida del frame (`display_role_slot` / `expected_role_slot`)
    - Si hay `field_position_m` en `player`: otra línea bajo el bbox con `pos(m): x, y`
    - Si el track coincide con el jugador en posesión: dibuja un segundo recuadro amarillo alrededor del bbox
    - Además pinta un banner `POS: <equipo>` en el frame

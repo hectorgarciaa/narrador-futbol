@@ -124,6 +124,12 @@ class Drawer:
 
     @staticmethod
     def _extract_role_text(data):
+        segment_majority_expected_role_slot = data.get("segment_majority_expected_role_slot")
+        if segment_majority_expected_role_slot:
+            return _format_role_overlay_label(segment_majority_expected_role_slot)
+        segment_majority_role = data.get("segment_majority_role")
+        if segment_majority_role:
+            return _format_role_overlay_label(segment_majority_role)
         display_role_slot = data.get("display_role_slot")
         if display_role_slot:
             return _format_role_overlay_label(display_role_slot)
@@ -414,13 +420,23 @@ class Drawer:
         predicted_role_frame = data.get("predicted_role_frame")
         predicted_role = data.get("predicted_role")
         assignment_method = data.get("assignment_method")
+        segment_majority_expected_role_slot = data.get("segment_majority_expected_role_slot")
+        segment_majority_role = data.get("segment_majority_role")
         expected_role_slot = data.get("expected_role_slot")
         display_role_slot = data.get("display_role_slot")
         constrained_expected_role = (
             bool(assignment_method) or bool(expected_role_slot) or bool(display_role_slot)
         )
 
-        if constrained_expected_role and display_role_slot:
+        if segment_majority_expected_role_slot:
+            info_lines.append(
+                f"role: {_format_role_overlay_label(segment_majority_expected_role_slot)}"
+            )
+        elif segment_majority_role:
+            info_lines.append(
+                f"role: {_format_role_overlay_label(segment_majority_role)}"
+            )
+        elif constrained_expected_role and display_role_slot:
             info_lines.append(f"role: {_format_role_overlay_label(display_role_slot)}")
         elif constrained_expected_role and predicted_role:
             info_lines.append(f"role: {predicted_role}")

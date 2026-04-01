@@ -23,6 +23,8 @@ Este módulo define las formaciones soportadas por la interfaz (`4-3-3`, `5-3-2`
 
 Además, `LineupSlotMatcher` resuelve el nombre del jugador una vez que el track ya tiene un slot estable:
 
+- primero intenta `segment_majority_expected_role_slot`
+- luego `segment_majority_role`
 - primero intenta `display_role_slot`
 - luego `expected_role_slot`
 - y solo usa `predicted_role`/`predicted_role_frame` si ese slot es único en la formación
