@@ -204,6 +204,17 @@ class Tracker(TrackerLogicMixin):
         self.max_reassign_lost_frames_by_class = {}
         for class_name, class_limit in raw_max_reassign_lost_frames_by_class.items():
             self.max_reassign_lost_frames_by_class[str(class_name)] = class_limit
+        self.forced_absorption_enabled = bool(
+            tracker_conf.get("forced_absorption_enabled", True)
+        )
+        self.forced_absorption_player_min_lost_frames = max(
+            1,
+            int(tracker_conf.get("forced_absorption_player_min_lost_frames", 20)),
+        )
+        self.forced_absorption_player_min_consistent_frames = max(
+            1,
+            int(tracker_conf.get("forced_absorption_player_min_consistent_frames", 10)),
+        )
         self.visualization_debug_frames = []
         self.possession_config = PossessionConfig.from_mapping(
             tracker_conf.get("possession")
@@ -607,6 +618,7 @@ class Tracker(TrackerLogicMixin):
         raw_to_canonical_id,
         tracks,
         accepted_raw_detection_indexes,
+        forced_absorption_state,
     ):
         available_ids = [
             candidate_id
@@ -619,12 +631,70 @@ class Tracker(TrackerLogicMixin):
             canonical_state,
             n_frame,
         )
+        forced_absorption_assignments, active_forced_absorption_raw_ids = (
+            self._build_forced_absorption_assignments(
+                pending_detections,
+                canonical_state,
+                used_canonical_ids_in_frame,
+                n_frame,
+                forced_absorption_state,
+                excluded_pending_indexes=set(pending_assignments.keys()),
+                excluded_canonical_ids={
+                    canonical_id
+                    for canonical_id, _output_class_name in pending_assignments.values()
+                },
+            )
+        )
 
         for pending_idx, pending in enumerate(pending_detections):
             assignment = pending_assignments.get(pending_idx)
             if assignment is not None:
                 canonical_id, output_class_name = assignment
             else:
+                forced_assignment = forced_absorption_assignments.get(pending_idx)
+                if forced_assignment is not None:
+                    canonical_id, output_class_name, forced_absorption_info = (
+                        forced_assignment
+                    )
+                    self._commit_assignment(
+                        canonical_to_raw_id,
+                        raw_to_canonical_id,
+                        pending["raw_tracker_id"],
+                        canonical_state,
+                        n_frame,
+                        used_canonical_ids_in_frame,
+                        tracks,
+                        accepted_raw_detection_indexes,
+                        collect_visual_debug,
+                        canonical_id,
+                        output_class_name,
+                        pending["bbox"],
+                        pending["confidence"],
+                        pending["detected_team"],
+                        pending["field_position"],
+                        pending["metadata"],
+                        raw_detection_idx=pending.get("raw_detection_idx"),
+                        detection_class_candidates=pending.get(
+                            "detection_class_candidates"
+                        ),
+                        forced_absorption_info=forced_absorption_info,
+                    )
+                    forced_absorption_state.pop(
+                        int(pending["raw_tracker_id"]),
+                        None,
+                    )
+                    active_forced_absorption_raw_ids.discard(
+                        int(pending["raw_tracker_id"])
+                    )
+                    if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                        try:
+                            bytetrack_discard_reason_by_raw_idx.pop(
+                                int(pending["raw_detection_idx"]),
+                                None,
+                            )
+                        except (TypeError, ValueError):
+                            pass
+                    continue
                 output_class_name = pending["preferred_class_name"]
                 class_limit = self.max_tracks_per_class.get(output_class_name)
                 if class_limit is not None:
@@ -675,6 +745,7 @@ class Tracker(TrackerLogicMixin):
                 raw_detection_idx=pending.get("raw_detection_idx"),
                 detection_class_candidates=pending.get("detection_class_candidates"),
             )
+            forced_absorption_state.pop(int(pending["raw_tracker_id"]), None)
             if collect_visual_debug and pending.get("raw_detection_idx") is not None:
                 # Mark as accepted if it came from YOLO index.
                 try:
@@ -684,6 +755,10 @@ class Tracker(TrackerLogicMixin):
                     )
                 except (TypeError, ValueError):
                     pass
+        self._finalize_forced_absorption_state(
+            forced_absorption_state,
+            active_forced_absorption_raw_ids,
+        )
 
     def _update_referee_absorption_context(self, sorted_tracked_detections):
         player_x_positions = []
@@ -939,6 +1014,7 @@ class Tracker(TrackerLogicMixin):
         raw_to_canonical_id = {}
         canonical_to_raw_id = {}
         canonical_state = {}
+        forced_absorption_state = {}
         self._initialize_reserved_penalty_spot_players(canonical_state)
         
         ball_state = None
@@ -1054,6 +1130,7 @@ class Tracker(TrackerLogicMixin):
                 raw_to_canonical_id,
                 tracks,
                 accepted_raw_detection_indexes,
+                forced_absorption_state,
             )
             frame_phase_rows.append(("Resolver pendientes y asignar IDs canónicos", elapsed_ms))
 
@@ -1234,6 +1311,7 @@ class Tracker(TrackerLogicMixin):
         metadata,
         raw_detection_idx=None,
         detection_class_candidates=None,
+        forced_absorption_info=None,
     ):
         previous_owner_raw_id = canonical_to_raw_id.get(canonical_id)
         previous_canonical_id = raw_to_canonical_id.get(raw_tracker_id)
@@ -1373,6 +1451,39 @@ class Tracker(TrackerLogicMixin):
             ),
             "reserved_seed": False,
             "special_penalty_seed": special_penalty_seed,
+            "forced_absorption": bool(forced_absorption_info),
+            "forced_absorption_raw_tracker_streak_frames": (
+                int(forced_absorption_info["raw_tracker_streak_frames"])
+                if forced_absorption_info is not None
+                else None
+            ),
+            "forced_absorption_canonical_lost_frames": (
+                int(forced_absorption_info["canonical_lost_frames"])
+                if forced_absorption_info is not None
+                else None
+            ),
+            "forced_absorption_source_raw_tracker_id": (
+                int(forced_absorption_info["raw_tracker_id"])
+                if forced_absorption_info is not None
+                else None
+            ),
+            "forced_absorption_mode": (
+                str(forced_absorption_info.get("mode"))
+                if forced_absorption_info is not None
+                else None
+            ),
+            "forced_absorption_reference_frame": (
+                int(forced_absorption_info["reference_frame"])
+                if forced_absorption_info is not None
+                and forced_absorption_info.get("reference_frame") is not None
+                else None
+            ),
+            "forced_absorption_distance_sq": (
+                float(forced_absorption_info["distance_sq"])
+                if forced_absorption_info is not None
+                and forced_absorption_info.get("distance_sq") is not None
+                else None
+            ),
         }
 
         if collect_visual_debug and raw_detection_idx is not None:

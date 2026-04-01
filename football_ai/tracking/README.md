@@ -59,6 +59,7 @@ Por cada frame del vídeo:
    - La reabsorción de árbitros usa una lógica específica por zona de campo: `sideline_top`, `sideline_bottom` y `central`, calculadas desde `field_position_m`. Si un árbitro reaparece en la misma zona, reabsorbe ese ID reservado aunque haya habido un pequeño gap temporal.
    - En la capa canónica, un ID `referee` solo acepta detecciones de entrada cuya clase resuelta siga siendo `referee`; ya no puede reabsorber detecciones `player`.
    - El árbitro central solo puede reabsorber detecciones cuya `x` en campo caiga entre la segunda `x` más a la izquierda y la segunda más a la derecha de los `player/goalkeeper` visibles en ese frame; así se evita absorber tracks pegados a las porterías.
+   - Además existe una **absorción forzada conservadora** solo para `player`: si un canónico de jugador lleva perdido al menos `tracking.forced_absorption_player_min_lost_frames` frames y ByteTrack mantiene durante `tracking.forced_absorption_player_min_consistent_frames` frames seguidos un `raw_tracker_id` huérfano con la misma clase `player` y el mismo equipo, la capa canónica puede reusar ese ID perdido aunque el gate geométrico normal no lo aceptase. Esta vía no aplica gate de posición como veto. Cuando hay varios canónicos perdidos y/o varios huérfanos compatibles del mismo equipo, construye todas las parejas posibles y resuelve un matching greedy por menor distancia usando, para cada canónico, la muestra del huérfano más cercana en tiempo al frame en que se perdió ese canónico.
 8. **Selección robusta del balón**: las candidatas de balón, tanto las devueltas por ByteTrack como las detecciones YOLO crudas, pasan por un gate específico de continuidad. A diferencia de `player/goalkeeper`, aquí no se aplica además el gate genérico de reasignación: se usa solo la lógica propia del balón para no perder cobertura. Se valida que el balón:
    - no salte a una posición incompatible con su trayectoria reciente;
    - no cambie de tamaño de forma abrupta entre frames;
@@ -92,6 +93,13 @@ Cada `frame_N_dict` es `{track_id: datos_objeto}` donde `track_id` es un entero 
     "distances":   {"Equipo A": float, "Equipo B": float} | None,
     "shirt_color": [L, A, B] | None,   # color en espacio LAB
     "bbox_size":   float,              # área del bounding box en píxeles²
+    "forced_absorption": bool,         # true si el ID entró por reabsorción forzada sin gate de posición
+    "forced_absorption_raw_tracker_streak_frames": int | None,
+    "forced_absorption_canonical_lost_frames": int | None,
+    "forced_absorption_source_raw_tracker_id": int | None,
+    "forced_absorption_mode": str | None,
+    "forced_absorption_reference_frame": int | None,
+    "forced_absorption_distance_sq": float | None,
     "is_possession_player": bool,      # true en el jugador/portero poseedor del frame
     "ball_owning_team_id": str | None, # equipo con posesión en ese frame
     "ball_owning_player_id": int | None, # id canónico del jugador poseedor
@@ -240,6 +248,9 @@ Parámetros en `config.yaml`:
 - `role_stabilization_min_observations` (mínimo de observaciones antes de permitir congelado; si coincide con la ventana, la congelación ocurre al agotar esa ventana, por defecto `600`)
 - `role_stabilization_vote_ratio` (porcentaje mínimo de dominio de una clase para congelar el role antes de agotar la ventana)
 - `reassign_motion_growth_cap_frames` (tope de frames perdidos que se usan para extrapolar el salto permitido solo en clases sin homografía)
+- `forced_absorption_enabled` (activa la reabsorción forzada conservadora para `player`)
+- `forced_absorption_player_min_lost_frames` (frames mínimos perdidos del canónico `player` antes de ceder el ID; por defecto `20`)
+- `forced_absorption_player_min_consistent_frames` (frames consecutivos mínimos del `raw_tracker_id` huérfano con misma clase/equipo; por defecto `10`)
 - `output/tracker/<video>_role_artifacts/<video>_frame_role_predictions.csv` (predicción cruda frame a frame antes del congelado estable)
 - `output/tracker/<video>_role_artifacts/<video>_player_role_summary.csv` (resumen estable por track al terminar el vídeo)
 - `output/tracker/<video>_role_artifacts/<video>_greedy_role_diagnostics.csv` (traza paso a paso de las métricas usadas por el greedy al congelar slots estables)

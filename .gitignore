@@ -67,3 +67,5 @@ Thumbs.db
 football_ai.egg-info/
 
 .env
+
+repo/

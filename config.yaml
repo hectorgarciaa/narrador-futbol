@@ -224,6 +224,9 @@ tracking:
   require_field_position_for_reassign: true  # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles. Si falta field_position, la reasignación se rechaza.
   max_reassign_lost_frames: null  # Tope opcional de frames perdidos para reasignar un ID. null/0/desactivado => un track puede reaparecer tras muchos frames.
   max_reassign_lost_frames_by_class: {}  # Sin corte por clase (legacy). Evita capar reenganches tardíos.
+  forced_absorption_enabled: true  # Habilita una reabsorción forzada conservadora para huérfanos largos de ByteTrack.
+  forced_absorption_player_min_lost_frames: 20  # X: frames mínimos que debe llevar perdido un canónico `player` para poder ceder su ID.
+  forced_absorption_player_min_consistent_frames: 10  # Y: frames consecutivos mínimos que debe durar un raw track huérfano, con misma clase y equipo.
   profile_phases: false  # Si true, imprime tiempos por fase en cada frame (profiling)
   reserve_penalty_spot_seed_players: true  # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos de penalti.
   reserve_penalty_spot_seed_match_distance_m: 12.0  # Distancia máxima en metros desde el punto de penalti para absorber una detección real sobre cada track semilla reservado.    
