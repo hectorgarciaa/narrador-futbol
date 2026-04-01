@@ -136,12 +136,46 @@ class Drawer:
         return None
 
     def _resolve_debug_detection_class_name(self, det):
-        for key in ("class_name", "class_tracker", "class_yolo", "class"):
+        for key in ("class_name", "class_tracker", "class_relabel", "class_team_detector", "class_yolo", "class"):
             value = det.get(key)
             normalized = self._normalize_track_class_name(value)
             if normalized:
                 return normalized
         return ""
+
+    def _resolve_detection_source_classes(self, data):
+        class_tracker = self._normalize_track_class_name(
+            data.get("class_tracker")
+            or data.get("class_name")
+        )
+        class_yolo = self._normalize_track_class_name(
+            data.get("class_yolo")
+        )
+        class_team_detector = self._normalize_track_class_name(
+            data.get("class_relabel")
+            or data.get("class_team_detector")
+            or data.get("class")
+        )
+        return class_tracker, class_yolo, class_team_detector
+
+    def _format_detection_source_label(self, data):
+        class_tracker, class_yolo, class_team_detector = self._resolve_detection_source_classes(data)
+        label_parts = []
+        tracker_token = (
+            self._short_debug_class_label(class_tracker)
+            if class_tracker
+            else "-"
+        )
+        label_parts.append(f"tr:{tracker_token}")
+        if class_yolo:
+            label_parts.append(f"y:{self._short_debug_class_label(class_yolo)}")
+        else:
+            label_parts.append("y:-")
+        if class_team_detector:
+            label_parts.append(f"td:{self._short_debug_class_label(class_team_detector)}")
+        else:
+            label_parts.append("td:-")
+        return " ".join(label_parts)
 
     def _detection_draw_color(self, class_name, data, fallback_color):
         if class_name in {"player", "goalkeeper"}:
@@ -237,6 +271,9 @@ class Drawer:
                     cv2.LINE_AA,
                 )
             info_lines = []
+            source_label = self._format_detection_source_label(data)
+            if source_label:
+                info_lines.append(source_label)
             role_text = self._extract_role_text(data)
             if role_text:
                 info_lines.append(role_text)
@@ -690,7 +727,10 @@ class Drawer:
                 class_name = self._resolve_debug_detection_class_name(det)
                 cls = self._short_debug_class_label(class_name)
                 conf = float(det.get("confidence", 0.0))
-                label = f"{cls} {conf:.2f}".strip()
+                source_label = self._format_detection_source_label(det)
+                label_parts = [part for part in (source_label, cls) if part]
+                label = " ".join(label_parts).strip()
+                label = f"{label} {conf:.2f}".strip()
                 bt_id = det.get("bytetrack_id")
                 if bt_id is not None and bt_id != -1:
                     label = f"{label} bt#{bt_id}"

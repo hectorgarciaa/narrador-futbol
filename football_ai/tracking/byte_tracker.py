@@ -77,6 +77,7 @@ class ByteTrack:
         shirt_color_distance_gate: float = 45.0,
         team_vote_weight: float = 1.0,
         team_consensus_switch_margin: float = 2.0,
+        new_track_active_overlap_iou: float = 0.0,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
@@ -146,6 +147,9 @@ class ByteTrack:
         self.shirt_color_distance_gate = float(max(1.0, shirt_color_distance_gate))
         self.team_vote_weight = float(max(0.0, team_vote_weight))
         self.team_consensus_switch_margin = float(max(0.0, team_consensus_switch_margin))
+        self.new_track_active_overlap_iou = float(
+            min(1.0, max(0.0, new_track_active_overlap_iou))
+        )
         self.assigned_track_ids_by_class = {
             class_name: set() for class_name in self.max_tracks_per_class
         }
@@ -215,14 +219,16 @@ class ByteTrack:
         active_tracked_pool: list[STrack],
         reference_unconfirmed_pool: Optional[list[STrack]] = None,
     ) -> list[int]:
-        # Rule 1: if candidate overlaps any active tracked object even minimally, reject.
+        # Rule 1: if candidate overlaps an already-active track above the configured
+        # threshold, reject it.
         min_overlap_iou = 1e-6
+        active_overlap_iou = max(min_overlap_iou, float(self.new_track_active_overlap_iou))
         valid_indices = []
         for idx in candidate_indices:
             candidate_box = self._track_tlbr(detections[idx])
             overlaps_active = False
             for active_track in active_tracked_pool:
-                if self._tlbr_iou(candidate_box, self._track_tlbr(active_track)) > min_overlap_iou:
+                if self._tlbr_iou(candidate_box, self._track_tlbr(active_track)) > active_overlap_iou:
                     overlaps_active = True
                     break
             if not overlaps_active:
@@ -336,9 +342,9 @@ class ByteTrack:
         aliases = {
             "player": "player",
             "players": "player",
-            "goalkeeper": "goalkeeper",
-            "gk": "goalkeeper",
-            "keeper": "goalkeeper",
+            "goalkeeper": "player",
+            "gk": "player",
+            "keeper": "player",
             "referee": "referee",
             "ref": "referee",
             "refs": "referee",

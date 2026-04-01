@@ -132,6 +132,24 @@ class Tracker(TrackerLogicMixin):
         self.reserve_penalty_spot_seed_match_distance_m = tracker_conf["reserve_penalty_spot_seed_match_distance_m"]
         self.referee_recovery_max_lost_frames = tracker_conf["referee_recovery_max_lost_frames"]
         self.referee_recovery_max_distance = tracker_conf["referee_recovery_max_distance"]
+        configured_referee_ids = tracker_conf.get("referee_canonical_ids", [23, 24, 25])
+        self.referee_canonical_ids = tuple(
+            sorted(
+                {
+                    int(canonical_id)
+                    for canonical_id in configured_referee_ids
+                    if self._normalize_optional_positive_int(canonical_id) is not None
+                }
+            )
+        )
+        if not self.referee_canonical_ids:
+            self.referee_canonical_ids = (23, 24, 25)
+        self.referee_sideline_band_distance_m = float(
+            tracker_conf.get("referee_sideline_band_distance_m", 3.0)
+        )
+        self.referee_field_width_m = float(
+            projector_conf.get("constructor", {}).get("field_width_m", 68.0)
+        )
         self.use_shirt_color_for_reassign = bool(
             tracker_conf.get("use_shirt_color_for_reassign", False)
         )
@@ -188,6 +206,7 @@ class Tracker(TrackerLogicMixin):
             tracker_conf.get("possession")
         )
         self.possession_estimator = TeamPossessionEstimator(self.possession_config)
+        self._current_referee_central_x_bounds = None
 
     @staticmethod
     def _normalize_track_identifier(track_id):
@@ -259,6 +278,7 @@ class Tracker(TrackerLogicMixin):
         self,
         detections,
         detections_sv,
+        raw_detections,
         detection_class_labels,
         show_kmeans,
         field_positions,
@@ -289,6 +309,21 @@ class Tracker(TrackerLogicMixin):
             ],
             dtype=object,
         )
+        if raw_detections:
+            for raw_idx, raw_detection in enumerate(raw_detections):
+                class_yolo_value = (
+                    str(yolo_class_labels[raw_idx])
+                    if raw_idx < len(yolo_class_labels)
+                    else raw_detection.get("class_yolo")
+                )
+                class_relabel_value = (
+                    str(class_labels[raw_idx])
+                    if raw_idx < len(class_labels)
+                    else None
+                )
+                raw_detection["class_yolo"] = class_yolo_value
+                raw_detection["class_relabel"] = class_relabel_value
+                raw_detection["class_team_detector"] = class_relabel_value
         subphase_rows.append(("Construir arrays de labels", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
@@ -381,12 +416,14 @@ class Tracker(TrackerLogicMixin):
                     if collect_visual_debug and raw_detection_idx is not None:
                         bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
                             "reason_pre": "canonical_state_missing",
+                            "class_tracker": output_class_name,
                         }
                     canonical_id = None
                 elif canonical_id in used_canonical_ids_in_frame:
                     if collect_visual_debug and raw_detection_idx is not None:
                         bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
                             "reason_pre": "canonical_id_used_in_frame",
+                            "class_tracker": output_class_name,
                         }
                     canonical_id = None
                 else:
@@ -395,6 +432,7 @@ class Tracker(TrackerLogicMixin):
                         if collect_visual_debug and raw_detection_idx is not None:
                             bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
                                 "reason_pre": "canonical_class_unsupported",
+                                "class_tracker": output_class_name,
                             }
                         canonical_id = None
                     else:
@@ -414,6 +452,7 @@ class Tracker(TrackerLogicMixin):
                             if collect_visual_debug and raw_detection_idx is not None:
                                 bytetrack_discard_reason_by_raw_idx[int(raw_detection_idx)] = {
                                     "reason_pre": str(resolved_reason or "canonical_gate_failed"),
+                                    "class_tracker": output_class_name,
                                 }
                             canonical_id = None
                         else:
@@ -510,6 +549,7 @@ class Tracker(TrackerLogicMixin):
                         {},
                     )
                     entry.setdefault("reason_pre", "raw_tracker_id_unmapped_or_rejected")
+                    entry.setdefault("class_tracker", output_class_name)
                 pending_detections.append(
                     {
                         "raw_tracker_id": raw_tracker_id,
@@ -593,7 +633,10 @@ class Tracker(TrackerLogicMixin):
                             )
                             entry["reason_post"] = "canonical_class_limit_reached"
                         continue
-                next_free_id = self._next_free_canonical_id(canonical_state)
+                next_free_id = self._next_free_canonical_id(
+                    canonical_state,
+                    class_name=output_class_name,
+                )
                 if next_free_id is None:
                     if collect_visual_debug and pending.get("raw_detection_idx") is not None:
                         entry = bytetrack_discard_reason_by_raw_idx.setdefault(
@@ -633,6 +676,33 @@ class Tracker(TrackerLogicMixin):
                     )
                 except (TypeError, ValueError):
                     pass
+
+    def _update_referee_absorption_context(self, sorted_tracked_detections):
+        player_x_positions = []
+        for object_detected in sorted_tracked_detections or []:
+            try:
+                _, _, _, _, _, metadata = object_detected
+            except (TypeError, ValueError):
+                continue
+            class_name, _ = self._primary_class_from_metadata(metadata)
+            if class_name not in {"player", "goalkeeper"}:
+                continue
+            field_position = self._field_position_to_tuple(
+                metadata.get("field_position") if isinstance(metadata, dict) else None
+            )
+            if field_position is None:
+                continue
+            player_x_positions.append(float(field_position[0]))
+
+        if len(player_x_positions) < 4:
+            self._current_referee_central_x_bounds = None
+            return
+
+        player_x_positions.sort()
+        self._current_referee_central_x_bounds = (
+            player_x_positions[1],
+            player_x_positions[-2],
+        )
 
     @staticmethod
     def _phase_emit_reserved_seed_tracks(
@@ -765,6 +835,7 @@ class Tracker(TrackerLogicMixin):
                 payload = dict(det)
                 payload["bytetrack_id"] = bytetrack_id_by_raw_idx.get(raw_idx)
                 reason_info = bytetrack_discard_reason_by_raw_idx.get(raw_idx, {})
+                payload["class_tracker"] = reason_info.get("class_tracker")
                 reason_pre = reason_info.get("reason_pre")
                 reason_post = reason_info.get("reason_post")
                 if reason_pre and reason_post:
@@ -898,6 +969,7 @@ class Tracker(TrackerLogicMixin):
                 self._phase_assign_team_and_enrich_metadata,
                 detections,
                 detections_sv,
+                raw_detections,
                 detection_class_labels,
                 show_kmeans,
                 field_positions,
@@ -933,6 +1005,7 @@ class Tracker(TrackerLogicMixin):
             frame_phase_rows.append(("Inicializar contenedores de frame", elapsed_ms))
 
             sorted_tracked_detections = self._sort_tracked_detections(tracks_detection)
+            self._update_referee_absorption_context(sorted_tracked_detections)
 
             bytetrack_raw_detection_indexes, bytetrack_id_by_raw_idx = self._collect_bytetrack_detection_info(sorted_tracked_detections, collect_visual_debug)
 
@@ -1238,6 +1311,14 @@ class Tracker(TrackerLogicMixin):
             self._field_position_to_tuple(field_position)
             or previous_state.get("field_position")
         )
+        referee_role_zone = previous_state.get("referee_role_zone")
+        if output_class_name == "referee":
+            referee_role_zone = (
+                self._referee_zone_from_field_position(resolved_field_position)
+                or referee_role_zone
+            )
+        else:
+            referee_role_zone = None
         canonical_state[canonical_id] = {
             "bbox": bbox,
             "class_name": output_class_name,
@@ -1253,6 +1334,7 @@ class Tracker(TrackerLogicMixin):
             "reserved_seed": False,
             "special_penalty_seed": special_penalty_seed,
             "class_candidates": list(detection_class_candidates or []),
+            "referee_role_zone": referee_role_zone,
         }
         used_canonical_ids_in_frame.add(canonical_id)
 

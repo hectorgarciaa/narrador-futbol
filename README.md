@@ -114,7 +114,7 @@ Incluye, por frame:
 - detecciones YOLO descartadas porque ByteTrack no las devolvió,
 - detecciones devueltas por ByteTrack pero descartadas en el mapeo a IDs canónicos (incluye `bt#<id>` y opcionalmente un `discard_reason`).
 
-En el panel inferior izquierdo de la salida 2x2, ambas categorías de descartes muestran también una abreviatura de clase (`p`, `gk`, `r`) junto a la confianza para facilitar el análisis visual frame a frame.
+En la salida 2x2, los paneles compacto/continuidad muestran además `tr:<cls>`, `y:<cls>` y `td:<cls>` para distinguir la clase actual del track, la clase YOLO y la clase relabelada por `TeamDetector`. El panel inferior izquierdo usa ese mismo trío de etiquetas en las detecciones descartadas junto a la confianza; cuando una detección no llegó a salir de ByteTrack, aparece como `tr:-`.
 
 Para un resumen offline rápido puedes usar:
 
@@ -658,6 +658,7 @@ tracking:
   projector:
     constructor:
       pnl_refine: false
+  new_track_active_overlap_iou: 0.25  # IoU máxima para permitir nacer un track nuevo encima de uno activo
   track_thresh: 0.15          # Confianza mínima para activar un track
   track_buffer: 90            # Frames que sobrevive un track sin ser visto
   match_thresh: 0.945         # IoU mínimo para asociar detección a track
@@ -700,6 +701,10 @@ tracking:
   motion_std_factor: 4.0
   motion_std_min_samples: 5
   motion_std_floor: 0.5
+  referee_canonical_ids: [23, 24, 25]
+  referee_sideline_band_distance_m: 3.0
+  # El árbitro central solo puede reabsorber dentro del carril definido por la
+  # segunda x más a la izquierda y la segunda más a la derecha de los jugadores visibles.
   ball:
     expected_position_gate_px: 90.0
     expected_position_gate_growth_per_frame: 35.0

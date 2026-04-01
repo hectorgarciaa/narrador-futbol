@@ -12,9 +12,9 @@ class TrackerLogicMixin:
         aliases = {
             "player": "player",
             "players": "player",
-            "goalkeeper": "goalkeeper",
-            "gk": "goalkeeper",
-            "keeper": "goalkeeper",
+            "goalkeeper": "player",
+            "gk": "player",
+            "keeper": "player",
             "referee": "referee",
             "ref": "referee",
             "refs": "referee",
@@ -179,8 +179,137 @@ class TrackerLogicMixin:
             return class_limit
         return self.max_reassign_lost_frames
 
-    def _next_free_canonical_id(self, canonical_state):
-        for canonical_id in range(1, self.max_total_tracks + 1):
+    def _field_width_m(self):
+        geometry = getattr(getattr(self, "field_projector", None), "geometry", None)
+        if geometry is not None:
+            raw_width = getattr(geometry, "field_width_m", None)
+            if raw_width is not None:
+                try:
+                    width_m = float(raw_width)
+                except (TypeError, ValueError):
+                    width_m = None
+                if width_m is not None and np.isfinite(width_m) and width_m > 0.0:
+                    return width_m
+        raw_width = getattr(self, "referee_field_width_m", None)
+        if raw_width is not None:
+            try:
+                width_m = float(raw_width)
+            except (TypeError, ValueError):
+                width_m = None
+            if width_m is not None and np.isfinite(width_m) and width_m > 0.0:
+                return width_m
+        return 68.0
+
+    def _referee_state_zone(self, state):
+        if not isinstance(state, dict):
+            return None
+        stored_zone = str(state.get("referee_role_zone") or "").strip().lower()
+        if stored_zone in {"sideline_top", "sideline_bottom", "central"}:
+            return stored_zone
+        return self._referee_zone_from_field_position(state.get("field_position"))
+
+    def _referee_zone_from_field_position(self, field_position):
+        field_position = self._field_position_to_tuple(field_position)
+        if field_position is None:
+            return None
+        _, y_coord = field_position
+        band_distance = max(0.0, float(self.referee_sideline_band_distance_m))
+        field_width = self._field_width_m()
+        top_distance = abs(float(y_coord))
+        bottom_distance = abs(field_width - float(y_coord))
+        if top_distance <= band_distance and top_distance <= bottom_distance:
+            return "sideline_top"
+        if bottom_distance <= band_distance:
+            return "sideline_bottom"
+        return "central"
+
+    def _is_field_position_within_central_referee_x_bounds(self, field_position):
+        field_position = self._field_position_to_tuple(field_position)
+        if field_position is None:
+            return False
+        current_bounds = getattr(self, "_current_referee_central_x_bounds", None)
+        if not isinstance(current_bounds, tuple) or len(current_bounds) != 2:
+            return True
+        min_x_bound, max_x_bound = current_bounds
+        if min_x_bound is None or max_x_bound is None:
+            return True
+        x_coord = float(field_position[0])
+        return float(min_x_bound) <= x_coord <= float(max_x_bound)
+
+    def _resolve_referee_candidate_class_for_detection(
+        self,
+        candidate_state,
+        detection_class,
+        detection_team,
+        detection_field_position,
+    ):
+        if detection_class not in {"referee", "player"}:
+            return None
+        if not self._is_team_compatible(
+            candidate_state.get("team"),
+            detection_team,
+            "referee",
+        ):
+            return None
+        candidate_zone = self._referee_state_zone(candidate_state)
+        detection_zone = self._referee_zone_from_field_position(detection_field_position)
+        if candidate_zone is None or detection_zone is None:
+            return None
+        if candidate_zone != detection_zone:
+            return None
+        if (
+            candidate_zone == "central"
+            and not self._is_field_position_within_central_referee_x_bounds(
+                detection_field_position
+            )
+        ):
+            return None
+        return "referee"
+
+    def _resolve_referee_candidate_class_for_detection_debug(
+        self,
+        candidate_state,
+        detection_class,
+        detection_team,
+        detection_field_position,
+    ):
+        if detection_class not in {"referee", "player"}:
+            return None, "referee_class_incompatible"
+        if not self._is_team_compatible(
+            candidate_state.get("team"),
+            detection_team,
+            "referee",
+        ):
+            return None, "team_incompatible"
+        candidate_zone = self._referee_state_zone(candidate_state)
+        if candidate_zone is None:
+            return None, "referee_candidate_zone_unknown"
+        detection_zone = self._referee_zone_from_field_position(detection_field_position)
+        if detection_zone is None:
+            return None, "referee_detection_zone_unknown"
+        if candidate_zone != detection_zone:
+            return None, "referee_zone_incompatible"
+        if (
+            candidate_zone == "central"
+            and not self._is_field_position_within_central_referee_x_bounds(
+                detection_field_position
+            )
+        ):
+            return None, "referee_detection_outside_player_lane"
+        return "referee", None
+
+    def _next_free_canonical_id(self, canonical_state, class_name=None):
+        reserved_referee_ids = set(getattr(self, "referee_canonical_ids", ()))
+        normalized_class_name = self._normalize_class_label(class_name)
+        if normalized_class_name == "referee":
+            candidate_range = [canonical_id for canonical_id in self.referee_canonical_ids]
+        else:
+            candidate_range = [
+                canonical_id
+                for canonical_id in range(1, self.max_total_tracks + 1)
+                if canonical_id not in reserved_referee_ids
+            ]
+        for canonical_id in candidate_range:
             if canonical_id not in canonical_state:
                 return canonical_id
         return None
@@ -595,6 +724,14 @@ class TrackerLogicMixin:
                 return None
             return detection_class
 
+        if candidate_class == "referee":
+            return self._resolve_referee_candidate_class_for_detection(
+                candidate_state,
+                detection_class,
+                detection_team,
+                detection_field_position,
+            )
+
         if self._is_compatible_class(candidate_class, detection_class):
             if not self._is_team_compatible(
                 candidate_state.get("team"),
@@ -612,73 +749,7 @@ class TrackerLogicMixin:
             ):
                 return None
 
-            if candidate_class == "referee":
-                distance_sq = self._bbox_distance_sq(
-                    candidate_state.get("bbox"),
-                    detection_bbox,
-                    class_name=candidate_class,
-                    field_position_a=candidate_state.get("field_position"),
-                    field_position_b=detection_field_position,
-                )
-                if distance_sq is None:
-                    return None
-                if distance_sq > (self.referee_recovery_max_distance ** 2):
-                    return None
             return candidate_class
-
-        if candidate_class == "referee" and detection_class == "player":
-            last_frame = int(candidate_state.get("last_frame", current_frame))
-            lost_frames = max(0, current_frame - last_frame)
-            if lost_frames > self.referee_recovery_max_lost_frames:
-                return None
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=candidate_class,
-                new_field_position=detection_field_position,
-                apply_statistical_gate=False,
-            ):
-                return None
-            distance_sq = self._bbox_distance_sq(
-                candidate_state.get("bbox"),
-                detection_bbox,
-                class_name=candidate_class,
-                field_position_a=candidate_state.get("field_position"),
-                field_position_b=detection_field_position,
-            )
-            if distance_sq is None:
-                return None
-            if distance_sq > (self.referee_recovery_max_distance ** 2):
-                return None
-            return "referee"
-
-        if candidate_class == "player" and detection_class == "referee":
-            last_frame = int(candidate_state.get("last_frame", current_frame))
-            lost_frames = max(0, current_frame - last_frame)
-            if lost_frames > self.referee_recovery_max_lost_frames:
-                return None
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name="referee",
-                new_field_position=detection_field_position,
-                apply_statistical_gate=False,
-            ):
-                return None
-            distance_sq = self._bbox_distance_sq(
-                candidate_state.get("bbox"),
-                detection_bbox,
-                class_name="referee",
-                field_position_a=candidate_state.get("field_position"),
-                field_position_b=detection_field_position,
-            )
-            if distance_sq is None:
-                return None
-            if distance_sq > (self.referee_recovery_max_distance ** 2):
-                return None
-            return "referee"
 
         return None
 
@@ -716,6 +787,13 @@ class TrackerLogicMixin:
         )
         if detection_class is None:
             return None, "detection_class_missing"
+        if candidate_class == "referee":
+            return self._resolve_referee_candidate_class_for_detection_debug(
+                candidate_state,
+                detection_class,
+                detection_team,
+                detection_field_position,
+            )
         if not self._is_team_compatible(
             candidate_state.get("team"),
             detection_team,
@@ -1158,6 +1236,14 @@ class TrackerLogicMixin:
                 return None
             return detection_class
 
+        if candidate_class == "referee":
+            return self._resolve_referee_candidate_class_for_detection(
+                candidate_state,
+                detection_class,
+                detection_team,
+                detection_field_position,
+            )
+
         if self._is_compatible_class(candidate_class, detection_class):
             if not self._is_team_compatible(
                 candidate_state.get("team"),
@@ -1173,76 +1259,7 @@ class TrackerLogicMixin:
                 new_field_position=detection_field_position,
             ):
                 return None
-
-            # En árbitros, exigimos también cercanía espacial absoluta para evitar swaps lejanos.
-            if candidate_class == "referee":
-                distance_sq = self._bbox_distance_sq(
-                    candidate_state.get("bbox"),
-                    detection_bbox,
-                    class_name=candidate_class,
-                    field_position_a=candidate_state.get("field_position"),
-                    field_position_b=detection_field_position,
-                )
-                if distance_sq is None:
-                    return None
-                if distance_sq > (self.referee_recovery_max_distance ** 2):
-                    return None
             return candidate_class
-
-        # Recuperación controlada de árbitro cuando entra como player por error.
-        if candidate_class == "referee" and detection_class == "player":
-            last_frame = int(candidate_state.get("last_frame", current_frame))
-            lost_frames = max(0, current_frame - last_frame)
-            if lost_frames > self.referee_recovery_max_lost_frames:
-                return None
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=candidate_class,
-                new_field_position=detection_field_position,
-            ):
-                return None
-            distance_sq = self._bbox_distance_sq(
-                candidate_state.get("bbox"),
-                detection_bbox,
-                class_name=candidate_class,
-                field_position_a=candidate_state.get("field_position"),
-                field_position_b=detection_field_position,
-            )
-            if distance_sq is None:
-                return None
-            if distance_sq > (self.referee_recovery_max_distance ** 2):
-                return None
-            return "referee"
-
-        # Corrección simétrica: si un árbitro arrancó mal como player, permitir
-        # migrar su ID canónico a referee cuando la evidencia espacial es fuerte.
-        if candidate_class == "player" and detection_class == "referee":
-            last_frame = int(candidate_state.get("last_frame", current_frame))
-            lost_frames = max(0, current_frame - last_frame)
-            if lost_frames > self.referee_recovery_max_lost_frames:
-                return None
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name="referee",
-                new_field_position=detection_field_position,
-            ):
-                return None
-            distance_sq = self._bbox_distance_sq(
-                candidate_state.get("bbox"),
-                detection_bbox,
-                class_name="referee",
-                field_position_a=candidate_state.get("field_position"),
-                field_position_b=detection_field_position,
-            )
-            if distance_sq is None:
-                return None
-            if distance_sq > (self.referee_recovery_max_distance ** 2):
-                return None
-            return "referee"
 
         return None
 
@@ -1306,6 +1323,14 @@ class TrackerLogicMixin:
                 return None, "motion_incompatible_reserved_seed"
             return detection_class, None
 
+        if candidate_class == "referee":
+            return self._resolve_referee_candidate_class_for_detection_debug(
+                candidate_state,
+                detection_class,
+                detection_team,
+                detection_field_position,
+            )
+
         if self._is_compatible_class(candidate_class, detection_class):
             if not self._is_team_compatible(
                 candidate_state.get("team"),
@@ -1322,71 +1347,7 @@ class TrackerLogicMixin:
             ):
                 return None, "motion_incompatible"
 
-            if candidate_class == "referee":
-                distance_sq = self._bbox_distance_sq(
-                    candidate_state.get("bbox"),
-                    detection_bbox,
-                    class_name=candidate_class,
-                    field_position_a=candidate_state.get("field_position"),
-                    field_position_b=detection_field_position,
-                )
-                if distance_sq is None:
-                    return None, "referee_distance_unknown"
-                if distance_sq > (self.referee_recovery_max_distance ** 2):
-                    return None, "referee_distance_too_large"
             return candidate_class, None
-
-        if candidate_class == "referee" and detection_class == "player":
-            last_frame = int(candidate_state.get("last_frame", current_frame))
-            lost_frames = max(0, current_frame - last_frame)
-            if lost_frames > self.referee_recovery_max_lost_frames:
-                return None, "referee_recovery_too_late"
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=candidate_class,
-                new_field_position=detection_field_position,
-            ):
-                return None, "referee_recovery_motion_incompatible"
-            distance_sq = self._bbox_distance_sq(
-                candidate_state.get("bbox"),
-                detection_bbox,
-                class_name=candidate_class,
-                field_position_a=candidate_state.get("field_position"),
-                field_position_b=detection_field_position,
-            )
-            if distance_sq is None:
-                return None, "referee_recovery_distance_unknown"
-            if distance_sq > (self.referee_recovery_max_distance ** 2):
-                return None, "referee_recovery_distance_too_large"
-            return "referee", None
-
-        if candidate_class == "player" and detection_class == "referee":
-            last_frame = int(candidate_state.get("last_frame", current_frame))
-            lost_frames = max(0, current_frame - last_frame)
-            if lost_frames > self.referee_recovery_max_lost_frames:
-                return None, "referee_migration_too_late"
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name="referee",
-                new_field_position=detection_field_position,
-            ):
-                return None, "referee_migration_motion_incompatible"
-            distance_sq = self._bbox_distance_sq(
-                candidate_state.get("bbox"),
-                detection_bbox,
-                class_name="referee",
-                field_position_a=candidate_state.get("field_position"),
-                field_position_b=detection_field_position,
-            )
-            if distance_sq is None:
-                return None, "referee_migration_distance_unknown"
-            if distance_sq > (self.referee_recovery_max_distance ** 2):
-                return None, "referee_migration_distance_too_large"
-            return "referee", None
 
         return None, "class_incompatible"
 

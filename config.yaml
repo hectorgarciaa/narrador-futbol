@@ -118,11 +118,12 @@ tracking:
       device: null
 
   bytetracker:
-    track_activation_threshold: 0.15
+    track_activation_threshold: 0.05
     lost_track_buffer: 90
     minimum_matching_threshold: 0.945
     frame_rate: 25
     minimum_consecutive_frames: 5
+    new_track_active_overlap_iou: 0.25
     team_mismatch_penalty: 1000.0
     second_match_threshold: 0.9
     unconfirmed_match_threshold: 0.8
@@ -205,6 +206,8 @@ tracking:
   motion_std_floor: 0.5  # Límite mínimo del gate estadístico
   referee_recovery_max_lost_frames: 3  # Máximo número de frames perdidos para intentar una recuperación específica de árbitros
   referee_recovery_max_distance: 45.0  # Distancia máxima en metros para
+  referee_canonical_ids: [23, 24, 25]
+  referee_sideline_band_distance_m: 3.0
   use_shirt_color_for_reassign: false  # Sin efecto en canonización (gate LAB desactivado)
   shirt_color_reassign_distance_gate: 45.0  # Distancia LAB máxima base entre color previo y actual para aceptar continuidad
   shirt_color_reassign_distance_growth_per_frame: 1.5  # Apertura del gate de color por frame perdido
