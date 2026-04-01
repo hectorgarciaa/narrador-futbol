@@ -5,7 +5,7 @@ Lógica de posiciones/roles online usada por `scripts/track.py`.
 import math
 import re
 import shutil
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 import matplotlib
@@ -34,6 +34,14 @@ DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = (
 DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH = (
     "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
 )
+DEFAULT_ROLE_CONTEXT_INTERPOLATION_MAX_GAP_FRAMES = 15
+DEFAULT_ROLE_RECENT_POSITION_WINDOW = 10
+DEFAULT_ROLE_RECENT_ROLE_WINDOW = 20
+DEFAULT_ROLE_SWAP_MIN_RECENT_SAMPLES = 8
+DEFAULT_ROLE_SWAP_POSITION_JUMP_M = 14.0
+DEFAULT_ROLE_SWAP_POSITION_JUMP_RELINKED_M = 8.0
+DEFAULT_ROLE_SWAP_ROLE_CHANGE_MIN_RATIO = 0.60
+DEFAULT_ROLE_SWAP_ROLE_CHANGE_MIN_CONFIDENCE = 0.35
 DEFAULT_EXPECTED_ROLES_BY_TEAM = {
     "Real Madrid": [
         "POR",
@@ -196,6 +204,61 @@ def _format_role_overlay_label(value):
     if token in {"MC_IZQ", "MC_DCHO", "DC_IZQ", "DC_DCHO"}:
         return token
     return str(value)
+
+
+def _role_swap_family_token(value):
+    token = _normalize_role_token(value)
+    if token in {"MC_IZQ", "MC_DCHO"}:
+        return "MC"
+    if token in {"DC_IZQ", "DC_DCHO"}:
+        return "DC"
+    if token.startswith("DFC_"):
+        return "DFC"
+    return token
+
+
+def _majority_from_values(values):
+    normalized = [_normalize_role_token(value) for value in values if str(value).strip()]
+    if not normalized:
+        return None, 0.0, 0
+    counts = Counter(normalized)
+    best_label, best_count = max(
+        counts.items(),
+        key=lambda item: (int(item[1]), str(item[0])),
+    )
+    ratio = float(best_count) / float(len(normalized))
+    return str(best_label), float(ratio), int(best_count)
+
+
+def _median_position_m(positions):
+    valid = []
+    for position in positions:
+        if position is None:
+            continue
+        try:
+            x_pos, y_pos = position
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(x_pos) or not np.isfinite(y_pos):
+            continue
+        valid.append((float(x_pos), float(y_pos)))
+    if not valid:
+        return None
+    coords = np.asarray(valid, dtype=np.float32)
+    return float(np.median(coords[:, 0])), float(np.median(coords[:, 1]))
+
+
+def _position_distance_m(position_a, position_b):
+    if position_a is None or position_b is None:
+        return None
+    try:
+        ax, ay = position_a
+        bx, by = position_b
+    except (TypeError, ValueError):
+        return None
+    if not all(np.isfinite(value) for value in (ax, ay, bx, by)):
+        return None
+    return float(math.hypot(float(ax) - float(bx), float(ay) - float(by)))
 
 
 def _ordered_roles_from_exports(frame_df, player_df):
@@ -1648,8 +1711,69 @@ class OnlineSpecialSeedRoleAssigner:
             if isinstance(lineup_matcher, LineupSlotMatcher)
             else None
         )
+        self.role_context_interpolation_max_gap_frames = max(
+            0,
+            int(
+                tracking_cfg.get(
+                    "role_context_interpolation_max_gap_frames",
+                    DEFAULT_ROLE_CONTEXT_INTERPOLATION_MAX_GAP_FRAMES,
+                )
+            ),
+        )
+        self.role_recent_position_window = max(
+            3,
+            int(
+                tracking_cfg.get(
+                    "role_recent_position_window",
+                    DEFAULT_ROLE_RECENT_POSITION_WINDOW,
+                )
+            ),
+        )
+        self.role_recent_role_window = max(
+            3,
+            int(
+                tracking_cfg.get(
+                    "role_recent_role_window",
+                    DEFAULT_ROLE_RECENT_ROLE_WINDOW,
+                )
+            ),
+        )
+        self.role_swap_min_recent_samples = max(
+            2,
+            int(
+                tracking_cfg.get(
+                    "role_swap_min_recent_samples",
+                    DEFAULT_ROLE_SWAP_MIN_RECENT_SAMPLES,
+                )
+            ),
+        )
+        self.role_swap_position_jump_m = float(
+            tracking_cfg.get(
+                "role_swap_position_jump_m",
+                DEFAULT_ROLE_SWAP_POSITION_JUMP_M,
+            )
+        )
+        self.role_swap_position_jump_relinked_m = float(
+            tracking_cfg.get(
+                "role_swap_position_jump_relinked_m",
+                DEFAULT_ROLE_SWAP_POSITION_JUMP_RELINKED_M,
+            )
+        )
+        self.role_swap_role_change_min_ratio = float(
+            tracking_cfg.get(
+                "role_swap_role_change_min_ratio",
+                DEFAULT_ROLE_SWAP_ROLE_CHANGE_MIN_RATIO,
+            )
+        )
+        self.role_swap_role_change_min_confidence = float(
+            tracking_cfg.get(
+                "role_swap_role_change_min_confidence",
+                DEFAULT_ROLE_SWAP_ROLE_CHANGE_MIN_CONFIDENCE,
+            )
+        )
         self.last_team_by_special_id = {}
         self.prev_positions = {}
+        self.identity_state_by_track_id = {}
         self.role_state_by_track_id = {}
         self.role_stabilization_snapshot_done = False
         self.raw_frame_prediction_rows = []
@@ -1663,6 +1787,7 @@ class OnlineSpecialSeedRoleAssigner:
             "special_seed_carry_frames": 0,
             "special_seed_unassigned_frames": 0,
             "stable_role_tracks_frozen": 0,
+            "identity_segment_resets": 0,
             "special_ids": [int(track_id) for track_id in self.special_ids],
         }
         self.role_session = None
@@ -1717,6 +1842,262 @@ class OnlineSpecialSeedRoleAssigner:
             )
             self.enabled = False
 
+    def _build_empty_segment_state(self, track_id, segment_id, frame_id):
+        return {
+            "track_id": int(track_id),
+            "segment_id": int(segment_id),
+            "start_frame": int(frame_id),
+            "end_frame": None,
+            "observations": 0,
+            "role_counts": {},
+            "confidence_sums": {},
+            "prob_sums": {},
+            "slot_counts": {},
+            "slot_confidence_sums": {},
+            "team_id": None,
+            "frozen_role": None,
+            "frozen_confidence": None,
+            "frozen_at_frame": None,
+            "expected_role_slot": None,
+            "display_role_slot": None,
+            "assignment_method": None,
+            "lineup_slot": None,
+            "player_name": None,
+            "x_sum": 0.0,
+            "y_sum": 0.0,
+            "dist_left_sum": 0.0,
+            "dist_right_sum": 0.0,
+            "lateral_observations": 0,
+            "position_history_m": [],
+            "role_history": [],
+            "expected_slot_history": [],
+            "recent_position_window_m": deque(maxlen=int(self.role_recent_position_window)),
+            "recent_role_window": deque(maxlen=int(self.role_recent_role_window)),
+            "recent_expected_slot_window": deque(maxlen=int(self.role_recent_role_window)),
+            "majority_role": None,
+            "recent_majority_role": None,
+            "majority_expected_role_slot": None,
+            "segment_reset_reason": None,
+            "segment_reset_position_jump_m": None,
+            "segment_reset_recent_role": None,
+            "last_assignment_mode": None,
+            "last_source_raw_tracker_id": None,
+        }
+
+    def _ensure_identity_state(self, track_id, frame_id):
+        track_key = int(track_id)
+        identity_state = self.identity_state_by_track_id.get(track_key)
+        if isinstance(identity_state, dict):
+            active_segment_id = int(identity_state.get("active_segment_id", 1))
+            active_state = identity_state.get("segments", {}).get(active_segment_id)
+            if isinstance(active_state, dict):
+                self.role_state_by_track_id[track_key] = active_state
+                return identity_state, active_state
+
+        initial_state = self._build_empty_segment_state(
+            track_id=track_key,
+            segment_id=1,
+            frame_id=frame_id,
+        )
+        identity_state = {
+            "active_segment_id": 1,
+            "segments": {1: initial_state},
+            "reset_events": [],
+        }
+        self.identity_state_by_track_id[track_key] = identity_state
+        self.role_state_by_track_id[track_key] = initial_state
+        return identity_state, initial_state
+
+    def _start_new_segment(
+        self,
+        track_id,
+        frame_id,
+        *,
+        team_id=None,
+        reset_info=None,
+    ):
+        identity_state, previous_state = self._ensure_identity_state(track_id, frame_id)
+        previous_state["end_frame"] = int(max(previous_state.get("start_frame", frame_id), frame_id - 1))
+
+        new_segment_id = int(identity_state.get("active_segment_id", 1)) + 1
+        new_state = self._build_empty_segment_state(
+            track_id=int(track_id),
+            segment_id=new_segment_id,
+            frame_id=frame_id,
+        )
+        if team_id is not None:
+            new_state["team_id"] = str(team_id)
+        if isinstance(reset_info, dict):
+            new_state["segment_reset_reason"] = reset_info.get("reason")
+            new_state["segment_reset_position_jump_m"] = reset_info.get("position_jump_m")
+            new_state["segment_reset_recent_role"] = reset_info.get("recent_majority_role")
+            identity_state.setdefault("reset_events", []).append(
+                {
+                    "segment_id": int(new_segment_id),
+                    "frame_id": int(frame_id),
+                    **reset_info,
+                }
+            )
+        identity_state["active_segment_id"] = int(new_segment_id)
+        identity_state.setdefault("segments", {})[int(new_segment_id)] = new_state
+        self.role_state_by_track_id[int(track_id)] = new_state
+        self.stats["identity_segment_resets"] += 1
+        return new_state
+
+    @staticmethod
+    def _row_unconstrained_role_payload(row):
+        if hasattr(row, "predicted_role_unconstrained") and pd.notna(
+            row.predicted_role_unconstrained
+        ):
+            return (
+                str(row.predicted_role_unconstrained),
+                float(
+                    getattr(
+                        row,
+                        "predicted_role_confidence_unconstrained",
+                        row.predicted_role_frame_confidence,
+                    )
+                ),
+            )
+        if hasattr(row, "predicted_role") and pd.notna(row.predicted_role):
+            return (
+                str(row.predicted_role),
+                float(
+                    getattr(
+                        row,
+                        "predicted_role_confidence",
+                        row.predicted_role_frame_confidence,
+                    )
+                ),
+            )
+        return str(row.predicted_role_frame), float(row.predicted_role_frame_confidence)
+
+    @staticmethod
+    def _row_expected_slot_payload(row):
+        if hasattr(row, "expected_role_slot") and pd.notna(row.expected_role_slot):
+            return str(row.expected_role_slot)
+        if hasattr(row, "predicted_role") and pd.notna(row.predicted_role):
+            return str(row.predicted_role)
+        if hasattr(row, "predicted_role_frame") and pd.notna(row.predicted_role_frame):
+            return str(row.predicted_role_frame)
+        return None
+
+    @staticmethod
+    def _row_field_position_payload(row):
+        x_m = pd.to_numeric(getattr(row, "x_m", np.nan), errors="coerce")
+        y_m = pd.to_numeric(getattr(row, "y_m", np.nan), errors="coerce")
+        if pd.isna(x_m) or pd.isna(y_m):
+            return None
+        return float(x_m), float(y_m)
+
+    def _update_segment_majorities(self, state):
+        if not isinstance(state, dict):
+            return
+        state["majority_role"] = self._select_stable_role(
+            state.get("role_counts", {}),
+            state.get("confidence_sums", {}),
+        )
+        recent_majority_role, _, _ = _majority_from_values(
+            state.get("recent_role_window", ())
+        )
+        state["recent_majority_role"] = recent_majority_role
+        slot_counts = state.get("slot_counts", {})
+        slot_confidence_sums = state.get("slot_confidence_sums", {})
+        state["majority_expected_role_slot"] = self._select_stable_role(
+            slot_counts,
+            slot_confidence_sums,
+        )
+
+    def _should_rotate_segment(self, state, row, track_data):
+        if not isinstance(state, dict):
+            return False, None
+        if int(state.get("observations", 0)) < int(self.role_swap_min_recent_samples):
+            return False, None
+
+        current_position = self._row_field_position_payload(row)
+        if current_position is None:
+            return False, None
+        recent_positions = list(state.get("recent_position_window_m", ()))
+        if len(recent_positions) < int(self.role_swap_min_recent_samples):
+            return False, None
+
+        current_role, current_confidence = self._row_unconstrained_role_payload(row)
+        recent_majority_role, recent_majority_ratio, _ = _majority_from_values(
+            state.get("recent_role_window", ())
+        )
+        role_change = False
+        if recent_majority_role is not None:
+            role_change = (
+                _role_swap_family_token(current_role)
+                != _role_swap_family_token(recent_majority_role)
+                and float(recent_majority_ratio)
+                >= float(self.role_swap_role_change_min_ratio)
+                and float(current_confidence)
+                >= float(self.role_swap_role_change_min_confidence)
+            )
+
+        median_position = _median_position_m(recent_positions)
+        jump_recent = _position_distance_m(current_position, median_position)
+        jump_last = _position_distance_m(current_position, recent_positions[-1])
+        structural_signal = bool(track_data.get("canonical_relinked"))
+        assignment_mode = str(track_data.get("canonical_assignment_mode") or "").strip()
+        if assignment_mode in {
+            "forced_absorption",
+            "canonical_relinked_to_new_raw_tracker",
+            "raw_tracker_reassigned_to_other_canonical",
+        }:
+            structural_signal = True
+        jump_threshold = (
+            float(self.role_swap_position_jump_relinked_m)
+            if structural_signal
+            else float(self.role_swap_position_jump_m)
+        )
+        effective_jump = max(
+            float(jump_recent or 0.0),
+            float(jump_last or 0.0),
+        )
+        if effective_jump < jump_threshold:
+            return False, None
+        if not role_change and not structural_signal:
+            return False, None
+
+        return True, {
+            "reason": (
+                "role_jump_plus_position_jump"
+                if role_change
+                else "canonical_relinked_plus_position_jump"
+            ),
+            "position_jump_m": float(effective_jump),
+            "recent_majority_role": recent_majority_role,
+            "current_role": current_role,
+            "recent_majority_ratio": float(recent_majority_ratio),
+            "canonical_assignment_mode": assignment_mode or None,
+            "canonical_relinked": bool(structural_signal),
+        }
+
+    def _apply_segment_metadata_to_track(self, track_data, state, *, reset_info=None):
+        if not isinstance(track_data, dict) or not isinstance(state, dict):
+            return
+        self._update_segment_majorities(state)
+        track_data["identity_segment_id"] = int(state.get("segment_id", 1))
+        track_data["identity_segment_start_frame"] = int(state.get("start_frame", 0))
+        track_data["identity_segment_observations"] = int(state.get("observations", 0))
+        track_data["role_stabilization_observations"] = int(state.get("observations", 0))
+        track_data["segment_majority_role"] = state.get("majority_role")
+        track_data["segment_recent_majority_role"] = state.get("recent_majority_role")
+        track_data["segment_majority_expected_role_slot"] = state.get(
+            "majority_expected_role_slot"
+        )
+        track_data["identity_reset"] = bool(reset_info)
+        track_data["identity_reset_reason"] = (
+            None if reset_info is None else str(reset_info.get("reason"))
+        )
+        track_data["identity_reset_position_jump_m"] = (
+            None
+            if reset_info is None or reset_info.get("position_jump_m") is None
+            else float(reset_info.get("position_jump_m"))
+        )
+
     @staticmethod
     def _empty_observations_df():
         return pd.DataFrame(
@@ -1736,6 +2117,8 @@ class OnlineSpecialSeedRoleAssigner:
                 "role_label",
                 "vx",
                 "vy",
+                "is_interpolated",
+                "role_inference_target",
             ]
         )
 
@@ -1752,6 +2135,7 @@ class OnlineSpecialSeedRoleAssigner:
         )
         rows = []
         frame_key_positions = {}
+        visible_keys = set()
         for class_name in ("player", "goalkeeper"):
             class_frames = tracks.get(class_name, [])
             if frame_id >= len(class_frames):
@@ -1807,13 +2191,77 @@ class OnlineSpecialSeedRoleAssigner:
                         "role_label": pd.NA,
                         "vx": vx,
                         "vy": vy,
+                        "is_interpolated": 0,
+                        "role_inference_target": 1,
                     }
                 )
+                visible_keys.add(key)
                 frame_key_positions[key] = {
                     "x": x,
                     "y": y,
+                    "x_m": float(x_m),
+                    "y_m": float(y_m),
                     "frame_id": int(frame_id),
+                    "class_name": str(class_name),
+                    "team_id": team_id_str,
+                    "confidence_tracking": float(track_data.get("confidence", np.nan)),
                 }
+
+        interpolation_gap = int(self.role_context_interpolation_max_gap_frames)
+        if interpolation_gap > 0:
+            for key, previous in previous_positions.items():
+                if key in visible_keys:
+                    continue
+                if not isinstance(previous, dict):
+                    continue
+                team_id_str, player_id = key
+                is_special_id = int(player_id) in self.special_ids
+                if is_special_id and not include_special_ids:
+                    continue
+                previous_frame = int(previous.get("frame_id", -10_000))
+                if int(frame_id) <= previous_frame:
+                    continue
+                if (int(frame_id) - previous_frame) > interpolation_gap:
+                    continue
+                x = pd.to_numeric(previous.get("x", np.nan), errors="coerce")
+                y = pd.to_numeric(previous.get("y", np.nan), errors="coerce")
+                x_m = pd.to_numeric(previous.get("x_m", np.nan), errors="coerce")
+                y_m = pd.to_numeric(previous.get("y_m", np.nan), errors="coerce")
+                if any(pd.isna(value) for value in (x, y, x_m, y_m)):
+                    continue
+                rows.append(
+                    {
+                        "match_id": self.video_path.stem.replace(" ", "_"),
+                        "frame_id": int(frame_id),
+                        "team_id": str(team_id_str),
+                        "player_id": int(player_id),
+                        "class_name": str(previous.get("class_name", "player")),
+                        "x_m": float(x_m),
+                        "y_m": float(y_m),
+                        "x": float(x),
+                        "y": float(y),
+                        "visible": 0,
+                        "confidence_tracking": float(
+                            pd.to_numeric(
+                                previous.get("confidence_tracking", np.nan),
+                                errors="coerce",
+                            )
+                        )
+                        if not pd.isna(
+                            pd.to_numeric(
+                                previous.get("confidence_tracking", np.nan),
+                                errors="coerce",
+                            )
+                        )
+                        else float("nan"),
+                        "bbox": None,
+                        "role_label": pd.NA,
+                        "vx": 0.0,
+                        "vy": 0.0,
+                        "is_interpolated": 1,
+                        "role_inference_target": 0,
+                    }
+                )
 
         if not rows:
             return self._empty_observations_df(), frame_key_positions
@@ -1944,13 +2392,22 @@ class OnlineSpecialSeedRoleAssigner:
                         player_id = int(track_id_raw)
                     except (TypeError, ValueError):
                         player_id = str(track_id_raw)
-                    key = (str(class_name), str(track_data.get("team")), str(player_id))
+                    segment_id = track_data.get("identity_segment_id")
+                    key = (
+                        str(class_name),
+                        str(track_data.get("team")),
+                        str(player_id),
+                        None if segment_id is None else int(segment_id),
+                    )
                     row = rows_by_key.setdefault(
                         key,
                         {
                             "class_name": str(class_name),
                             "team_id": None if track_data.get("team") is None else str(track_data.get("team")),
                             "player_id": player_id,
+                            "identity_segment_id": (
+                                None if segment_id is None else int(segment_id)
+                            ),
                             "frames_seen": 0,
                             "first_frame_id": int(frame_id),
                             "last_frame_id": int(frame_id),
@@ -1976,13 +2433,26 @@ class OnlineSpecialSeedRoleAssigner:
                         "role_stabilized",
                         "role_stabilized_at_frame",
                         "role_stabilization_observations",
+                        "identity_segment_id",
+                        "identity_segment_start_frame",
+                        "identity_segment_observations",
+                        "segment_majority_role",
+                        "segment_recent_majority_role",
+                        "segment_majority_expected_role_slot",
+                        "identity_reset",
+                        "identity_reset_reason",
+                        "identity_reset_position_jump_m",
                     ):
                         if col in track_data and track_data.get(col) is not None:
                             row[col] = track_data.get(col)
         if not rows_by_key:
             return pd.DataFrame()
         player_df = pd.DataFrame(rows_by_key.values())
-        sort_cols = [col for col in ("team_id", "player_id") if col in player_df.columns]
+        sort_cols = [
+            col
+            for col in ("team_id", "player_id", "identity_segment_id")
+            if col in player_df.columns
+        ]
         if sort_cols:
             player_df = player_df.sort_values(sort_cols).reset_index(drop=True)
         return player_df
@@ -2865,64 +3335,42 @@ class OnlineSpecialSeedRoleAssigner:
         self._resolve_duplicate_lateral_slots()
         return handled_team_ids
 
-    def _update_role_state(self, tracks, frame_id, player_id, row):
+    def _update_role_state(self, tracks, frame_id, player_id, row, track_data):
         track_key = int(player_id)
-        if hasattr(row, "predicted_role_unconstrained") and pd.notna(
-            row.predicted_role_unconstrained
-        ):
-            label = str(row.predicted_role_unconstrained)
-            confidence = float(
-                getattr(
-                    row,
-                    "predicted_role_confidence_unconstrained",
-                    row.predicted_role_frame_confidence,
-                )
+        label, confidence = self._row_unconstrained_role_payload(row)
+        expected_slot = self._row_expected_slot_payload(row)
+        team_id = str(getattr(row, "team_id", track_data.get("team")))
+        identity_state, state = self._ensure_identity_state(track_key, frame_id)
+        should_rotate, reset_info = self._should_rotate_segment(state, row, track_data)
+        if should_rotate:
+            state = self._start_new_segment(
+                track_id=track_key,
+                frame_id=frame_id,
+                team_id=team_id,
+                reset_info=reset_info,
             )
-        elif hasattr(row, "predicted_role") and pd.notna(row.predicted_role):
-            label = str(row.predicted_role)
-            confidence = float(
-                getattr(
-                    row,
-                    "predicted_role_confidence",
-                    row.predicted_role_frame_confidence,
-                )
-            )
-        else:
-            label = str(row.predicted_role_frame)
-            confidence = float(row.predicted_role_frame_confidence)
-        state = self.role_state_by_track_id.setdefault(
-            track_key,
-            {
-                "observations": 0,
-                "role_counts": {},
-                "confidence_sums": {},
-                "prob_sums": {},
-                "team_id": None,
-                "frozen_role": None,
-                "frozen_confidence": None,
-                "frozen_at_frame": None,
-                "expected_role_slot": None,
-                "display_role_slot": None,
-                "assignment_method": None,
-                "lineup_slot": None,
-                "player_name": None,
-                "x_sum": 0.0,
-                "y_sum": 0.0,
-                "dist_left_sum": 0.0,
-                "dist_right_sum": 0.0,
-                "lateral_observations": 0,
-            },
-        )
-
-        if state["frozen_role"] is not None:
-            return state
+            identity_state = self.identity_state_by_track_id.get(track_key, identity_state)
 
         state["observations"] += 1
-        state["team_id"] = str(getattr(row, "team_id", state.get("team_id")))
+        state["team_id"] = str(team_id)
+        state["end_frame"] = int(frame_id)
         state["role_counts"][label] = int(state["role_counts"].get(label, 0)) + 1
         state["confidence_sums"][label] = float(
             state["confidence_sums"].get(label, 0.0)
         ) + confidence
+        if expected_slot:
+            state["slot_counts"][expected_slot] = int(
+                state["slot_counts"].get(expected_slot, 0)
+            ) + 1
+            state["slot_confidence_sums"][expected_slot] = float(
+                state["slot_confidence_sums"].get(expected_slot, 0.0)
+            ) + float(
+                getattr(
+                    row,
+                    "predicted_role_confidence",
+                    getattr(row, "predicted_role_frame_confidence", confidence),
+                )
+            )
         state["x_sum"] = float(state.get("x_sum", 0.0)) + float(
             pd.to_numeric(getattr(row, "x", np.nan), errors="coerce")
             if not pd.isna(pd.to_numeric(getattr(row, "x", np.nan), errors="coerce"))
@@ -2949,14 +3397,44 @@ class OnlineSpecialSeedRoleAssigner:
                 dist_right_value
             )
             state["lateral_observations"] = int(state.get("lateral_observations", 0)) + 1
+        field_position = self._row_field_position_payload(row)
+        if field_position is not None:
+            state.setdefault("position_history_m", []).append(field_position)
+            state.setdefault("recent_position_window_m", deque(maxlen=int(self.role_recent_position_window))).append(
+                field_position
+            )
+        state.setdefault("role_history", []).append(str(label))
+        state.setdefault("recent_role_window", deque(maxlen=int(self.role_recent_role_window))).append(
+            str(label)
+        )
+        if expected_slot:
+            state.setdefault("expected_slot_history", []).append(str(expected_slot))
+            state.setdefault(
+                "recent_expected_slot_window",
+                deque(maxlen=int(self.role_recent_role_window)),
+            ).append(str(expected_slot))
+            state["expected_role_slot"] = str(expected_slot)
+            state["display_role_slot"] = str(expected_slot)
+        assignment_method = getattr(row, "assignment_method", None)
+        if assignment_method is not None and not pd.isna(assignment_method):
+            state["assignment_method"] = str(assignment_method)
+        state["last_assignment_mode"] = str(track_data.get("canonical_assignment_mode") or "")
+        state["last_source_raw_tracker_id"] = (
+            int(track_data.get("source_raw_tracker_id"))
+            if track_data.get("source_raw_tracker_id") is not None
+            else None
+        )
         for role_label in self._role_labels_for_assignment():
             prob_col = f"prob_{role_label}"
             prob_value = float(getattr(row, prob_col, 0.0))
             state["prob_sums"][role_label] = float(
                 state["prob_sums"].get(role_label, 0.0)
             ) + prob_value
+        self._update_segment_majorities(state)
+        identity_state["active_segment_id"] = int(state.get("segment_id", 1))
+        identity_state.setdefault("segments", {})[int(state.get("segment_id", 1))] = state
 
-        return state
+        return state, reset_info
 
     def _annotate_frame_with_roles(self, tracks, frame_id, frame_predictions_df):
         if frame_predictions_df.empty:
@@ -2986,47 +3464,18 @@ class OnlineSpecialSeedRoleAssigner:
                 if row is None:
                     continue
                 self._set_track_role_payload(track_data, row)
-                state = self._update_role_state(
+                state, reset_info = self._update_role_state(
                     tracks,
                     frame_id=frame_id,
                     player_id=player_id,
                     row=row,
+                    track_data=track_data,
                 )
-                if state.get("frozen_role") is not None:
-                    track_data["predicted_role_frame"] = str(state["frozen_role"])
-                    track_data["predicted_role_frame_confidence"] = float(
-                        state["frozen_confidence"]
-                    )
-                    track_data["predicted_role"] = str(state["frozen_role"])
-                    track_data["predicted_role_confidence"] = float(
-                        state["frozen_confidence"]
-                    )
-                    track_data["role_stabilized"] = True
-                    track_data["role_stabilized_at_frame"] = int(
-                        state["frozen_at_frame"]
-                    )
-                    track_data["role_stabilization_observations"] = int(
-                        state["observations"]
-                    )
-                    if state.get("expected_role_slot") is not None:
-                        track_data["expected_role_slot"] = str(
-                            state["expected_role_slot"]
-                        )
-                    if state.get("display_role_slot") is not None:
-                        track_data["display_role_slot"] = str(
-                            state["display_role_slot"]
-                        )
-                    if state.get("assignment_method") is not None:
-                        track_data["assignment_method"] = str(
-                            state["assignment_method"]
-                        )
-                        track_data["stable_role_assignment_method"] = str(
-                            state["assignment_method"]
-                        )
-                    else:
-                        track_data["stable_role_assignment_method"] = (
-                            "team_unique_hungarian"
-                        )
+                self._apply_segment_metadata_to_track(
+                    track_data,
+                    state,
+                    reset_info=reset_info,
+                )
                 self._apply_lineup_assignment_to_track(track_data, state)
 
     def _assign_special_seed_frame_teams(self, tracks, frame_id, frame_predictions_df):
@@ -3147,7 +3596,8 @@ class OnlineSpecialSeedRoleAssigner:
         if not regular_observations.empty:
             role_result = self.role_session.predict_frame(
                 regular_observations,
-                expected_roles_by_team=None,
+                expected_roles_by_team=self.expected_roles_by_team,
+                include_all_targets=True,
             )
             regular_frame_predictions_df = role_result["frame_predictions_df"]
             self._record_raw_frame_predictions(regular_frame_predictions_df)
@@ -3158,24 +3608,41 @@ class OnlineSpecialSeedRoleAssigner:
             regular_frame_predictions_df,
         )
 
+        visible_frame_predictions_df = regular_frame_predictions_df
+        if (
+            not regular_frame_predictions_df.empty
+            and "visible" in regular_frame_predictions_df.columns
+        ):
+            visible_mask = (
+                pd.to_numeric(
+                    regular_frame_predictions_df["visible"],
+                    errors="coerce",
+                )
+                .fillna(0)
+                .astype(int)
+                > 0
+            )
+            visible_frame_predictions_df = regular_frame_predictions_df.loc[
+                visible_mask
+            ].copy()
+
         self.stats["position_role_frame_predictions"] += int(
-            len(regular_frame_predictions_df)
+            len(visible_frame_predictions_df)
         )
         self.stats["position_role_player_predictions"] += int(
-            regular_frame_predictions_df[
+            visible_frame_predictions_df[
                 ["team_id", "player_id"]
             ].drop_duplicates().shape[0]
-            if not regular_frame_predictions_df.empty
+            if not visible_frame_predictions_df.empty
             else 0
         )
-        if not regular_frame_predictions_df.empty:
+        if not visible_frame_predictions_df.empty:
             self.stats["frames_with_role_predictions"] += 1
             self._annotate_frame_with_roles(
                 tracks,
                 frame_id,
-                regular_frame_predictions_df,
+                visible_frame_predictions_df,
             )
-            self._freeze_ready_roles_by_team(tracks, frame_id)
 
         self._annotate_special_goalkeeper_roles(tracks, frame_id)
 

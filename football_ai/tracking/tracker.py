@@ -1344,6 +1344,18 @@ class Tracker(TrackerLogicMixin):
     ):
         previous_owner_raw_id = canonical_to_raw_id.get(canonical_id)
         previous_canonical_id = raw_to_canonical_id.get(raw_tracker_id)
+        canonical_relinked = False
+        canonical_assignment_mode = "new_canonical"
+        if forced_absorption_info is not None:
+            canonical_assignment_mode = "forced_absorption"
+        elif previous_canonical_id is not None and previous_canonical_id != canonical_id:
+            canonical_assignment_mode = "raw_tracker_reassigned_to_other_canonical"
+            canonical_relinked = True
+        elif previous_owner_raw_id is not None and previous_owner_raw_id != raw_tracker_id:
+            canonical_assignment_mode = "canonical_relinked_to_new_raw_tracker"
+            canonical_relinked = True
+        elif canonical_id in canonical_state:
+            canonical_assignment_mode = "raw_continuity"
         if (
             previous_canonical_id is not None
             and previous_canonical_id != canonical_id
@@ -1454,6 +1466,9 @@ class Tracker(TrackerLogicMixin):
             "special_penalty_seed": special_penalty_seed,
             "class_candidates": list(detection_class_candidates or []),
             "referee_role_zone": referee_role_zone,
+            "last_raw_tracker_id": int(raw_tracker_id),
+            "canonical_assignment_mode": str(canonical_assignment_mode),
+            "canonical_relinked": bool(canonical_relinked),
         }
         used_canonical_ids_in_frame.add(canonical_id)
 
@@ -1469,6 +1484,9 @@ class Tracker(TrackerLogicMixin):
             "referee_reassign_gate": metadata.get("referee_reassign_gate"),
             "goalkeeper_reassign_gate": metadata.get("goalkeeper_reassign_gate"),
             "bbox_size": metadata.get("bbox_size"),
+            "source_raw_tracker_id": int(raw_tracker_id),
+            "canonical_assignment_mode": str(canonical_assignment_mode),
+            "canonical_relinked": bool(canonical_relinked),
             "field_position_m": (
                 list(self._field_position_to_tuple(field_position))
                 if self._field_position_to_tuple(field_position) is not None

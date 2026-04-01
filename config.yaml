@@ -263,6 +263,14 @@ tracking:
   role_stabilization_window_frames: 600
   role_stabilization_min_observations: 600
   role_stabilization_vote_ratio: 0.7
+  role_context_interpolation_max_gap_frames: 15  # Frames máximos para reutilizar la última posición visible de un canónico ausente como contexto del Set Transformer. No actualiza segmentos ni compite por slot.
+  role_recent_position_window: 10  # Ventana corta en metros usada para la mediana espacial reciente del segmento al detectar swaps.
+  role_recent_role_window: 20  # Ventana corta de roles crudos recientes usada para medir el rol dominante local del segmento.
+  role_swap_min_recent_samples: 8  # Muestras visibles mínimas en la ventana corta antes de permitir detección de swap.
+  role_swap_position_jump_m: 14.0  # Salto mínimo en metros respecto a la trayectoria reciente para sospechar swap sin señal estructural de canonización.
+  role_swap_position_jump_relinked_m: 8.0  # Salto mínimo en metros si el canónico llega relinkado/reabsorbido desde otro raw tracker.
+  role_swap_role_change_min_ratio: 0.60  # Dominancia mínima del rol reciente para aceptar que un cambio de rol actual contradice al segmento.
+  role_swap_role_change_min_confidence: 0.35  # Confianza mínima del rol actual para usarlo como evidencia semántica de swap.
 
 # Configuración de equipos
 teams:

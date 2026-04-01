@@ -1071,6 +1071,7 @@ class OnlineRoleInferenceSession:
         observations: pd.DataFrame,
         expected_roles_by_team: Mapping[str, Sequence[str]] | None = None,
         batch_size: int | None = None,
+        include_all_targets: bool = False,
     ) -> dict[str, Any]:
         if observations.empty:
             empty_frame = pd.DataFrame()
@@ -1094,6 +1095,7 @@ class OnlineRoleInferenceSession:
             attack_direction_by_team=attack_direction_by_team,
             max_teammates=int(self.config.max_teammates),
             drop_unlabeled=False,
+            include_all_targets=bool(include_all_targets),
         )
         if samples_df.empty:
             empty_frame = pd.DataFrame()
@@ -1122,6 +1124,9 @@ class OnlineRoleInferenceSession:
             "x_m",
             "y_m",
             "confidence_tracking",
+            "visible",
+            "is_interpolated",
+            "role_inference_target",
         ]
         available_meta_cols = [col for col in meta_cols if col in obs.columns]
         sample_meta = obs.loc[:, available_meta_cols].drop_duplicates(
@@ -1595,18 +1600,13 @@ def _apply_expected_roles_constraint(
         return constrained
 
     available_team_ids = set(constrained["team_id"].astype(str).unique().tolist())
-    unknown_team_ids = sorted(
-        {str(team_id) for team_id in expected_roles_by_team.keys()}.difference(available_team_ids)
-    )
-    if unknown_team_ids:
-        raise ValueError(
-            f"expected_roles_by_team contiene team_id inexistentes en la inferencia: {unknown_team_ids}"
-        )
 
     epsilon = 1e-9
     prob_cols = [f"prob_{label}" for label in label_names]
     for raw_team_id, expected_roles in expected_roles_by_team.items():
         team_id = str(raw_team_id)
+        if team_id not in available_team_ids:
+            continue
         team_mask = constrained["team_id"].astype(str) == team_id
         team_df = constrained.loc[team_mask].copy()
         slots = [

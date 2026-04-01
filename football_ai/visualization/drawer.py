@@ -127,12 +127,15 @@ class Drawer:
         display_role_slot = data.get("display_role_slot")
         if display_role_slot:
             return _format_role_overlay_label(display_role_slot)
-        predicted_role_frame = data.get("predicted_role_frame")
-        if predicted_role_frame:
-            return str(predicted_role_frame)
+        expected_role_slot = data.get("expected_role_slot")
+        if expected_role_slot:
+            return _format_role_overlay_label(expected_role_slot)
         predicted_role = data.get("predicted_role")
         if predicted_role:
             return str(predicted_role)
+        predicted_role_frame = data.get("predicted_role_frame")
+        if predicted_role_frame:
+            return str(predicted_role_frame)
         return None
 
     def _resolve_debug_detection_class_name(self, det):
@@ -268,6 +271,7 @@ class Drawer:
         track_id,
         possession_player_id=None,
         compact=False,
+        show_identity_segment=False,
     ):
         if data.get("synthetic_seed"):
             return
@@ -313,6 +317,12 @@ class Drawer:
             role_text = self._extract_role_text(data)
             if role_text:
                 info_lines.append(role_text)
+            if show_identity_segment:
+                identity_segment_id = data.get("identity_segment_id")
+                if identity_segment_id is not None:
+                    info_lines.append(
+                        f"seg:{self._coerce_int(identity_segment_id, identity_segment_id)}"
+                    )
             if class_name == "player":
                 field_position = data.get("field_position_m")
                 if (
@@ -326,13 +336,48 @@ class Drawer:
                     )
             for idx, info_label in enumerate(info_lines):
                 baseline_y = min(y2 + 13 + (idx * 12), frame.shape[0] - 4)
+                is_segment_label = (
+                    show_identity_segment
+                    and isinstance(info_label, str)
+                    and info_label.startswith("seg:")
+                )
+                highlight_segment_label = bool(
+                    is_segment_label and data.get("identity_reset")
+                )
+                if highlight_segment_label:
+                    (text_w, text_h), text_base = cv2.getTextSize(
+                        info_label,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        self.compact_font_scale,
+                        1,
+                    )
+                    text_x = int(x1)
+                    text_y = int(baseline_y)
+                    top_left = (
+                        max(0, text_x - 2),
+                        max(0, text_y - text_h - 2),
+                    )
+                    bottom_right = (
+                        min(frame.shape[1] - 1, text_x + text_w + 2),
+                        min(frame.shape[0] - 1, text_y + text_base + 2),
+                    )
+                    cv2.rectangle(
+                        frame,
+                        top_left,
+                        bottom_right,
+                        (20, 20, 20),
+                        -1,
+                    )
+                    text_color = (0, 255, 255)
+                else:
+                    text_color = color
                 cv2.putText(
                     frame,
                     info_label,
                     (x1, baseline_y),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     self.compact_font_scale,
-                    color,
+                    text_color,
                     1,
                     cv2.LINE_AA,
                 )
@@ -560,6 +605,23 @@ class Drawer:
         )
 
     def _draw_tracks_frame(self, frame, frame_tracks, compact=False, possession_info=None):
+        return self._draw_tracks_frame_with_options(
+            frame,
+            frame_tracks,
+            compact=compact,
+            possession_info=possession_info,
+            show_identity_segment=False,
+        )
+
+    def _draw_tracks_frame_with_options(
+        self,
+        frame,
+        frame_tracks,
+        *,
+        compact=False,
+        possession_info=None,
+        show_identity_segment=False,
+    ):
         resolved_possession = (
             possession_info
             if isinstance(possession_info, dict)
@@ -582,6 +644,7 @@ class Drawer:
                     track_id,
                     possession_player_id=possession_player_id,
                     compact=compact,
+                    show_identity_segment=show_identity_segment,
                 )
         return frame
 
@@ -882,11 +945,12 @@ class Drawer:
         debug_frame = debug_frames[frame_id] if debug_frames and frame_id < len(debug_frames) else None
         panel_c = self._draw_discarded_panel(frame.copy(), debug_frame)
         stabilized_tracks = self._build_stabilized_frame_tracks(frame_tracks, carry_state, expected_counts)
-        panel_d = self._draw_tracks_frame(
+        panel_d = self._draw_tracks_frame_with_options(
             frame.copy(),
             stabilized_tracks,
             compact=True,
             possession_info=possession_info,
+            show_identity_segment=True,
         )
 
         self._draw_panel_title(panel_a, "A) Tracking compact")

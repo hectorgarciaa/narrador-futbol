@@ -1233,6 +1233,7 @@ def build_role_samples(
     attack_direction_by_team: Mapping[str, int],
     max_teammates: int = 10,
     drop_unlabeled: bool = True,
+    include_all_targets: bool = False,
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, FeatureSpec]:
     df = observations_with_roles.copy()
     if df.empty:
@@ -1321,8 +1322,18 @@ def build_role_samples(
             team_frame["y_ori"].rank(method="dense", ascending=True).astype(np.float32)
         )
 
-        if drop_unlabeled:
+        if include_all_targets:
+            objectives = team_frame.copy()
+        elif drop_unlabeled:
             objectives = team_frame[team_frame["role_label"].notna()].copy()
+        elif "role_inference_target" in team_frame.columns:
+            objective_mask = (
+                pd.to_numeric(team_frame["role_inference_target"], errors="coerce")
+                .fillna(0)
+                .astype(int)
+                > 0
+            )
+            objectives = team_frame[objective_mask].copy()
         else:
             objectives = team_frame.copy()
         if objectives.empty:

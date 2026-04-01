@@ -88,6 +88,7 @@ Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
    - Cuando `four_panel_enabled=true`, el pipeline guarda además un JSON `*_debug_frames.json` junto al `*_tracks.json` con estas listas y motivos, para análisis offline.
 4. `D) Tracking con continuidad`: overlay compacto con relleno de continuidad (usa la última posición conocida por ID cuando falta detección en el frame) y mantiene el resaltado de posesión.
    - Igual que el panel A, muestra `tr:<cls>`, `y:<cls>` y `td:<cls>` de cada track.
+   - Añade además `seg:<id>` bajo cada track para mostrar el segmento semántico activo del `canonical_id`.
    - Si `visualization.continuity_keep_all_seen_ids=true`, mantiene visibles todos los IDs ya observados en el clip para cada clase (no corta al cupo esperado).
 
 Compatibilidad de clases en `tracks`:
