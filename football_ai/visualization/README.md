@@ -80,6 +80,7 @@ Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
    - Se separan en dos tipos (colores configurables en `config.yaml/visualization`):
      - `discarded_panel_color_not_tracked`: YOLO no devueltas por ByteTrack.
      - `discarded_panel_color_tracked_no_canonical`: devueltas por ByteTrack pero descartadas en el mapeo a ID canónico.
+   - Ambas etiquetas muestran una abreviatura de clase al estilo del panel compacto (`p`, `gk`, `r`) y la confianza de la detección.
    - Para las detecciones devueltas por ByteTrack pero descartadas en canónico, el panel incluye también `bt#<id>` (el `tracker_id` devuelto por ByteTrack).
    - Si `visualization.discarded_panel_show_reasons=true`, el panel añade un código corto `discard_reason` en la etiqueta (útil para depurar gates/límites).
    - Cuando `four_panel_enabled=true`, el pipeline guarda además un JSON `*_debug_frames.json` junto al `*_tracks.json` con estas listas y motivos, para análisis offline.

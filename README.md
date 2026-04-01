@@ -114,6 +114,8 @@ Incluye, por frame:
 - detecciones YOLO descartadas porque ByteTrack no las devolvió,
 - detecciones devueltas por ByteTrack pero descartadas en el mapeo a IDs canónicos (incluye `bt#<id>` y opcionalmente un `discard_reason`).
 
+En el panel inferior izquierdo de la salida 2x2, ambas categorías de descartes muestran también una abreviatura de clase (`p`, `gk`, `r`) junto a la confianza para facilitar el análisis visual frame a frame.
+
 Para un resumen offline rápido puedes usar:
 
 ```bash

@@ -63,6 +63,12 @@ class Drawer:
         }
         return mapping.get(class_name, class_name)
 
+    def _short_debug_class_label(self, class_name):
+        short_label = self._short_class_label(class_name)
+        if short_label == "ref":
+            return "r"
+        return short_label
+
     @staticmethod
     def _parse_bgr_color(color):
         if not isinstance(color, (list, tuple)) or len(color) < 3:
@@ -128,6 +134,14 @@ class Drawer:
         if predicted_role:
             return str(predicted_role)
         return None
+
+    def _resolve_debug_detection_class_name(self, det):
+        for key in ("class_name", "class_tracker", "class_yolo", "class"):
+            value = det.get(key)
+            normalized = self._normalize_track_class_name(value)
+            if normalized:
+                return normalized
+        return ""
 
     def _detection_draw_color(self, class_name, data, fallback_color):
         if class_name in {"player", "goalkeeper"}:
@@ -673,7 +687,8 @@ class Drawer:
                 if not isinstance(bbox, list) or len(bbox) < 4:
                     continue
                 x1, y1, x2, y2 = map(int, bbox)
-                cls = self._short_class_label(det.get("class_name", ""))
+                class_name = self._resolve_debug_detection_class_name(det)
+                cls = self._short_debug_class_label(class_name)
                 conf = float(det.get("confidence", 0.0))
                 label = f"{cls} {conf:.2f}".strip()
                 bt_id = det.get("bytetrack_id")
