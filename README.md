@@ -27,6 +27,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
 - Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
+- Anti-solape de ByteTrack limitado al nacimiento de tracks nuevos: los `unconfirmed` ya nacidos siguen el matching normal y el filtro duro de solape solo se aplica antes de crear un track nuevo frente a activos, `unconfirmed` previos y otros candidatos del mismo frame, con thresholds independientes para cada comparación.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
 
 ### 🚧 Fase 2: Detección de acciones
@@ -659,7 +660,9 @@ tracking:
   projector:
     constructor:
       pnl_refine: false
-  new_track_active_overlap_iou: 0.25  # IoU máxima para permitir nacer un track nuevo encima de uno activo
+  new_track_active_overlap_iou: 0.2  # IoU máxima permitida contra tracks activos al crear un track nuevo
+  new_track_unconfirmed_overlap_iou: 0.1  # IoU máxima permitida contra tracks unconfirmed al crear un track nuevo
+  new_track_candidate_overlap_iou: 0.0  # IoU máxima permitida entre nuevos candidatos del mismo frame
   track_thresh: 0.15          # Confianza mínima para activar un track
   track_buffer: 90            # Frames que sobrevive un track sin ser visto
   match_thresh: 0.945         # IoU mínimo para asociar detección a track

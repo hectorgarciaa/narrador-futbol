@@ -78,6 +78,8 @@ class ByteTrack:
         team_vote_weight: float = 1.0,
         team_consensus_switch_margin: float = 2.0,
         new_track_active_overlap_iou: float = 0.0,
+        new_track_unconfirmed_overlap_iou: float = 0.0,
+        new_track_candidate_overlap_iou: float = 0.0,
     ):
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
@@ -149,6 +151,12 @@ class ByteTrack:
         self.team_consensus_switch_margin = float(max(0.0, team_consensus_switch_margin))
         self.new_track_active_overlap_iou = float(
             min(1.0, max(0.0, new_track_active_overlap_iou))
+        )
+        self.new_track_unconfirmed_overlap_iou = float(
+            min(1.0, max(0.0, new_track_unconfirmed_overlap_iou))
+        )
+        self.new_track_candidate_overlap_iou = float(
+            min(1.0, max(0.0, new_track_candidate_overlap_iou))
         )
         self.assigned_track_ids_by_class = {
             class_name: set() for class_name in self.max_tracks_per_class
@@ -223,6 +231,14 @@ class ByteTrack:
         # threshold, reject it.
         min_overlap_iou = 1e-6
         active_overlap_iou = max(min_overlap_iou, float(self.new_track_active_overlap_iou))
+        unconfirmed_overlap_iou = max(
+            min_overlap_iou,
+            float(self.new_track_unconfirmed_overlap_iou),
+        )
+        candidate_overlap_iou = max(
+            min_overlap_iou,
+            float(self.new_track_candidate_overlap_iou),
+        )
         valid_indices = []
         for idx in candidate_indices:
             candidate_box = self._track_tlbr(detections[idx])
@@ -241,7 +257,8 @@ class ByteTrack:
         for idx in valid_indices:
             candidate_box = self._track_tlbr(detections[idx])
             overlaps_unconfirmed = any(
-                self._tlbr_iou(candidate_box, self._track_tlbr(unconfirmed_track)) > min_overlap_iou
+                self._tlbr_iou(candidate_box, self._track_tlbr(unconfirmed_track))
+                > unconfirmed_overlap_iou
                 for unconfirmed_track in unconfirmed_pool
             )
             if overlaps_unconfirmed:
@@ -260,7 +277,7 @@ class ByteTrack:
         for idx in valid_after_unconfirmed:
             candidate_box = self._track_tlbr(detections[idx])
             overlaps_selected = any(
-                self._tlbr_iou(candidate_box, selected_box) > min_overlap_iou
+                self._tlbr_iou(candidate_box, selected_box) > candidate_overlap_iou
                 for selected_box in selected_boxes
             )
             if overlaps_selected:
@@ -268,62 +285,6 @@ class ByteTrack:
             selected_indices.append(idx)
             selected_boxes.append(candidate_box)
         return selected_indices
-
-    @staticmethod
-    def _track_priority_for_unconfirmed(track: STrack) -> tuple[float, float]:
-        """Higher priority wins when suppressing duplicated unconfirmed tracks."""
-        age = float(int(getattr(track, "frame_id", 0)) - int(getattr(track, "start_frame", 0)))
-        score = float(getattr(track, "score", 0.0) or 0.0)
-        return age, score
-
-    def _filter_unconfirmed_tracks(
-        self,
-        unconfirmed_tracks: list[STrack],
-        active_tracked_pool: list[STrack],
-    ) -> tuple[list[STrack], list[STrack]]:
-        """
-        1) Drop any unconfirmed track with any overlap against active tracks (IoU > 0).
-        2) Suppress duplicate unconfirmed tracks among themselves with any overlap.
-        """
-        if not unconfirmed_tracks:
-            return [], []
-
-        removed_tracks = []
-        min_overlap_iou_active = 1e-6
-
-        valid_unconfirmed = []
-        for track in unconfirmed_tracks:
-            track_box = self._track_tlbr(track)
-            overlaps_active = any(
-                self._tlbr_iou(track_box, self._track_tlbr(active_track)) > min_overlap_iou_active
-                for active_track in active_tracked_pool
-            )
-            if overlaps_active:
-                track.state = TrackState.Removed
-                removed_tracks.append(track)
-                continue
-            valid_unconfirmed.append(track)
-
-        valid_unconfirmed.sort(
-            key=self._track_priority_for_unconfirmed,
-            reverse=True,
-        )
-        deduped_unconfirmed = []
-        kept_boxes = []
-        for track in valid_unconfirmed:
-            track_box = self._track_tlbr(track)
-            overlaps_kept = any(
-                self._tlbr_iou(track_box, kept_box) > min_overlap_iou_active
-                for kept_box in kept_boxes
-            )
-            if overlaps_kept:
-                track.state = TrackState.Removed
-                removed_tracks.append(track)
-                continue
-            deduped_unconfirmed.append(track)
-            kept_boxes.append(track_box)
-
-        return deduped_unconfirmed, removed_tracks
 
     @staticmethod
     def _field_position_to_array(field_position) -> Optional[np.ndarray]:
@@ -1074,26 +1035,6 @@ class ByteTrack:
                 lost_stracks.append(track)
 
         """Deal with unconfirmed tracks, usually tracks with only one beginning frame"""
-        active_for_unconfirmed_filter = []
-        seen_active_ids_for_unconfirmed = set()
-        for candidate_track in tracked_stracks + activated_starcks + refind_stracks:
-            internal_track_id = getattr(candidate_track, "internal_track_id", None)
-            if internal_track_id is not None:
-                if internal_track_id in seen_active_ids_for_unconfirmed:
-                    continue
-                seen_active_ids_for_unconfirmed.add(internal_track_id)
-            if getattr(candidate_track, "state", None) != TrackState.Tracked:
-                continue
-            if not bool(getattr(candidate_track, "is_activated", False)):
-                continue
-            active_for_unconfirmed_filter.append(candidate_track)
-
-        unconfirmed, removed_unconfirmed_overlaps = self._filter_unconfirmed_tracks(
-            unconfirmed_tracks=unconfirmed,
-            active_tracked_pool=active_for_unconfirmed_filter,
-        )
-        removed_stracks.extend(removed_unconfirmed_overlaps)
-
         detections = [detections[i] for i in u_detection]
         dists = matching.iou_distance(unconfirmed, detections)
         dists = self._apply_bbox_center_costs(dists, unconfirmed, detections)
@@ -1107,42 +1048,14 @@ class ByteTrack:
         matches, u_unconfirmed, u_detection = matching.linear_assignment(
             dists, thresh=self.unconfirmed_match_threshold
         )
-        matched_pairs = sorted(
-            list(matches),
-            key=lambda pair: float(getattr(detections[pair[1]], "score", 0.0)),
-            reverse=True,
-        )
-        kept_unconfirmed_boxes = []
         accepted_unconfirmed_tracks = []
-        min_overlap_iou_active = 1e-6
-        for itracked, idet in matched_pairs:
+        for itracked, idet in matches:
             track = unconfirmed[itracked]
             det = detections[idet]
-            candidate_box = self._track_tlbr(det)
-
-            overlaps_active = any(
-                self._tlbr_iou(candidate_box, self._track_tlbr(active_track)) > min_overlap_iou_active
-                for active_track in active_for_unconfirmed_filter
-            )
-            if overlaps_active:
-                track.state = TrackState.Removed
-                removed_stracks.append(track)
-                continue
-
-            overlaps_kept_unconfirmed = any(
-                self._tlbr_iou(candidate_box, kept_box) > min_overlap_iou_active
-                for kept_box in kept_unconfirmed_boxes
-            )
-            if overlaps_kept_unconfirmed:
-                track.state = TrackState.Removed
-                removed_stracks.append(track)
-                continue
-
             track.update(det, self.frame_id)
             self._apply_track_metadata(track, det)
             activated_starcks.append(track)
             accepted_unconfirmed_tracks.append(track)
-            kept_unconfirmed_boxes.append(self._track_tlbr(track))
 
         surviving_unconfirmed_tracks = [
             track
