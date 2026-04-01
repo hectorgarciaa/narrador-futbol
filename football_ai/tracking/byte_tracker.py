@@ -342,9 +342,9 @@ class ByteTrack:
         aliases = {
             "player": "player",
             "players": "player",
-            "goalkeeper": "player",
-            "gk": "player",
-            "keeper": "player",
+            "goalkeeper": "goalkeeper",
+            "gk": "goalkeeper",
+            "keeper": "goalkeeper",
             "referee": "referee",
             "ref": "referee",
             "refs": "referee",

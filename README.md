@@ -26,6 +26,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo, doble señal de clase (YOLO + reetiquetado por color) y remapeo controlado por consenso.
 - Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
+- Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
 
 ### 🚧 Fase 2: Detección de acciones

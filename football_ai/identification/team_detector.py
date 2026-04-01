@@ -6,7 +6,13 @@ from football_ai.identification.shirt_detector import ShirtDetector
 from football_ai.evaluation.cluster_visualizer import visualize_shirt_clusters
 
 class TeamDetector:
-    def __init__(self, team_colors=None, min_samples={"player": 60, "referee": 15}, min_size_cluster=4, shirt_detector_conf={}):
+    def __init__(
+        self,
+        team_colors=None,
+        min_samples={"player": 60, "referee": 15},
+        min_size_cluster=4,
+        shirt_detector_conf={},
+    ):
         self.min_samples = min_samples
         self.min_size_cluster = min_size_cluster
         self.with_ref = team_colors is not None
@@ -18,10 +24,10 @@ class TeamDetector:
 
         self.n_teams = 2
         self.shirt_detector = ShirtDetector(**shirt_detector_conf)
-        self.candidate_classes = [c_name for c_name in ["player", "referee"]]
-        self.updated = {class_name: False for class_name in self.candidate_classes}
-        self.class_samples = {class_name: [] for class_name in self.candidate_classes}
-        
+        self.candidate_classes = [c_name for c_name in ["player", "goalkeeper", "referee"]]
+        self.updated = {class_name: False for class_name in ["player", "referee"]}
+        self.class_samples = {class_name: [] for class_name in ["player", "referee"]}
+
         self.contador = 0
 
     def detect_teams(self, frame_detections, show_plot=False):
@@ -30,21 +36,23 @@ class TeamDetector:
         
         for object_detected in frame_detections:
             class_name = object_detected.names[object_detected.boxes.cls.item()]
+            sample_bucket = "player" if class_name == "goalkeeper" else class_name
             bbox_size = self._extract_bbox_size(object_detected)
             if class_name in self.candidate_classes:
                 shirt, shirt_color = self._get_shirt_color(object_detected)
                 if show_plot:
                     shirts.append(shirt)
-                if shirt_color is not None and not self.updated[class_name]:
-                    self.class_samples[class_name].append(shirt_color)
+                if shirt_color is not None and sample_bucket in self.updated and not self.updated[sample_bucket]:
+                    self.class_samples[sample_bucket].append(shirt_color)
 
-                if len(self.class_samples[class_name]) > self.min_samples[class_name] and not self.updated[class_name]:
-                    self.updated[class_name] = self._update_class_colors(class_name)
+                if (
+                    sample_bucket in self.updated
+                    and len(self.class_samples[sample_bucket]) > self.min_samples[sample_bucket]
+                    and not self.updated[sample_bucket]
+                ):
+                    self.updated[sample_bucket] = self._update_class_colors(sample_bucket)
                 
-                aux = class_name
                 class_name, team, distances = self._reassign_class(object_detected, shirt_color)
-                if aux != class_name:
-                    self.contador += 1
 
 
                 teams_of_detected_objects.append(
@@ -110,13 +118,17 @@ class TeamDetector:
         if km is None:
             return False
 
-        cluster_refs = []
+        cluster_entries = []
         for cluster_id in range(self.n_teams):
             samples_cluster = class_samples[km.labels_ == cluster_id]
-            cluster_refs.append(np.median(samples_cluster, axis=0))
-        cluster_refs = np.asarray(cluster_refs, dtype=np.float32)
-        sorted_centers = sorted(cluster_refs, key=self._center_hue_key)
-        self._update_reference_team_colors(sorted_centers)
+            cluster_entries.append(
+                {
+                    "center": np.median(samples_cluster, axis=0).astype(np.float32),
+                    "samples": samples_cluster.astype(np.float32),
+                }
+            )
+        cluster_entries = sorted(cluster_entries, key=lambda entry: self._center_hue_key(entry["center"]))
+        self._update_reference_team_colors(cluster_entries)
         return True
     
     def _update_referee_colors(self, class_samples): 
@@ -152,7 +164,8 @@ class TeamDetector:
         lightness = float(lab_color[0])
         return (hue, -chroma, -lightness)
 
-    def _update_reference_team_colors(self, centers):
+    def _update_reference_team_colors(self, cluster_entries):
+        centers = np.asarray([entry["center"] for entry in cluster_entries], dtype=np.float32)
         if self.with_ref:
             team_names = [team for team in self.team_colors.keys() if team != "referee"]
 
@@ -166,20 +179,25 @@ class TeamDetector:
             assignment = [0, 1] if cost_a <= cost_b else [1, 0]
 
             for idx, team in enumerate(team_names):
-                self.team_colors[team] = centers[assignment[idx]]
+                cluster_entry = cluster_entries[assignment[idx]]
+                self.team_colors[team] = cluster_entry["center"]
 
         else:
-            for idx, center in enumerate(centers, start=1):
-                self.team_colors[f"Equipo {idx}"] = center.astype(np.float32)
+            for idx, cluster_entry in enumerate(cluster_entries, start=1):
+                team_name = f"Equipo {idx}"
+                self.team_colors[team_name] = cluster_entry["center"].astype(np.float32)
 
     def _reassign_class(self, object_detected, shirt_color):
+        raw_class_name = object_detected.names[object_detected.boxes.cls.item()]
         team, distances = self._assign_team(shirt_color)
         if team == "referee":
             return "referee", None, distances
         elif team in self.team_colors:
+            if raw_class_name == "goalkeeper":
+                return "goalkeeper", team, distances
             return "player", team, distances
         else:
-            return object_detected.names[object_detected.boxes.cls.item()], team, distances
+            return raw_class_name, team, distances
         
     
     def _assign_team(self, shirt_color):
@@ -195,3 +213,124 @@ class TeamDetector:
         team_idx = np.argmin([d for d in valid_distances.values()])
         team_name = list(valid_distances.keys())[team_idx]
         return team_name, distances
+
+    @staticmethod
+    def _field_position_to_tuple(field_position):
+        if field_position is None:
+            return None
+        try:
+            x_pos, y_pos = field_position
+            if not np.isfinite(x_pos) or not np.isfinite(y_pos):
+                return None
+            return float(x_pos), float(y_pos)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _nearest_outfield_team_from_distances(distances):
+        if not isinstance(distances, dict):
+            return None
+        valid = [
+            (str(team_name), float(distance_value))
+            for team_name, distance_value in distances.items()
+            if team_name != "referee" and distance_value is not None
+        ]
+        if not valid:
+            return None
+        return min(valid, key=lambda item: item[1])[0]
+
+    def apply_referee_relabel_gate(
+        self,
+        teams_of_detected_objects,
+        yolo_class_labels,
+        field_positions,
+        field_width_m,
+        sideline_band_distance_m,
+    ):
+        if not teams_of_detected_objects or field_width_m is None:
+            return None
+
+        x_positions = []
+        for det_idx, class_name in enumerate(yolo_class_labels):
+            normalized = str(class_name or "").strip().lower()
+            if normalized not in {"player", "goalkeeper"}:
+                continue
+            field_position = (
+                field_positions[det_idx]
+                if det_idx < len(field_positions)
+                else None
+            )
+            field_position = self._field_position_to_tuple(field_position)
+            if field_position is None:
+                continue
+            x_positions.append(float(field_position[0]))
+
+        if len(x_positions) < 8:
+            return None
+
+        x_positions.sort()
+        left_x_bound = float(x_positions[3])
+        right_x_bound = float(x_positions[-4])
+        lower_sideline_limit = float(sideline_band_distance_m)
+        upper_sideline_limit = float(field_width_m) - float(sideline_band_distance_m)
+
+        for det_idx, detection_info in enumerate(teams_of_detected_objects):
+            raw_class_name = str(
+                yolo_class_labels[det_idx] if det_idx < len(yolo_class_labels) else ""
+            ).strip().lower()
+            relabeled_class_name = str(detection_info.get("class") or "").strip().lower()
+            if raw_class_name not in {"player", "goalkeeper"}:
+                continue
+            if relabeled_class_name != "referee":
+                continue
+
+            field_position = (
+                field_positions[det_idx]
+                if det_idx < len(field_positions)
+                else None
+            )
+            field_position = self._field_position_to_tuple(field_position)
+            allowed = False
+            reason = "missing_field_position"
+            if field_position is not None:
+                x_pos, y_pos = field_position
+                within_x_bounds = left_x_bound <= float(x_pos) <= right_x_bound
+                within_sideline_band = (
+                    float(y_pos) <= lower_sideline_limit
+                    or float(y_pos) >= upper_sideline_limit
+                )
+                allowed = bool(within_x_bounds or within_sideline_band)
+                if allowed and within_x_bounds and within_sideline_band:
+                    reason = "inside_referee_x_bounds_and_sideline_band"
+                elif allowed and within_x_bounds:
+                    reason = "inside_referee_x_bounds"
+                elif allowed and within_sideline_band:
+                    reason = "inside_referee_sideline_band"
+                elif not within_x_bounds:
+                    reason = "outside_referee_x_bounds"
+                else:
+                    reason = "outside_referee_sideline_band"
+
+            detection_info["referee_reassign_gate"] = {
+                "applied": True,
+                "allowed": bool(allowed),
+                "reason": reason,
+                "left_x_bound": left_x_bound,
+                "right_x_bound": right_x_bound,
+                "sideline_band_distance_m": float(sideline_band_distance_m),
+                "field_position_m": list(field_position) if field_position is not None else None,
+            }
+            if allowed:
+                continue
+
+            previous_class_name = relabeled_class_name
+            detection_info["class"] = raw_class_name
+            detection_info["team"] = self._nearest_outfield_team_from_distances(
+                detection_info.get("distances")
+            )
+
+        return {
+            "left_x_bound": left_x_bound,
+            "right_x_bound": right_x_bound,
+            "sideline_band_distance_m": float(sideline_band_distance_m),
+        }

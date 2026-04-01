@@ -39,7 +39,7 @@ class Tracker(TrackerLogicMixin):
         token = str(class_name or "").strip().lower()
         aliases = {
             "player": "player", "players": "player",
-            "goalkeeper": "goalkeeper", "gk": "goalkeeper", "keeper": "goalkeeper",
+            "goalkeeper": "player", "gk": "player", "keeper": "player",
             "referee": "referee", "ref": "referee", "refs": "referee",
             "ball": "ball", "balls": "ball",
         }
@@ -63,10 +63,10 @@ class Tracker(TrackerLogicMixin):
             return []
         candidates = []
         for key in ("class_tracker", "class", "class_yolo"):
-            normalized = cls._normalize_detection_class_name(metadata.get(key))
-            if not normalized or normalized in candidates:
+            value = metadata.get(key)
+            if not value or value in candidates:
                 continue
-            candidates.append(normalized)
+            candidates.append(value)
         return candidates
 
     @classmethod
@@ -146,6 +146,9 @@ class Tracker(TrackerLogicMixin):
             self.referee_canonical_ids = (23, 24, 25)
         self.referee_sideline_band_distance_m = float(
             tracker_conf.get("referee_sideline_band_distance_m", 3.0)
+        )
+        self.referee_field_length_m = float(
+            projector_conf.get("constructor", {}).get("field_length_m", 106.0)
         )
         self.referee_field_width_m = float(
             projector_conf.get("constructor", {}).get("field_width_m", 68.0)
@@ -291,22 +294,23 @@ class Tracker(TrackerLogicMixin):
         subphase_rows.append(("TeamDetector.detect_teams", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
+        yolo_class_labels = np.array(
+            detection_class_labels,
+            dtype=object,
+        )
+        self.team_detector.apply_referee_relabel_gate(
+            teams_of_detected_objects,
+            yolo_class_labels,
+            field_positions,
+            self.referee_field_width_m,
+            self.referee_sideline_band_distance_m,
+        )
         teams_labels = np.array(
             [dicc["team"] for dicc in teams_of_detected_objects],
             dtype=object,
         )
         class_labels = np.array(
-            [
-                self._normalize_detection_class_name(dicc["class"])
-                for dicc in teams_of_detected_objects
-            ],
-            dtype=object,
-        )
-        yolo_class_labels = np.array(
-            [
-                self._normalize_detection_class_name(class_name)
-                for class_name in detection_class_labels
-            ],
+            [dicc["class"] for dicc in teams_of_detected_objects],
             dtype=object,
         )
         if raw_detections:
@@ -324,6 +328,10 @@ class Tracker(TrackerLogicMixin):
                 raw_detection["class_yolo"] = class_yolo_value
                 raw_detection["class_relabel"] = class_relabel_value
                 raw_detection["class_team_detector"] = class_relabel_value
+                if raw_idx < len(teams_of_detected_objects):
+                    raw_detection["referee_reassign_gate"] = teams_of_detected_objects[raw_idx].get(
+                        "referee_reassign_gate"
+                    )
         subphase_rows.append(("Construir arrays de labels", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
@@ -737,7 +745,7 @@ class Tracker(TrackerLogicMixin):
         conf = boxes.conf.cpu().numpy()
         cls = boxes.cls.cpu().numpy().astype(int)
         for raw_idx, (bbox, score, cid) in enumerate(zip(xyxy, conf, cls)):
-            class_name = self._normalize_detection_class_name(detections.names[cid])
+            class_name = detections.names[cid]
             if class_name != "ball" or score < self.ball_min_conf:
                 continue
             x1, y1, x2, y2 = bbox.tolist()
@@ -1125,7 +1133,7 @@ class Tracker(TrackerLogicMixin):
                     raw_detections.append(
                         {
                             "raw_det_idx": int(raw_idx),
-                            "class_yolo": self._normalize_detection_class_name(detections.names[cid]),
+                            "class_yolo": detections.names[cid],
                             "bbox": [float(v) for v in bbox.tolist()],
                             "confidence": float(score),
                         }
@@ -1166,6 +1174,10 @@ class Tracker(TrackerLogicMixin):
         detections_sv.data["distances"] = np.array([dicc["distances"] for dicc in teams_of_detected_objects], dtype=object)
         detections_sv.data["shirt_color"] = np.array([dicc["shirt_color"] for dicc in teams_of_detected_objects], dtype=object)
         detections_sv.data["bbox_size"] = np.array([dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float)
+        detections_sv.data["referee_reassign_gate"] = np.array(
+            [dicc.get("referee_reassign_gate") for dicc in teams_of_detected_objects],
+            dtype=object,
+        )
 
         detections_sv.data["field_position"] = np.asarray(field_positions, dtype=np.float32)
         detections_sv.data["ground_point_image"] = np.asarray(ground_points_projected, dtype=np.float32)
@@ -1347,6 +1359,7 @@ class Tracker(TrackerLogicMixin):
             "class_tracker": output_class_name,
             "class_relabel": metadata.get("class"),
             "class_yolo": metadata.get("class_yolo"),
+            "referee_reassign_gate": metadata.get("referee_reassign_gate"),
             "bbox_size": metadata.get("bbox_size"),
             "field_position_m": (
                 list(self._field_position_to_tuple(field_position))

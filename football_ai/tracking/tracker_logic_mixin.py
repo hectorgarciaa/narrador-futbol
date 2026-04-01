@@ -12,9 +12,9 @@ class TrackerLogicMixin:
         aliases = {
             "player": "player",
             "players": "player",
-            "goalkeeper": "player",
-            "gk": "player",
-            "keeper": "player",
+            "goalkeeper": "goalkeeper",
+            "gk": "goalkeeper",
+            "keeper": "goalkeeper",
             "referee": "referee",
             "ref": "referee",
             "refs": "referee",
@@ -243,7 +243,7 @@ class TrackerLogicMixin:
         detection_team,
         detection_field_position,
     ):
-        if detection_class not in {"referee", "player"}:
+        if detection_class != "referee":
             return None
         if not self._is_team_compatible(
             candidate_state.get("team"),
@@ -273,7 +273,7 @@ class TrackerLogicMixin:
         detection_team,
         detection_field_position,
     ):
-        if detection_class not in {"referee", "player"}:
+        if detection_class != "referee":
             return None, "referee_class_incompatible"
         if not self._is_team_compatible(
             candidate_state.get("team"),

@@ -77,6 +77,8 @@ Hasta que el bootstrap queda fijado, `detect_teams` puede devolver `team=None` p
 #### 4. Asignación (`assign_team`)
 Una vez disponibles las referencias activas, la asignación se hace por **distancia euclidiana mínima en espacio LAB** entre el color detectado y los colores de equipo aprendidos o confirmados.
 
+Cuando el color más cercano es el del árbitro, el detector puede proponer una reetiqueta `player -> referee`. Sin embargo, en el tracking esa propuesta solo se acepta después de la homografía si la detección cumple al menos una de estas condiciones: estar dentro de la franja `+- tracking.referee_sideline_band_distance_m` respecto a las líneas laterales, o caer entre la cuarta `x` más a la izquierda y la cuarta `x` más a la derecha de los jugadores visibles en ese frame.
+
 #### 5. Extracción de región de camiseta
 El crop que se analiza es el **50% superior** del bounding box del jugador. Esto excluye el pantalón, las botas y el césped, que introducían ruido en el clustering.
 
