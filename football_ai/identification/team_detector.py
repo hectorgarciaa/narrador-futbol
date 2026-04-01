@@ -27,6 +27,9 @@ class TeamDetector:
         self.candidate_classes = [c_name for c_name in ["player", "goalkeeper", "referee"]]
         self.updated = {class_name: False for class_name in ["player", "referee"]}
         self.class_samples = {class_name: [] for class_name in ["player", "referee"]}
+        self.outfield_team_distance_stats = {}
+        self.goalkeeper_outlier_iqr_factor = 1.5
+        self.goalkeeper_sideline_min_distance_m = 3.0
 
         self.contador = 0
 
@@ -181,11 +184,40 @@ class TeamDetector:
             for idx, team in enumerate(team_names):
                 cluster_entry = cluster_entries[assignment[idx]]
                 self.team_colors[team] = cluster_entry["center"]
+                self.outfield_team_distance_stats[team] = self._build_outfield_distance_stats(
+                    cluster_entry["samples"],
+                    cluster_entry["center"],
+                )
 
         else:
             for idx, cluster_entry in enumerate(cluster_entries, start=1):
                 team_name = f"Equipo {idx}"
                 self.team_colors[team_name] = cluster_entry["center"].astype(np.float32)
+                self.outfield_team_distance_stats[team_name] = self._build_outfield_distance_stats(
+                    cluster_entry["samples"],
+                    cluster_entry["center"],
+                )
+
+    def _build_outfield_distance_stats(self, samples, center):
+        samples = np.asarray(samples, dtype=np.float32)
+        center = np.asarray(center, dtype=np.float32).reshape(-1)
+        if samples.ndim != 2 or samples.shape[0] <= 0 or center.size < 3:
+            return None
+        distances = np.linalg.norm(samples - center[: samples.shape[1]], axis=1)
+        distances = np.asarray(distances, dtype=np.float32).reshape(-1)
+        if distances.size <= 0:
+            return None
+        q1, median, q3 = np.quantile(distances, [0.25, 0.5, 0.75])
+        iqr = max(0.0, float(q3 - q1))
+        upper_bound = float(q3 + (self.goalkeeper_outlier_iqr_factor * iqr))
+        return {
+            "sample_count": int(distances.size),
+            "median": float(median),
+            "q1": float(q1),
+            "q3": float(q3),
+            "iqr": float(iqr),
+            "upper_bound": upper_bound,
+        }
 
     def _reassign_class(self, object_detected, shirt_color):
         raw_class_name = object_detected.names[object_detected.boxes.cls.item()]
@@ -238,6 +270,49 @@ class TeamDetector:
         if not valid:
             return None
         return min(valid, key=lambda item: item[1])[0]
+
+    def _goalkeeper_outlier_debug_from_distances(self, distances):
+        if not isinstance(distances, dict):
+            return None
+        team_names = [team_name for team_name in self.team_colors.keys() if team_name != "referee"]
+        if len(team_names) < 2:
+            return None
+        per_team = {}
+        all_outlier = True
+        for team_name in team_names:
+            distance_value = distances.get(team_name)
+            stats = self.outfield_team_distance_stats.get(team_name)
+            is_outlier = False
+            if distance_value is not None and isinstance(stats, dict):
+                is_outlier = float(distance_value) > float(stats.get("upper_bound", np.inf))
+            else:
+                all_outlier = False
+            per_team[str(team_name)] = {
+                "distance": (None if distance_value is None else float(distance_value)),
+                "upper_bound": (
+                    None
+                    if not isinstance(stats, dict)
+                    else float(stats.get("upper_bound", np.inf))
+                ),
+                "median": (
+                    None
+                    if not isinstance(stats, dict)
+                    else float(stats.get("median", np.nan))
+                ),
+                "iqr": (
+                    None
+                    if not isinstance(stats, dict)
+                    else float(stats.get("iqr", np.nan))
+                ),
+                "is_outlier": bool(is_outlier),
+            }
+            all_outlier = all_outlier and bool(is_outlier)
+        return {
+            "applied": bool(per_team),
+            "all_outfield_teams_outlier": bool(all_outlier),
+            "teams": per_team,
+            "iqr_factor": float(self.goalkeeper_outlier_iqr_factor),
+        }
 
     def apply_referee_relabel_gate(
         self,
@@ -333,4 +408,101 @@ class TeamDetector:
             "left_x_bound": left_x_bound,
             "right_x_bound": right_x_bound,
             "sideline_band_distance_m": float(sideline_band_distance_m),
+        }
+
+    def apply_goalkeeper_relabel_gate(
+        self,
+        teams_of_detected_objects,
+        current_class_labels,
+        field_positions,
+        field_width_m,
+    ):
+        if not teams_of_detected_objects or field_width_m is None:
+            return None
+
+        x_positions = []
+        for det_idx, class_name in enumerate(current_class_labels):
+            normalized = str(class_name or "").strip().lower()
+            if normalized not in {"player", "goalkeeper"}:
+                continue
+            field_position = (
+                field_positions[det_idx]
+                if det_idx < len(field_positions)
+                else None
+            )
+            field_position = self._field_position_to_tuple(field_position)
+            if field_position is None:
+                continue
+            x_positions.append(float(field_position[0]))
+
+        if len(x_positions) < 6:
+            return None
+
+        x_positions.sort()
+        left_x_bound = float(x_positions[2])
+        right_x_bound = float(x_positions[-3])
+        lower_sideline_limit = float(self.goalkeeper_sideline_min_distance_m)
+        upper_sideline_limit = float(field_width_m) - float(self.goalkeeper_sideline_min_distance_m)
+
+        for det_idx, detection_info in enumerate(teams_of_detected_objects):
+            relabeled_class_name = str(detection_info.get("class") or "").strip().lower()
+            if relabeled_class_name not in {"player", "referee"}:
+                continue
+
+            field_position = (
+                field_positions[det_idx]
+                if det_idx < len(field_positions)
+                else None
+            )
+            field_position = self._field_position_to_tuple(field_position)
+            outlier_debug = self._goalkeeper_outlier_debug_from_distances(
+                detection_info.get("distances")
+            )
+            color_outlier = bool(
+                isinstance(outlier_debug, dict)
+                and outlier_debug.get("all_outfield_teams_outlier", False)
+            )
+            allowed = False
+            reason = "missing_field_position"
+            if field_position is not None:
+                x_pos, y_pos = field_position
+                outside_x_bounds = (
+                    float(x_pos) < left_x_bound or float(x_pos) > right_x_bound
+                )
+                far_from_sidelines = (
+                    float(y_pos) > lower_sideline_limit
+                    and float(y_pos) < upper_sideline_limit
+                )
+                allowed = bool(color_outlier and outside_x_bounds and far_from_sidelines)
+                if allowed:
+                    reason = "outside_goalkeeper_x_bounds_and_color_outlier"
+                elif not color_outlier:
+                    reason = "outfield_team_color_not_outlier"
+                elif not outside_x_bounds:
+                    reason = "inside_goalkeeper_x_bounds"
+                else:
+                    reason = "inside_goalkeeper_sideline_exclusion_band"
+
+            detection_info["goalkeeper_reassign_gate"] = {
+                "applied": True,
+                "allowed": bool(allowed),
+                "reason": reason,
+                "left_x_bound": left_x_bound,
+                "right_x_bound": right_x_bound,
+                "sideline_min_distance_m": float(self.goalkeeper_sideline_min_distance_m),
+                "field_position_m": list(field_position) if field_position is not None else None,
+                "color_outlier_debug": outlier_debug,
+            }
+            if not allowed:
+                continue
+
+            detection_info["class"] = "goalkeeper"
+            detection_info["team"] = self._nearest_outfield_team_from_distances(
+                detection_info.get("distances")
+            )
+
+        return {
+            "left_x_bound": left_x_bound,
+            "right_x_bound": right_x_bound,
+            "sideline_min_distance_m": float(self.goalkeeper_sideline_min_distance_m),
         }

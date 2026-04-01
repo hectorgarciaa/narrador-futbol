@@ -79,6 +79,8 @@ Una vez disponibles las referencias activas, la asignación se hace por **distan
 
 Cuando el color más cercano es el del árbitro, el detector puede proponer una reetiqueta `player -> referee`. Sin embargo, en el tracking esa propuesta solo se acepta después de la homografía si la detección cumple al menos una de estas condiciones: estar dentro de la franja `+- tracking.referee_sideline_band_distance_m` respecto a las líneas laterales, o caer entre la cuarta `x` más a la izquierda y la cuarta `x` más a la derecha de los jugadores visibles en ese frame.
 
+Además, cuando ya existen referencias actualizadas para los dos equipos de campo, el detector mantiene una estadística robusta de la distribución de distancias LAB dentro de cada equipo (`Q1`, `mediana`, `Q3`, `IQR`). Con esa referencia, el tracking también puede relabelar `player/referee -> goalkeeper` si la detección es un outlier simultáneo respecto a ambos equipos de campo y, tras la homografía, cae fuera del corredor delimitado por la tercera persona más a la izquierda y la tercera más a la derecha visibles en ese frame, manteniéndose además a más de 3 metros de las bandas laterales.
+
 #### 5. Extracción de región de camiseta
 El crop que se analiza es el **50% superior** del bounding box del jugador. Esto excluye el pantalón, las botas y el césped, que introducían ruido en el clustering.
 

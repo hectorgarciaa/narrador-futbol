@@ -94,15 +94,15 @@ class TrackerLogicMixin:
             and candidate_class in {"player", "goalkeeper"}
         ):
             for class_option in ordered_candidates:
-                if class_option in {"player", "goalkeeper"}:
-                    return class_option
-            return candidate_class
+                if class_option == "goalkeeper":
+                    return "goalkeeper"
+            return None
 
-        if candidate_state.get("reserved_seed") and candidate_class == "player":
+        if candidate_state.get("reserved_seed") and candidate_class == "goalkeeper":
             for class_option in ordered_candidates:
-                if class_option in {"player", "goalkeeper"}:
-                    return class_option
-            return "player"
+                if class_option == "goalkeeper":
+                    return "goalkeeper"
+            return None
 
         if candidate_class is not None:
             for class_option in ordered_candidates:
@@ -300,14 +300,20 @@ class TrackerLogicMixin:
 
     def _next_free_canonical_id(self, canonical_state, class_name=None):
         reserved_referee_ids = set(getattr(self, "referee_canonical_ids", ()))
+        reserved_goalkeeper_ids = set(getattr(self, "special_seed_canonical_ids", (1, 2)))
         normalized_class_name = self._normalize_class_label(class_name)
         if normalized_class_name == "referee":
             candidate_range = [canonical_id for canonical_id in self.referee_canonical_ids]
+        elif normalized_class_name == "goalkeeper":
+            candidate_range = [
+                canonical_id for canonical_id in self.special_seed_canonical_ids
+            ]
         else:
             candidate_range = [
                 canonical_id
                 for canonical_id in range(1, self.max_total_tracks + 1)
                 if canonical_id not in reserved_referee_ids
+                and canonical_id not in reserved_goalkeeper_ids
             ]
         for canonical_id in candidate_range:
             if canonical_id not in canonical_state:
@@ -631,7 +637,7 @@ class TrackerLogicMixin:
     def _build_reserved_penalty_spot_state(self, field_position):
         return {
             "bbox": None,
-            "class_name": "player",
+            "class_name": "goalkeeper",
             "last_frame": 0,
             "team": None,
             "field_position": tuple(float(v) for v in field_position),
@@ -748,6 +754,7 @@ class TrackerLogicMixin:
             "distances": None,
             "shirt_color": None,
             "bbox_size": bbox_size,
+            "class_tracker": "goalkeeper",
             "field_position_m": list(field_position) if field_position is not None else None,
             "ground_point_image": (
                 [float(projected_ground_point[0]), float(projected_ground_point[1])]
@@ -760,10 +767,16 @@ class TrackerLogicMixin:
         }
 
     def _initialize_reserved_penalty_spot_players(self, canonical_state):
-        for field_position in self._reserved_penalty_spot_field_positions():
-            next_free_id = self._next_free_canonical_id(canonical_state)
-            if next_free_id is None:
-                break
+        reserved_goalkeeper_ids = tuple(
+            int(canonical_id)
+            for canonical_id in getattr(self, "special_seed_canonical_ids", (1, 2))
+        )
+        for next_free_id, field_position in zip(
+            reserved_goalkeeper_ids,
+            self._reserved_penalty_spot_field_positions(),
+        ):
+            if next_free_id in canonical_state:
+                continue
             canonical_state[next_free_id] = self._build_reserved_penalty_spot_state(
                 field_position
             )
@@ -989,7 +1002,7 @@ class TrackerLogicMixin:
         if (
             candidate_state.get("special_penalty_seed")
             and candidate_class in {"player", "goalkeeper"}
-            and detection_class in {"player", "goalkeeper"}
+            and detection_class == "goalkeeper"
         ):
             if not self._is_motion_compatible(
                 candidate_state,
@@ -1004,8 +1017,8 @@ class TrackerLogicMixin:
 
         if (
             candidate_state.get("reserved_seed")
-            and candidate_class == "player"
-            and detection_class in {"player", "goalkeeper"}
+            and candidate_class == "goalkeeper"
+            and detection_class == "goalkeeper"
         ):
             if not self._is_motion_compatible(
                 candidate_state,
@@ -1503,7 +1516,7 @@ class TrackerLogicMixin:
         if (
             candidate_state.get("special_penalty_seed")
             and candidate_class in {"player", "goalkeeper"}
-            and detection_class in {"player", "goalkeeper"}
+            and detection_class == "goalkeeper"
         ):
             if not self._is_motion_compatible(
                 candidate_state,
@@ -1517,8 +1530,8 @@ class TrackerLogicMixin:
 
         if (
             candidate_state.get("reserved_seed")
-            and candidate_class == "player"
-            and detection_class in {"player", "goalkeeper"}
+            and candidate_class == "goalkeeper"
+            and detection_class == "goalkeeper"
         ):
             if not self._is_motion_compatible(
                 candidate_state,
@@ -1590,7 +1603,7 @@ class TrackerLogicMixin:
         if (
             candidate_state.get("special_penalty_seed")
             and candidate_class in {"player", "goalkeeper"}
-            and detection_class in {"player", "goalkeeper"}
+            and detection_class == "goalkeeper"
         ):
             if not self._is_motion_compatible(
                 candidate_state,
@@ -1604,8 +1617,8 @@ class TrackerLogicMixin:
 
         if (
             candidate_state.get("reserved_seed")
-            and candidate_class == "player"
-            and detection_class in {"player", "goalkeeper"}
+            and candidate_class == "goalkeeper"
+            and detection_class == "goalkeeper"
         ):
             if not self._is_motion_compatible(
                 candidate_state,

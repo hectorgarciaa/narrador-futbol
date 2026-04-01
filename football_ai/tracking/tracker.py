@@ -130,6 +130,18 @@ class Tracker(TrackerLogicMixin):
         )
         self.reserve_penalty_spot_seed_players = tracker_conf["reserve_penalty_spot_seed_players"]
         self.reserve_penalty_spot_seed_match_distance_m = tracker_conf["reserve_penalty_spot_seed_match_distance_m"]
+        configured_special_seed_ids = tracker_conf.get("special_seed_canonical_ids", [1, 2])
+        self.special_seed_canonical_ids = tuple(
+            sorted(
+                {
+                    int(canonical_id)
+                    for canonical_id in configured_special_seed_ids
+                    if self._normalize_optional_positive_int(canonical_id) is not None
+                }
+            )
+        )
+        if not self.special_seed_canonical_ids:
+            self.special_seed_canonical_ids = (1, 2)
         self.referee_recovery_max_lost_frames = tracker_conf["referee_recovery_max_lost_frames"]
         self.referee_recovery_max_distance = tracker_conf["referee_recovery_max_distance"]
         configured_referee_ids = tracker_conf.get("referee_canonical_ids", [23, 24, 25])
@@ -316,6 +328,16 @@ class Tracker(TrackerLogicMixin):
             self.referee_field_width_m,
             self.referee_sideline_band_distance_m,
         )
+        current_class_labels_after_referee_gate = np.array(
+            [dicc["class"] for dicc in teams_of_detected_objects],
+            dtype=object,
+        )
+        self.team_detector.apply_goalkeeper_relabel_gate(
+            teams_of_detected_objects,
+            current_class_labels_after_referee_gate,
+            field_positions,
+            self.referee_field_width_m,
+        )
         teams_labels = np.array(
             [dicc["team"] for dicc in teams_of_detected_objects],
             dtype=object,
@@ -342,6 +364,9 @@ class Tracker(TrackerLogicMixin):
                 if raw_idx < len(teams_of_detected_objects):
                     raw_detection["referee_reassign_gate"] = teams_of_detected_objects[raw_idx].get(
                         "referee_reassign_gate"
+                    )
+                    raw_detection["goalkeeper_reassign_gate"] = teams_of_detected_objects[raw_idx].get(
+                        "goalkeeper_reassign_gate"
                     )
         subphase_rows.append(("Construir arrays de labels", (perf_counter() - t0) * 1000.0))
 
@@ -801,7 +826,7 @@ class Tracker(TrackerLogicMixin):
                 continue
             if not state.get("reserved_seed", False):
                 continue
-            tracks["player"][n_frame][canonical_id] = build_reserved_seed_track_payload_fn(
+            tracks["goalkeeper"][n_frame][canonical_id] = build_reserved_seed_track_payload_fn(
                 state,
                 field_projection,
             )
@@ -1255,6 +1280,10 @@ class Tracker(TrackerLogicMixin):
             [dicc.get("referee_reassign_gate") for dicc in teams_of_detected_objects],
             dtype=object,
         )
+        detections_sv.data["goalkeeper_reassign_gate"] = np.array(
+            [dicc.get("goalkeeper_reassign_gate") for dicc in teams_of_detected_objects],
+            dtype=object,
+        )
 
         detections_sv.data["field_position"] = np.asarray(field_positions, dtype=np.float32)
         detections_sv.data["ground_point_image"] = np.asarray(ground_points_projected, dtype=np.float32)
@@ -1438,6 +1467,7 @@ class Tracker(TrackerLogicMixin):
             "class_relabel": metadata.get("class"),
             "class_yolo": metadata.get("class_yolo"),
             "referee_reassign_gate": metadata.get("referee_reassign_gate"),
+            "goalkeeper_reassign_gate": metadata.get("goalkeeper_reassign_gate"),
             "bbox_size": metadata.get("bbox_size"),
             "field_position_m": (
                 list(self._field_position_to_tuple(field_position))
