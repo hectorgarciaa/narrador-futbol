@@ -10,19 +10,19 @@ Convierte un `tracks.json` del tracker actual a un parquet ancho compatible con 
 
 - fusiona `player` y `goalkeeper` en 22 slots fijos (`home_1..11`, `away_1..11`);
 - conserva 3 árbitros en slots `referee_1..3`;
-- genera `ball_x/ball_y` y columnas de estado (`frame_id`, `period_id`, `timestamp`, `phase_id`, `episode_id`, `ball_state`, `ball_owning_team_id`, `player_id`);
+- genera columnas de estado (`frame_id`, `period_id`, `timestamp`, `phase_id`, `episode_id`, `ball_state`, `ball_owning_team_id`, `player_id`) y deja `ball_x/ball_y` vacío de forma intencionada;
 - interpola huecos internos por coordenadas de campo con interpolación lineal;
 - asigna los slots de jugadores por ajuste espacial a una plantilla base de equipo para mantener una semántica más estable de `home_1..11` y `away_1..11`;
 - suaviza temporalmente las trayectorias exportadas con mediana móvil, Savitzky-Golay y limitación de jitter antes de recalcular velocidades;
 - rellena extremos con arrastre (`ffill/bfill`);
 - si un slot nunca aparece en el clip, sintetiza una trayectoria razonable a partir de una plantilla simple de formación y la desplaza según el centro del equipo visible en ese frame;
-- para el balón, usa `field_position_m` cuando existe; si no, cae a una heurística sencilla de portador o al último estado válido;
+- no exporta señal de balón usable en `ball_x/ball_y`, para evitar contaminar PathCRF con proyecciones pobres del balón;
 - por defecto **no** exporta `player_id` ni `ball_owning_team_id` como señal de posesión hacia PathCRF, para no contaminar la inferencia con una heurística ruidosa;
 - ignora seeds sintéticos y observaciones fantasma (`bbox=None`, `confidence<=0`) al construir slots para PathCRF.
 
 ### Limitaciones explícitas
 
-- El `tracks.json` ya puede incluir `field_position_m` del balón cuando existe proyección válida; aun así, `ball_x/ball_y` puede seguir recurriendo al portador inferido o a fallback temporal cuando esa proyección falte o sea poco fiable.
+- `ball_x/ball_y` queda vacío siempre en este adaptador; por tanto, cualquier visualización o postproceso dependiente del balón debe tratar esa ausencia explícitamente.
 - Si faltan jugadores durante todo el clip, el adaptador crea slots sintéticos; eso sirve para estructurar PathCRF, pero no equivale a tracking real.
 - `phase_id`, `episode_id` y `ball_state` salen en esta primera fase como una única secuencia viva (`1`, `1`, `"alive"`). Más adelante se puede endurecer con segmentación real.
 - Si el clip ya es un tramo continuo corto de juego vivo, mantener un único `episode_id` es intencional; no se corta artificialmente sin una heurística fiable de reinicio.

@@ -623,7 +623,7 @@ python scripts/train/finetune_player.py
 ```bash
 python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
 ```
-Este paso genera un parquet ancho en `football_ai/actions/pathcrf/data/narrador/tracking_processed/` con 22 slots fijos de jugadores, 3 árbitros, balón aproximado y variables de estado por frame. Si faltan tracks en algún frame, el adaptador interpola huecos internos y rellena ausencias persistentes con una plantilla simple de formación alineada al equipo visible. Para estimar el portador, prioriza `player_id`/`ball_owning_player_id` cuando el tracker ya trae posesión online; si no, usa el fallback por jugador visible más cercano.
+Este paso genera un parquet ancho en `football_ai/actions/pathcrf/data/narrador/tracking_processed/` con 22 slots fijos de jugadores, 3 árbitros y variables de estado por frame. Si faltan tracks en algún frame, el adaptador interpola huecos internos y rellena ausencias persistentes con una plantilla simple de formación alineada al equipo visible.
 En la versión actual del adaptador, las trayectorias exportadas se suavizan de forma más agresiva con mediana móvil, Savitzky-Golay y limitación de jitter por frame. Además, los slots de cada equipo se asignan por ajuste espacial a una plantilla táctica base en vez de por orden de aparición, se filtran seeds/observaciones sintéticas antes de recalcular velocidades y `player_id`/`ball_owning_team_id` se dejan vacíos por defecto en el parquet final para no contaminar PathCRF con una posesión heurística poco fiable.
 
 ### Ejecutar inferencia PathCRF sobre la salida del tracker
@@ -646,7 +646,7 @@ El script:
 
 Notas:
 - el wrapper local soporta los checkpoints `set_*` incluidos en el repo clonado aunque la `venv` no tenga `torch_geometric`; si se quisiera usar un checkpoint `gat`, entonces sí habría que instalar esa dependencia;
-- si el `tracks.json` trae `field_position_m` del balón, el adaptador lo usa; si no, el balón cae al portador inferido o al último estado válido.
+- `ball_x/ball_y` se deja vacío de forma deliberada para no contaminar PathCRF con una proyección de balón poco fiable.
 
 ### Grid search de hiperparámetros del tracker
 ```bash

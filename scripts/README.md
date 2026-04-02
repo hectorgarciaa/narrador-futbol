@@ -120,13 +120,13 @@ python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/p
 2. Fusiona `player` y `goalkeeper` en 22 slots fijos (`home_1..11`, `away_1..11`) y conserva 3 árbitros (`referee_1..3`).
 3. Interpola huecos internos con coordenadas de campo (`field_position_m`) y rellena los slots que nunca aparecen con una plantilla simple de formación alineada al equipo visible.
 4. Asigna los slots por cercanía a una plantilla espacial base de equipo, suaviza las trayectorias con mediana móvil, Savitzky-Golay y limitación de jitter, corrige picos aislados imposibles y filtra seeds/observaciones sintéticas antes de recalcular movimiento.
-5. Genera una trayectoria aproximada del balón. Si `tracks.json` trae `field_position_m` del balón, la usa; si no, cae al portador inferido o al último estado válido.
+5. Deja `ball_x/ball_y` vacío de forma deliberada para no introducir una señal de balón poco fiable en el parquet de PathCRF.
 6. Por defecto deja `player_id` y `ball_owning_team_id` vacíos en el parquet final para no inyectar una señal de posesión heurística y ruidosa en PathCRF.
 7. Exporta:
    - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.parquet`
    - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.summary.json`
 
-**Limitación importante:** aunque exista proyección parcial del balón, `ball_x/ball_y` sigue siendo una señal auxiliar y no una reconstrucción física exacta del balón comparable al tracking del paper.
+**Limitación importante:** el parquet exportado para PathCRF no incluye señal de balón usable; el modelo trabaja solo con la geometría/kinemática de jugadores y nodos exteriores.
 
 ---
 
