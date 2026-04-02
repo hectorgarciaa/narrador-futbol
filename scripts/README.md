@@ -119,18 +119,20 @@ python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/p
 1. Lee el `tracks.json` generado por `scripts/track.py`.
 2. Fusiona `player` y `goalkeeper` en 22 slots fijos (`home_1..11`, `away_1..11`) y conserva 3 árbitros (`referee_1..3`).
 3. Interpola huecos internos con coordenadas de campo (`field_position_m`) y rellena los slots que nunca aparecen con una plantilla simple de formación alineada al equipo visible.
-4. Genera una trayectoria aproximada del balón y del portador actual. Si `tracks.json` trae posesión (`player_id`/`ball_owning_player_id`), se usa ese portador como señal principal; si no, cae al fallback por jugador más cercano visible.
-5. Exporta:
+4. Asigna los slots por cercanía a una plantilla espacial base de equipo, suaviza las trayectorias con mediana móvil, Savitzky-Golay y limitación de jitter, corrige picos aislados imposibles y filtra seeds/observaciones sintéticas antes de recalcular movimiento.
+5. Genera una trayectoria aproximada del balón. Si `tracks.json` trae `field_position_m` del balón, la usa; si no, cae al portador inferido o al último estado válido.
+6. Por defecto deja `player_id` y `ball_owning_team_id` vacíos en el parquet final para no inyectar una señal de posesión heurística y ruidosa en PathCRF.
+7. Exporta:
    - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.parquet`
    - `football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.summary.json`
 
-**Limitación importante:** como el `tracks.json` actual no proyecta el balón al campo, `ball_x/ball_y` es una estimación basada en el portador inferido y no una reconstrucción física exacta.
+**Limitación importante:** aunque exista proyección parcial del balón, `ball_x/ball_y` sigue siendo una señal auxiliar y no una reconstrucción física exacta del balón comparable al tracking del paper.
 
 ---
 
 ### `actions/run_pathcrf.py` — Conversión + inferencia + drawer PathCRF
 
-**Objetivo:** tomar la salida ya guardada de `scripts/track.py`, convertirla a formato PathCRF, ejecutar inferencia con el repo clonado en `football_ai/actions/repo/pathcrf/` y generar una visualización 2D del campo con la arista activa.
+**Objetivo:** tomar la salida ya guardada de `scripts/track.py`, convertirla a formato PathCRF, ejecutar inferencia con el repo clonado en `football_ai/actions/repo/pathcrf/` y generar una visualización PathCRF. Si el script conoce el vídeo original y el `tracks.json`, el render sale sobre el broadcast real con `bbox` reales y un mini-mapa 2D incrustado; si no, cae al modo 2D puro.
 
 **CLI:**
 ```bash
@@ -150,7 +152,7 @@ python scripts/actions/run_pathcrf.py output/tracks_json/tracker/partido_corto_t
 - `--no-crf`: fuerza decodificación sin CRF.
 - `--decode indep|greedy|viterbi`: modo de decodificación si `--no-crf`.
 - `--no-render`: omite el MP4 del campo y deja solo parquet/json.
-- `--render-width` / `--render-height`: tamaño del video 2D.
+- `--render-width` / `--render-height`: tamaño del render de fallback 2D o del inset cuando hay broadcast real.
 
 **Flujo:**
 1. Resuelve la entrada: shortcut de `config.yaml`, vídeo, `tracks.json` o parquet ya convertido.
@@ -162,7 +164,7 @@ python scripts/actions/run_pathcrf.py output/tracks_json/tracker/partido_corto_t
    - `*_macro_prev.parquet`
    - `*_macro_next.parquet`
    - `*_summary.json`
-5. Si no se desactiva, genera `*_pitch_pathcrf.mp4` con el nuevo drawer 2D.
+5. Si no se desactiva, genera `*_pitch_pathcrf.mp4` con el nuevo drawer. Con shortcut de vídeo o `tracks.json` asociado intenta renderizar sobre el vídeo original con `bbox` reales; con solo parquet, usa el fallback 2D.
 
 **Nota de entorno:** los checkpoints `set_*` del repo clonado funcionan aunque falte `torch_geometric` en la `venv`; el wrapper local mete un stub mínimo porque ese import solo es imprescindible para la variante `gat`.
 

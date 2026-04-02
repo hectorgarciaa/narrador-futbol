@@ -119,7 +119,7 @@ Compatibilidad de clases en `tracks`:
 
 ### Objetivo
 
-Renderizar una visualización puramente 2D del campo a partir del parquet ancho de PathCRF y de la secuencia de aristas inferida (`edge_src`, `edge_dst`).
+Renderizar PathCRF a partir del parquet ancho y de la secuencia de aristas inferida (`edge_src`, `edge_dst`). Si el pipeline conoce también el vídeo original y el `tracks.json`, el drawer pinta sobre el broadcast real usando las `bbox` reales e incrusta un mini-mapa 2D en la esquina superior derecha. Si no dispone de eso, cae al modo 2D puro.
 
 ### Método principal
 
@@ -140,11 +140,13 @@ drawer.render_tracking_and_edges(
 
 ### Qué pinta
 
-- fondo de campo 2D con líneas, áreas, puntos de penalti y porterías;
-- nodos `home_1..11` y `away_1..11` coloreados por equipo;
-- árbitros `referee_1..3` como nodos grises;
-- nodos exteriores de PathCRF (`out_left`, `out_right`, `out_bottom`, `out_top`);
-- balón estimado (`ball_x`, `ball_y`);
+- sobre broadcast real, las `bbox` reales de `player`, `goalkeeper`, `referee` y `ball` cuando existen;
+- resaltado visual de `edge_src` y `edge_dst` sobre esas cajas si se puede mapear el slot PathCRF al `raw_track_id`;
+- mini-mapa 2D semitransparente en la esquina superior derecha con:
+  - nodos `home_1..11` y `away_1..11` coloreados por equipo;
+  - árbitros `referee_1..3` como nodos grises;
+  - nodos exteriores de PathCRF (`out_left`, `out_right`, `out_bottom`, `out_top`);
+  - balón estimado (`ball_x`, `ball_y`);
 - arista activa del frame:
   - flecha si `edge_src != edge_dst`;
   - anillo de control si es self-loop;

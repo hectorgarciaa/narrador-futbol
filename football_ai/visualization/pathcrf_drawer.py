@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import cv2
+import json
 import numpy as np
 import pandas as pd
 
@@ -261,6 +262,215 @@ class PathCRFDrawer:
         )
         return edge_src, edge_dst
 
+    @staticmethod
+    def _safe_bbox(bbox: Any) -> tuple[int, int, int, int] | None:
+        if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+            return None
+        try:
+            x1, y1, x2, y2 = [int(round(float(value))) for value in bbox[:4]]
+        except (TypeError, ValueError):
+            return None
+        return x1, y1, x2, y2
+
+    @staticmethod
+    def _bbox_center(bbox: tuple[int, int, int, int] | None) -> tuple[int, int] | None:
+        if bbox is None:
+            return None
+        x1, y1, x2, y2 = bbox
+        return int(round((x1 + x2) * 0.5)), int(round((y1 + y2) * 0.5))
+
+    @staticmethod
+    def _normalize_tracks_payload(tracks_payload: Mapping[str, Any] | None) -> dict[str, list[dict[str, Any]]]:
+        if not isinstance(tracks_payload, Mapping):
+            return {}
+        normalized: dict[str, list[dict[str, Any]]] = {}
+        for class_name in ("player", "goalkeeper", "referee", "ball"):
+            frames = tracks_payload.get(class_name, [])
+            if isinstance(frames, list):
+                normalized[class_name] = frames
+        return normalized
+
+    def _resolve_slot_lookup(self, conversion_summary: Mapping[str, Any] | None) -> tuple[dict[str, str], dict[str, str]]:
+        if not isinstance(conversion_summary, Mapping):
+            return {}, {}
+        raw_to_slot: dict[str, str] = {}
+        for mapping_name in ("person_slot_assignments", "referee_slot_assignments"):
+            mapping = conversion_summary.get(mapping_name)
+            if not isinstance(mapping, Mapping):
+                continue
+            for raw_id, slot_name in mapping.items():
+                raw_to_slot[str(raw_id)] = str(slot_name)
+        slot_to_raw = {slot_name: raw_id for raw_id, slot_name in raw_to_slot.items()}
+        return raw_to_slot, slot_to_raw
+
+    def _frame_tracks_payload(
+        self,
+        tracks_payload: Mapping[str, list[dict[str, Any]]],
+        frame_id: int,
+    ) -> dict[str, dict[str, Mapping[str, Any]]]:
+        result = {class_name: {} for class_name in ("player", "goalkeeper", "referee", "ball")}
+        for class_name, frames in tracks_payload.items():
+            if frame_id < 0 or frame_id >= len(frames):
+                continue
+            frame_map = frames[frame_id]
+            if not isinstance(frame_map, Mapping):
+                continue
+            result[class_name] = {str(raw_id): payload for raw_id, payload in frame_map.items() if isinstance(payload, Mapping)}
+        return result
+
+    def _role_color(self, slot_name: str | None, class_name: str) -> tuple[int, int, int]:
+        if isinstance(slot_name, str) and slot_name.startswith("home_"):
+            return self.home_color
+        if isinstance(slot_name, str) and slot_name.startswith("away_"):
+            return self.away_color
+        if isinstance(slot_name, str) and slot_name.startswith("referee_"):
+            return self.referee_color
+        if class_name == "ball":
+            return self.ball_color
+        if class_name == "referee":
+            return self.referee_color
+        return self.home_color if class_name == "goalkeeper" else self.away_color
+
+    def _draw_bbox_annotation(
+        self,
+        frame: np.ndarray,
+        bbox: tuple[int, int, int, int],
+        label: str,
+        color: tuple[int, int, int],
+        active_src: bool,
+        active_dst: bool,
+    ) -> None:
+        x1, y1, x2, y2 = bbox
+        thickness = 2
+        if active_src:
+            cv2.rectangle(
+                frame,
+                (max(0, x1 - 4), max(0, y1 - 4)),
+                (min(frame.shape[1] - 1, x2 + 4), min(frame.shape[0] - 1, y2 + 4)),
+                self.active_src_color,
+                2,
+            )
+        if active_dst:
+            cv2.rectangle(
+                frame,
+                (max(0, x1 - 7), max(0, y1 - 7)),
+                (min(frame.shape[1] - 1, x2 + 7), min(frame.shape[0] - 1, y2 + 7)),
+                self.active_dst_color,
+                2,
+            )
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+        if label:
+            self._draw_text_box(
+                frame,
+                label,
+                (max(6, x1), max(18, y1 - 8)),
+                font_scale=0.45,
+                bg_color=(18, 18, 18),
+            )
+
+    def _draw_tracks_on_video(
+        self,
+        frame: np.ndarray,
+        frame_tracks: Mapping[str, dict[str, Mapping[str, Any]]],
+        raw_to_slot: Mapping[str, str],
+        edge_src: str | None,
+        edge_dst: str | None,
+    ) -> None:
+        ordered_classes = ("player", "goalkeeper", "referee", "ball")
+        for class_name in ordered_classes:
+            for raw_id, payload in frame_tracks.get(class_name, {}).items():
+                bbox = self._safe_bbox(payload.get("bbox"))
+                if bbox is None:
+                    continue
+                slot_name = raw_to_slot.get(str(raw_id))
+                if class_name == "ball":
+                    label = "BALL"
+                elif slot_name is not None:
+                    label = self._player_label(slot_name)
+                else:
+                    label = f"{class_name[:1].upper()}{raw_id}"
+                self._draw_bbox_annotation(
+                    frame=frame,
+                    bbox=bbox,
+                    label=label,
+                    color=self._role_color(slot_name, class_name),
+                    active_src=(slot_name == edge_src),
+                    active_dst=(slot_name == edge_dst),
+                )
+
+        ball_payload = next(iter(frame_tracks.get("ball", {}).values()), None)
+        if isinstance(ball_payload, Mapping):
+            bbox = self._safe_bbox(ball_payload.get("bbox"))
+            center = self._bbox_center(bbox)
+            if center is not None:
+                cv2.circle(frame, center, 5, self.ball_color, -1)
+                cv2.circle(frame, center, 5, self.ball_border_color, 2)
+
+    def _draw_video_active_edge(
+        self,
+        frame: np.ndarray,
+        frame_tracks: Mapping[str, dict[str, Mapping[str, Any]]],
+        slot_to_raw: Mapping[str, str],
+        edge_src: str | None,
+        edge_dst: str | None,
+    ) -> None:
+        if not isinstance(edge_src, str) or not isinstance(edge_dst, str):
+            return
+        if edge_src in OUTSIDE_NODE_POINTS or edge_dst in OUTSIDE_NODE_POINTS:
+            return
+
+        def _slot_center(slot_name: str) -> tuple[int, int] | None:
+            raw_id = slot_to_raw.get(slot_name)
+            if raw_id is None:
+                return None
+            for class_name in ("player", "goalkeeper", "referee"):
+                payload = frame_tracks.get(class_name, {}).get(str(raw_id))
+                if not isinstance(payload, Mapping):
+                    continue
+                return self._bbox_center(self._safe_bbox(payload.get("bbox")))
+            return None
+
+        src_center = _slot_center(edge_src)
+        dst_center = _slot_center(edge_dst)
+        if src_center is None or dst_center is None:
+            return
+        if edge_src == edge_dst:
+            cv2.circle(frame, src_center, 22, self.active_edge_color, 2)
+            return
+        cv2.arrowedLine(frame, src_center, dst_center, self.active_edge_color, 3, cv2.LINE_AA, tipLength=0.15)
+
+    def _build_pitch_inset(
+        self,
+        tracking_row: pd.Series,
+        edge_row: pd.Series | None,
+        event_row: pd.Series | None,
+        frame_size: tuple[int, int],
+    ) -> np.ndarray:
+        return self._draw_frame(
+            tracking_row=tracking_row,
+            edge_row=edge_row,
+            event_row=event_row,
+            frame_size=frame_size,
+        )
+
+    def _blend_inset(
+        self,
+        base_frame: np.ndarray,
+        inset_frame: np.ndarray,
+        opacity: float = 0.78,
+        margin_px: int = 18,
+    ) -> None:
+        inset_h, inset_w = inset_frame.shape[:2]
+        frame_h, frame_w = base_frame.shape[:2]
+        x1 = max(0, frame_w - inset_w - margin_px)
+        y1 = max(0, margin_px)
+        x2 = min(frame_w, x1 + inset_w)
+        y2 = min(frame_h, y1 + inset_h)
+        roi = base_frame[y1:y2, x1:x2]
+        inset_crop = inset_frame[: y2 - y1, : x2 - x1]
+        cv2.addWeighted(inset_crop, float(opacity), roi, float(1.0 - opacity), 0.0, dst=roi)
+        cv2.rectangle(base_frame, (x1, y1), (x2 - 1, y2 - 1), self.line_color, 2)
+
     def _draw_overlay(
         self,
         frame: np.ndarray,
@@ -364,6 +574,9 @@ class PathCRFDrawer:
         events: pd.DataFrame | None = None,
         fps: float = 25.0,
         frame_size: tuple[int, int] = (1280, 720),
+        video_path: str | Path | None = None,
+        tracks_path: str | Path | None = None,
+        conversion_summary: Mapping[str, Any] | None = None,
         show: bool = False,
         window_name: str = "PathCRF",
     ) -> Path:
@@ -377,10 +590,37 @@ class PathCRFDrawer:
             if "frame_id" in events_df.columns:
                 events_df = events_df.set_index("frame_id")
 
+        tracks_payload: dict[str, list[dict[str, Any]]] = {}
+        raw_to_slot: dict[str, str] = {}
+        slot_to_raw: dict[str, str] = {}
+        if tracks_path is not None:
+            tracks_path = Path(tracks_path).expanduser().resolve()
+            if tracks_path.exists():
+                with tracks_path.open("r", encoding="utf-8") as f:
+                    tracks_payload = self._normalize_tracks_payload(json.load(f))
+        raw_to_slot, slot_to_raw = self._resolve_slot_lookup(conversion_summary)
+
+        video_cap = None
+        effective_frame_size = frame_size
+        use_video_background = False
+        if video_path is not None:
+            candidate_video_path = Path(video_path).expanduser().resolve()
+            if candidate_video_path.exists():
+                video_cap = cv2.VideoCapture(str(candidate_video_path))
+                if video_cap.isOpened():
+                    width = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    if width > 0 and height > 0:
+                        effective_frame_size = (width, height)
+                        use_video_background = bool(tracks_payload)
+                else:
+                    video_cap.release()
+                    video_cap = None
+
         output_path = Path(output_path).expanduser().resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(output_path), fourcc, float(fps), frame_size)
+        writer = cv2.VideoWriter(str(output_path), fourcc, float(fps), effective_frame_size)
         if not writer.isOpened():
             raise RuntimeError(f"No se pudo crear el video de salida: {output_path}")
 
@@ -392,12 +632,37 @@ class PathCRFDrawer:
                 event_row = events_df.loc[frame_id] if events_df is not None and frame_id in events_df.index else None
                 if isinstance(event_row, pd.DataFrame):
                     event_row = event_row.iloc[0]
-                frame = self._draw_frame(
-                    tracking_row=tracking_row,
-                    edge_row=edge_row,
-                    event_row=event_row,
-                    frame_size=frame_size,
-                )
+                if video_cap is not None:
+                    ok, base_frame = video_cap.read()
+                    if not ok:
+                        break
+                else:
+                    base_frame = None
+
+                if use_video_background and base_frame is not None:
+                    frame = base_frame.copy()
+                    edge_src = edge_row.get("edge_src") if edge_row is not None else None
+                    edge_dst = edge_row.get("edge_dst") if edge_row is not None else None
+                    frame_tracks = self._frame_tracks_payload(tracks_payload, int(frame_id))
+                    self._draw_tracks_on_video(frame, frame_tracks, raw_to_slot, edge_src, edge_dst)
+                    self._draw_video_active_edge(frame, frame_tracks, slot_to_raw, edge_src, edge_dst)
+                    inset_w = max(280, int(frame.shape[1] * 0.28))
+                    inset_h = max(180, int(frame.shape[0] * 0.28))
+                    inset_frame = self._build_pitch_inset(
+                        tracking_row=tracking_row,
+                        edge_row=edge_row,
+                        event_row=event_row,
+                        frame_size=(inset_w, inset_h),
+                    )
+                    self._blend_inset(frame, inset_frame, opacity=0.8, margin_px=18)
+                    self._draw_overlay(frame, tracking_row, edge_src, edge_dst, event_row)
+                else:
+                    frame = self._draw_frame(
+                        tracking_row=tracking_row,
+                        edge_row=edge_row,
+                        event_row=event_row,
+                        frame_size=effective_frame_size,
+                    )
                 writer.write(frame)
                 if show_window:
                     cv2.imshow(window_name, frame)
@@ -405,6 +670,8 @@ class PathCRFDrawer:
                         break
         finally:
             writer.release()
+            if video_cap is not None:
+                video_cap.release()
             if show_window:
                 cv2.destroyWindow(window_name)
 

@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
+from scipy.signal import savgol_filter
+from scipy.optimize import linear_sum_assignment
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,16 @@ class PathCRFAdapterConfig:
     expected_referees: int = 3
     carrier_max_distance_px: float = 120.0
     bbox_inside_padding_px: float = 10.0
+    export_possession_targets: bool = False
+    framewise_person_slot_assignment: bool = False
+    player_outlier_speed_mps: float = 14.0
+    referee_outlier_speed_mps: float = 12.0
+    ball_outlier_speed_mps: float = 35.0
+    smoothing_window: int = 9
+    smoothing_center: bool = True
+    savgol_window: int = 11
+    savgol_polyorder: int = 2
+    smoothing_passes: int = 2
     output_dir: Path = Path("football_ai/actions/pathcrf/data/narrador/tracking_processed")
 
 
@@ -135,6 +147,7 @@ class PathCRFTracksAdapter:
         frame_df = self._build_tracking_dataframe(
             tracks=tracks,
             frame_count=frame_count,
+            records=records,
             person_assignments=person_assignments,
             referee_assignments=referee_assignments,
         )
@@ -193,6 +206,8 @@ class PathCRFTracksAdapter:
                 if not isinstance(frame_map, Mapping):
                     continue
                 for raw_id, payload in frame_map.items():
+                    if class_name in {"player", "goalkeeper", "referee"} and not self._should_use_payload_for_slot_tracking(payload):
+                        continue
                     record = records[class_name].setdefault(
                         str(raw_id),
                         TrackRecord(raw_track_id=str(raw_id), class_name=class_name),
@@ -249,26 +264,7 @@ class PathCRFTracksAdapter:
         person_records = [record for record in person_records if record.observations]
         referee_records = [record for record in records["referee"].values() if record.observations]
 
-        team_records: dict[str, list[TrackRecord]] = {}
-        for record in person_records:
-            team_name = record.stable_team_name()
-            if team_name:
-                team_records.setdefault(team_name, []).append(record)
-
-        ordered_teams = self._order_teams_by_side(team_records)
-        side_by_team = {}
-        if ordered_teams:
-            side_by_team[ordered_teams[0]] = "home"
-        if len(ordered_teams) > 1:
-            side_by_team[ordered_teams[1]] = "away"
-
-        unknown_records = [record for record in person_records if record.stable_team_name() is None]
-        for record in unknown_records:
-            median_x = record.median_x(self.config.pitch_length_m / 2.0)
-            side = "home" if median_x <= (self.config.pitch_length_m / 2.0) else "away"
-            synthetic_team_name = f"{side}_unknown"
-            side_by_team[synthetic_team_name] = side
-            team_records.setdefault(synthetic_team_name, []).append(record)
+        team_records, side_by_team = self._group_person_records_by_side(person_records)
 
         home_records = [record for team, recs in team_records.items() if side_by_team.get(team) == "home" for record in recs]
         away_records = [record for team, recs in team_records.items() if side_by_team.get(team) == "away" for record in recs]
@@ -289,6 +285,33 @@ class PathCRFTracksAdapter:
             "referee": [f"referee_{idx}" for idx in range(1, self.config.expected_referees + 1) if f"referee_{idx}" not in referee_assignments],
         }
         return person_assignments, referee_assignments, synthetic_slots
+
+    def _group_person_records_by_side(
+        self,
+        person_records: list[TrackRecord],
+    ) -> tuple[dict[str, list[TrackRecord]], dict[str, str]]:
+        team_records: dict[str, list[TrackRecord]] = {}
+        for record in person_records:
+            team_name = record.stable_team_name()
+            if team_name:
+                team_records.setdefault(team_name, []).append(record)
+
+        ordered_teams = self._order_teams_by_side(team_records)
+        side_by_team: dict[str, str] = {}
+        if ordered_teams:
+            side_by_team[ordered_teams[0]] = "home"
+        if len(ordered_teams) > 1:
+            side_by_team[ordered_teams[1]] = "away"
+
+        unknown_records = [record for record in person_records if record.stable_team_name() is None]
+        for record in unknown_records:
+            median_x = record.median_x(self.config.pitch_length_m / 2.0)
+            side = "home" if median_x <= (self.config.pitch_length_m / 2.0) else "away"
+            synthetic_team_name = f"{side}_unknown"
+            side_by_team[synthetic_team_name] = side
+            team_records.setdefault(synthetic_team_name, []).append(record)
+
+        return team_records, side_by_team
 
     def _order_teams_by_side(self, team_records: Mapping[str, list[TrackRecord]]) -> list[str]:
         def team_median_x(item: tuple[str, list[TrackRecord]]) -> float:
@@ -311,15 +334,29 @@ class PathCRFTracksAdapter:
             assignments[f"{side}_1"] = goalkeeper.raw_track_id
 
         remaining = [record for record in records if goalkeeper is None or record.raw_track_id != goalkeeper.raw_track_id]
-        remaining.sort(
-            key=lambda item: (
-                item.first_frame,
-                item.median_x(self.config.pitch_length_m / 2.0),
-                int(item.raw_track_id),
-            )
-        )
-        for idx, record in enumerate(remaining[: self.config.expected_players_per_team - 1], start=2):
-            assignments[f"{side}_{idx}"] = record.raw_track_id
+        template = self._team_template_for_side(side)
+        remaining_slots = [f"{side}_{idx}" for idx in range(2, self.config.expected_players_per_team + 1)]
+        if remaining and remaining_slots:
+            cost_matrix = np.zeros((len(remaining), len(remaining_slots)), dtype=np.float32)
+            fallback_x = 0.0 if side == "home" else self.config.pitch_length_m
+            for row_idx, record in enumerate(remaining):
+                xy = record.median_field_position()
+                if xy is None:
+                    xy = (record.median_x(fallback_x), self.config.pitch_width_m / 2.0)
+                record_xy = np.asarray(xy, dtype=np.float32)
+                for col_idx, slot_name in enumerate(remaining_slots):
+                    slot_idx = int(slot_name.split("_")[-1]) - 1
+                    template_xy = template[slot_idx]
+                    distance = float(np.linalg.norm(record_xy - template_xy))
+                    role_penalty = 0.0
+                    if record.class_name == "goalkeeper" or record.stable_role() == "POR":
+                        role_penalty += 25.0
+                    y_penalty = 0.15 * abs(float(record_xy[1] - template_xy[1]))
+                    cost_matrix[row_idx, col_idx] = distance + y_penalty + role_penalty
+
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            for row_idx, col_idx in zip(row_ind.tolist(), col_ind.tolist()):
+                assignments[remaining_slots[col_idx]] = remaining[row_idx].raw_track_id
         return assignments
 
     def _select_goalkeeper(self, side: str, records: list[TrackRecord]) -> TrackRecord | None:
@@ -341,6 +378,7 @@ class PathCRFTracksAdapter:
         self,
         tracks: Mapping[str, Any],
         frame_count: int,
+        records: dict[str, dict[str, TrackRecord]],
         person_assignments: Mapping[str, str],
         referee_assignments: Mapping[str, str],
     ) -> pd.DataFrame:
@@ -348,9 +386,27 @@ class PathCRFTracksAdapter:
         raw_ref_to_slot = {raw_id: slot for slot, raw_id in referee_assignments.items()}
         all_person_slots = [f"home_{idx}" for idx in range(1, 12)] + [f"away_{idx}" for idx in range(1, 12)]
         all_ref_slots = [f"referee_{idx}" for idx in range(1, self.config.expected_referees + 1)]
+        _, side_by_team = self._group_person_records_by_side(
+            [*records["player"].values(), *records["goalkeeper"].values()]
+        )
 
-        slot_tracks = self._build_slot_track_arrays(tracks, frame_count, raw_to_slot, all_person_slots)
-        referee_tracks = self._build_slot_track_arrays(tracks, frame_count, raw_ref_to_slot, all_ref_slots, class_names=("referee",))
+        if self.config.framewise_person_slot_assignment:
+            slot_tracks = self._build_person_slot_tracks(
+                tracks=tracks,
+                frame_count=frame_count,
+                side_by_team=side_by_team,
+                ordered_slots=all_person_slots,
+            )
+        else:
+            slot_tracks = self._build_slot_track_arrays(tracks, frame_count, raw_to_slot, all_person_slots)
+        referee_tracks = self._build_slot_track_arrays(
+            tracks,
+            frame_count,
+            raw_ref_to_slot,
+            all_ref_slots,
+            class_names=("referee",),
+            max_speed_mps=self.config.referee_outlier_speed_mps,
+        )
         self._fill_team_templates(slot_tracks, "home")
         self._fill_team_templates(slot_tracks, "away")
         self._fill_referee_templates(referee_tracks)
@@ -361,6 +417,10 @@ class PathCRFTracksAdapter:
             raw_to_slot=raw_to_slot,
             slot_tracks=slot_tracks,
         )
+
+        if not self.config.export_possession_targets:
+            carrier_series = pd.Series([None] * frame_count, dtype=object)
+            owning_team_series = pd.Series([None] * frame_count, dtype=object)
 
         state_df = pd.DataFrame(
             {
@@ -387,6 +447,173 @@ class PathCRFTracksAdapter:
         output_df = pd.concat([output_df, self._compute_motion_features(ball_df).add_prefix("ball_")], axis=1)
         return output_df
 
+    def _build_person_slot_tracks(
+        self,
+        tracks: Mapping[str, Any],
+        frame_count: int,
+        side_by_team: Mapping[str, str],
+        ordered_slots: list[str],
+    ) -> dict[str, pd.DataFrame]:
+        slot_frames = {
+            slot_name: pd.DataFrame(index=np.arange(frame_count), columns=["x", "y"], dtype=np.float32)
+            for slot_name in ordered_slots
+        }
+        continuity_state = {
+            "home": {
+                "xy": {f"home_{idx}": None for idx in range(1, self.config.expected_players_per_team + 1)},
+                "raw_id": {f"home_{idx}": None for idx in range(1, self.config.expected_players_per_team + 1)},
+            },
+            "away": {
+                "xy": {f"away_{idx}": None for idx in range(1, self.config.expected_players_per_team + 1)},
+                "raw_id": {f"away_{idx}": None for idx in range(1, self.config.expected_players_per_team + 1)},
+            },
+        }
+
+        for frame_id in range(frame_count):
+            detections_by_side = {"home": [], "away": []}
+            for class_name in ("player", "goalkeeper"):
+                frames = tracks.get(class_name, [])
+                if frame_id >= len(frames):
+                    continue
+                frame_map = frames[frame_id]
+                if not isinstance(frame_map, Mapping):
+                    continue
+                for raw_id, payload in frame_map.items():
+                    if not isinstance(payload, Mapping):
+                        continue
+                    field_position = self._safe_field_position(payload.get("field_position_m"))
+                    if field_position is None:
+                        continue
+                    side = self._resolve_payload_side(payload, field_position, side_by_team)
+                    detections_by_side[side].append(
+                        {
+                            "raw_id": str(raw_id),
+                            "class_name": class_name,
+                            "role": self._normalize_role(
+                                payload.get("predicted_role") or payload.get("predicted_role_frame")
+                            ),
+                            "xy": field_position,
+                        }
+                    )
+
+            for side in ("home", "away"):
+                slot_names = [f"{side}_{idx}" for idx in range(1, self.config.expected_players_per_team + 1)]
+                assigned = self._assign_frame_team_detections(
+                    detections=detections_by_side[side],
+                    side=side,
+                    slot_names=slot_names,
+                    state=continuity_state[side],
+                )
+                for slot_name, detection in assigned.items():
+                    slot_frames[slot_name].loc[frame_id, ["x", "y"]] = detection["xy"]
+                    continuity_state[side]["xy"][slot_name] = detection["xy"]
+                    continuity_state[side]["raw_id"][slot_name] = detection["raw_id"]
+
+        for slot_name, slot_df in slot_frames.items():
+            slot_frames[slot_name] = self._stabilize_xy(
+                self._interpolate_xy(slot_df),
+                max_speed_mps=self.config.player_outlier_speed_mps,
+            )
+        return slot_frames
+
+    def _resolve_payload_side(
+        self,
+        payload: Mapping[str, Any],
+        field_position: tuple[float, float],
+        side_by_team: Mapping[str, str],
+    ) -> str:
+        team_name = self._normalize_team_name(payload.get("team"))
+        side = side_by_team.get(team_name) if team_name is not None else None
+        if side in {"home", "away"}:
+            return side
+        return "home" if field_position[0] <= (self.config.pitch_length_m / 2.0) else "away"
+
+    def _assign_frame_team_detections(
+        self,
+        detections: list[dict[str, Any]],
+        side: str,
+        slot_names: list[str],
+        state: dict[str, dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        assigned: dict[str, dict[str, Any]] = {}
+        if not detections:
+            return assigned
+
+        gk_slot = f"{side}_1"
+        goalkeeper = self._select_goalkeeper_detection(side, detections)
+        remaining_detections = detections
+        if goalkeeper is not None:
+            assigned[gk_slot] = goalkeeper
+            remaining_detections = [det for det in detections if det["raw_id"] != goalkeeper["raw_id"]]
+
+        field_template = self._aligned_side_template(side, remaining_detections)
+        remaining_slots = [slot for slot in slot_names if slot not in assigned]
+        if remaining_slots and remaining_detections:
+            cost_matrix = np.zeros((len(remaining_detections), len(remaining_slots)), dtype=np.float32)
+            for row_idx, detection in enumerate(remaining_detections):
+                for col_idx, slot_name in enumerate(remaining_slots):
+                    slot_idx = int(slot_name.split("_")[-1]) - 1
+                    template_xy = field_template[slot_idx]
+                    previous_xy = state["xy"].get(slot_name)
+                    previous_raw_id = state["raw_id"].get(slot_name)
+                    continuity_cost = 0.0
+                    if previous_xy is not None:
+                        continuity_cost = float(np.linalg.norm(np.asarray(detection["xy"]) - np.asarray(previous_xy)))
+                    template_cost = float(np.linalg.norm(np.asarray(detection["xy"]) - template_xy))
+                    raw_bonus = 0.0
+                    if previous_raw_id is not None and str(previous_raw_id) == str(detection["raw_id"]):
+                        raw_bonus = -4.0
+                    weight_prev = 0.75 if previous_xy is not None else 0.0
+                    weight_template = 1.0 - weight_prev if previous_xy is not None else 1.0
+                    cost_matrix[row_idx, col_idx] = (
+                        (weight_prev * continuity_cost)
+                        + (weight_template * template_cost)
+                        + raw_bonus
+                    )
+
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            for row_idx, col_idx in zip(row_ind.tolist(), col_ind.tolist()):
+                assigned[remaining_slots[col_idx]] = remaining_detections[row_idx]
+
+        return assigned
+
+    def _aligned_side_template(self, side: str, detections: list[dict[str, Any]]) -> np.ndarray:
+        pitch_template = self._team_template_for_side(side)
+        if not detections:
+            return pitch_template
+        observed_arr = np.asarray([det["xy"] for det in detections], dtype=np.float32)
+        template_center = np.median(pitch_template, axis=0)
+        observed_center = np.median(observed_arr, axis=0)
+        shift = observed_center - template_center
+        aligned = pitch_template + shift
+        aligned[:, 0] = np.clip(aligned[:, 0], 0.0, self.config.pitch_length_m)
+        aligned[:, 1] = np.clip(aligned[:, 1], 0.0, self.config.pitch_width_m)
+        return aligned
+
+    def _team_template_for_side(self, side: str) -> np.ndarray:
+        pitch_template = HOME_TEAM_TEMPLATE.copy()
+        if side == "away":
+            pitch_template[:, 0] = self.config.pitch_length_m - pitch_template[:, 0]
+        return pitch_template
+
+    def _select_goalkeeper_detection(
+        self,
+        side: str,
+        detections: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        goalkeeper_candidates = [
+            detection
+            for detection in detections
+            if detection["class_name"] == "goalkeeper" or detection["role"] == "POR"
+        ]
+        candidates = goalkeeper_candidates if goalkeeper_candidates else detections
+        reverse = side == "away"
+        return sorted(
+            candidates,
+            key=lambda item: float(item["xy"][0]),
+            reverse=reverse,
+        )[0] if candidates else None
+
     def _build_slot_track_arrays(
         self,
         tracks: Mapping[str, Any],
@@ -394,6 +621,7 @@ class PathCRFTracksAdapter:
         raw_to_slot: Mapping[str, str],
         ordered_slots: list[str],
         class_names: tuple[str, ...] = ("player", "goalkeeper"),
+        max_speed_mps: float | None = None,
     ) -> dict[str, pd.DataFrame]:
         slot_frames = {
             slot_name: pd.DataFrame(index=np.arange(frame_count), columns=["x", "y"], dtype=np.float32)
@@ -407,14 +635,39 @@ class PathCRFTracksAdapter:
                     slot_name = raw_to_slot.get(str(raw_id))
                     if slot_name is None:
                         continue
+                    if not self._should_use_payload_for_slot_tracking(payload):
+                        continue
                     field_position = self._safe_field_position(payload.get("field_position_m"))
                     if field_position is None:
                         continue
                     slot_frames[slot_name].loc[frame_id, ["x", "y"]] = field_position
 
         for slot_name, slot_df in slot_frames.items():
-            slot_frames[slot_name] = self._interpolate_xy(slot_df)
+            slot_frames[slot_name] = self._stabilize_xy(
+                self._interpolate_xy(slot_df),
+                max_speed_mps=(
+                    float(max_speed_mps)
+                    if max_speed_mps is not None
+                    else self.config.player_outlier_speed_mps
+                ),
+            )
         return slot_frames
+
+    @staticmethod
+    def _should_use_payload_for_slot_tracking(payload: Mapping[str, Any]) -> bool:
+        if not isinstance(payload, Mapping):
+            return False
+        if bool(payload.get("synthetic_seed")):
+            return False
+        bbox = payload.get("bbox")
+        confidence = payload.get("confidence")
+        if bbox is None and confidence is not None:
+            try:
+                if float(confidence) <= 0.0:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        return True
 
     def _interpolate_xy(self, slot_df: pd.DataFrame) -> pd.DataFrame:
         result = slot_df.copy()
@@ -422,12 +675,121 @@ class PathCRFTracksAdapter:
             method="linear",
             limit_direction="both",
         )
+        result["x"] = result["x"].clip(0.0, self.config.pitch_length_m)
+        result["y"] = result["y"].clip(0.0, self.config.pitch_width_m)
+        return result
+
+    def _stabilize_xy(self, slot_df: pd.DataFrame, max_speed_mps: float) -> pd.DataFrame:
+        result = slot_df.copy()
+        passes = max(1, int(self.config.smoothing_passes))
+        for _ in range(passes):
+            result = self._replace_isolated_motion_outliers(result, max_speed_mps=max_speed_mps)
+            result = self._smooth_xy(result)
+            result = self._limit_step_jitter(result, max_speed_mps=max_speed_mps)
+        result["x"] = result["x"].clip(0.0, self.config.pitch_length_m)
+        result["y"] = result["y"].clip(0.0, self.config.pitch_width_m)
+        return result
+
+    def _replace_isolated_motion_outliers(
+        self,
+        slot_df: pd.DataFrame,
+        max_speed_mps: float,
+    ) -> pd.DataFrame:
+        result = slot_df.copy()
+        dt = 1.0 / float(self.config.fps)
+        max_step = float(max_speed_mps) * dt
+        xy = result[["x", "y"]].to_numpy(dtype=np.float32, copy=True)
+        if len(xy) < 3:
+            return result
+
+        for idx in range(1, len(xy) - 1):
+            prev_xy = xy[idx - 1]
+            curr_xy = xy[idx]
+            next_xy = xy[idx + 1]
+            if not (
+                np.all(np.isfinite(prev_xy))
+                and np.all(np.isfinite(curr_xy))
+                and np.all(np.isfinite(next_xy))
+            ):
+                continue
+            prev_jump = float(np.linalg.norm(curr_xy - prev_xy))
+            next_jump = float(np.linalg.norm(next_xy - curr_xy))
+            bridge_jump = float(np.linalg.norm(next_xy - prev_xy))
+            if prev_jump <= max_step or next_jump <= max_step:
+                continue
+            if bridge_jump > max_step:
+                continue
+            xy[idx] = (prev_xy + next_xy) * 0.5
+
+        result.loc[:, ["x", "y"]] = xy
+        return result
+
+    def _smooth_xy(self, slot_df: pd.DataFrame) -> pd.DataFrame:
+        result = slot_df.copy()
+        window = max(1, int(self.config.smoothing_window))
+        if window <= 1:
+            return result
+        for axis in ("x", "y"):
+            series = result[axis]
+            series = series.rolling(window=window, min_periods=1, center=bool(self.config.smoothing_center)).median()
+            series = series.interpolate(method="linear", limit_direction="both").ffill().bfill()
+            savgol_window = self._resolve_savgol_window(len(series))
+            if savgol_window is not None:
+                series_np = series.to_numpy(dtype=np.float32)
+                if np.isfinite(series_np).all():
+                    series = pd.Series(
+                        savgol_filter(
+                            series_np,
+                            window_length=savgol_window,
+                            polyorder=min(int(self.config.savgol_polyorder), savgol_window - 1),
+                            mode="interp",
+                        ),
+                        index=series.index,
+                        dtype=np.float32,
+                    )
+            series = series.ewm(alpha=0.35, adjust=False).mean()
+            result[axis] = series
+        return result
+
+    def _resolve_savgol_window(self, series_len: int) -> int | None:
+        if series_len < 3:
+            return None
+        window = max(3, int(self.config.savgol_window))
+        if window % 2 == 0:
+            window += 1
+        if window > series_len:
+            window = series_len if series_len % 2 == 1 else series_len - 1
+        if window < 3:
+            return None
+        return window
+
+    def _limit_step_jitter(self, slot_df: pd.DataFrame, max_speed_mps: float) -> pd.DataFrame:
+        result = slot_df.copy()
+        xy = result[["x", "y"]].to_numpy(dtype=np.float32, copy=True)
+        if len(xy) < 2:
+            return result
+
+        dt = 1.0 / float(self.config.fps)
+        max_step = float(max_speed_mps) * dt
+        soft_step = max_step * 0.75
+
+        for idx in range(1, len(xy)):
+            prev_xy = xy[idx - 1]
+            curr_xy = xy[idx]
+            if not (np.all(np.isfinite(prev_xy)) and np.all(np.isfinite(curr_xy))):
+                continue
+            delta = curr_xy - prev_xy
+            step = float(np.linalg.norm(delta))
+            if step <= soft_step or step <= 1e-6:
+                continue
+            scale = soft_step / step
+            xy[idx] = prev_xy + (delta * scale)
+
+        result.loc[:, ["x", "y"]] = xy
         return result
 
     def _fill_team_templates(self, slot_tracks: dict[str, pd.DataFrame], side: str) -> None:
-        pitch_template = HOME_TEAM_TEMPLATE.copy()
-        if side == "away":
-            pitch_template[:, 0] = self.config.pitch_length_m - pitch_template[:, 0]
+        pitch_template = self._team_template_for_side(side)
 
         side_slots = [f"{side}_{idx}" for idx in range(1, self.config.expected_players_per_team + 1)]
         for frame_id in range(len(next(iter(slot_tracks.values())))):
@@ -545,6 +907,7 @@ class PathCRFTracksAdapter:
             previous_team = owning_team
             previous_ball_xy = ball_xy
 
+        ball_df = self._stabilize_xy(ball_df, max_speed_mps=self.config.ball_outlier_speed_mps)
         return ball_df, pd.Series(carriers, dtype=object), pd.Series(owning_teams, dtype=object)
 
     @staticmethod

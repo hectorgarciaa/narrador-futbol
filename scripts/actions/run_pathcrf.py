@@ -131,12 +131,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_source(source: str | None) -> tuple[Path | None, Path | None]:
+def _infer_video_for_tracks(tracks_path: Path) -> Path | None:
+    config = Config.from_yaml(PROJECT_ROOT / "config.yaml")
+    target_stem = sanitize_video_stem(tracks_path.stem.replace("_tracks", ""))
+    for _, value in config.paths.get("data", {}).items():
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = (config.project_root / candidate).resolve()
+        if not candidate.exists() or candidate.suffix.lower() not in VIDEO_SUFFIXES:
+            continue
+        if sanitize_video_stem(candidate.stem) == target_stem:
+            return candidate.resolve()
+    return None
+
+
+def resolve_source(source: str | None) -> tuple[Path | None, Path | None, Path | None]:
     if source is None:
         config = Config.from_yaml(PROJECT_ROOT / "config.yaml")
         video_path, _ = resolve_video_path(config, None)
         tracks_path = resolve_tracks_path_for_video(PROJECT_ROOT, Path(video_path))
-        return tracks_path.resolve(), None
+        return tracks_path.resolve(), None, Path(video_path).resolve()
 
     candidate = Path(source).expanduser()
     if not candidate.is_absolute():
@@ -145,17 +159,17 @@ def resolve_source(source: str | None) -> tuple[Path | None, Path | None]:
     if candidate.exists():
         suffix = candidate.suffix.lower()
         if suffix == ".json":
-            return candidate, None
+            return candidate, None, _infer_video_for_tracks(candidate)
         if suffix == ".parquet":
-            return None, candidate
+            return None, candidate, None
         if suffix in VIDEO_SUFFIXES:
             tracks_path = resolve_tracks_path_for_video(PROJECT_ROOT, candidate)
-            return tracks_path.resolve(), None
+            return tracks_path.resolve(), None, candidate.resolve()
 
     config = Config.from_yaml(PROJECT_ROOT / "config.yaml")
     video_path, _ = resolve_video_path(config, source)
     tracks_path = resolve_tracks_path_for_video(PROJECT_ROOT, Path(video_path))
-    return tracks_path.resolve(), None
+    return tracks_path.resolve(), None, Path(video_path).resolve()
 
 
 def default_output_dir(tracks_path: Path | None, tracking_path: Path | None) -> Path:
@@ -174,7 +188,7 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    tracks_path, tracking_path = resolve_source(args.source)
+    tracks_path, tracking_path, video_path = resolve_source(args.source)
     if tracks_path is not None and not tracks_path.exists():
         raise FileNotFoundError(f"No existe el tracks JSON esperado: {tracks_path}")
     if tracking_path is not None and not tracking_path.exists():
@@ -207,6 +221,7 @@ def main() -> None:
         output_dir=output_dir,
         tracks_path=tracks_path,
         tracking_path=tracking_path,
+        video_path=video_path,
         tracking_output_path=args.tracking_output_path.resolve() if args.tracking_output_path is not None else None,
         adapter_config=adapter_config,
         inference_config=inference_config,

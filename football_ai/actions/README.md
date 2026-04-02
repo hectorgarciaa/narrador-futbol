@@ -12,15 +12,20 @@ Convierte un `tracks.json` del tracker actual a un parquet ancho compatible con 
 - conserva 3 árbitros en slots `referee_1..3`;
 - genera `ball_x/ball_y` y columnas de estado (`frame_id`, `period_id`, `timestamp`, `phase_id`, `episode_id`, `ball_state`, `ball_owning_team_id`, `player_id`);
 - interpola huecos internos por coordenadas de campo con interpolación lineal;
+- asigna los slots de jugadores por ajuste espacial a una plantilla base de equipo para mantener una semántica más estable de `home_1..11` y `away_1..11`;
+- suaviza temporalmente las trayectorias exportadas con mediana móvil, Savitzky-Golay y limitación de jitter antes de recalcular velocidades;
 - rellena extremos con arrastre (`ffill/bfill`);
 - si un slot nunca aparece en el clip, sintetiza una trayectoria razonable a partir de una plantilla simple de formación y la desplaza según el centro del equipo visible en ese frame;
-- para el balón, usa una heurística sencilla de portador: jugador/portero visible más cercano al centro del bbox del balón; si no hay candidato plausible, mantiene el último portador válido.
+- para el balón, usa `field_position_m` cuando existe; si no, cae a una heurística sencilla de portador o al último estado válido;
+- por defecto **no** exporta `player_id` ni `ball_owning_team_id` como señal de posesión hacia PathCRF, para no contaminar la inferencia con una heurística ruidosa;
+- ignora seeds sintéticos y observaciones fantasma (`bbox=None`, `confidence<=0`) al construir slots para PathCRF.
 
 ### Limitaciones explícitas
 
 - El `tracks.json` ya puede incluir `field_position_m` del balón cuando existe proyección válida; aun así, `ball_x/ball_y` puede seguir recurriendo al portador inferido o a fallback temporal cuando esa proyección falte o sea poco fiable.
 - Si faltan jugadores durante todo el clip, el adaptador crea slots sintéticos; eso sirve para estructurar PathCRF, pero no equivale a tracking real.
 - `phase_id`, `episode_id` y `ball_state` salen en esta primera fase como una única secuencia viva (`1`, `1`, `"alive"`). Más adelante se puede endurecer con segmentación real.
+- Si el clip ya es un tramo continuo corto de juego vivo, mantener un único `episode_id` es intencional; no se corta artificialmente sin una heurística fiable de reinicio.
 
 ### CLI
 
@@ -48,7 +53,9 @@ Wrapper de inferencia para reutilizar el repo clonado de `PathCRF` desde este pr
   - eventos detectados (`*_events.parquet`);
   - salidas macro (`*_macro_prev.parquet`, `*_macro_next.parquet`) cuando existen;
   - resumen de ejecución (`*_summary.json`);
-- opcionalmente llama al drawer 2D específico de PathCRF para generar un MP4 del campo con la arista activa.
+- opcionalmente llama al drawer específico de PathCRF para generar un MP4:
+  - sobre el broadcast real con `bbox` reales + mini-mapa 2D si dispone de vídeo y `tracks.json`;
+  - o en modo 2D puro si solo hay parquet.
 
 ### Nota de compatibilidad
 

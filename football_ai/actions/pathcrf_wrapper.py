@@ -311,6 +311,7 @@ def run_pathcrf_pipeline(
     output_dir: str | Path,
     tracks_path: str | Path | None = None,
     tracking_path: str | Path | None = None,
+    video_path: str | Path | None = None,
     tracking_output_path: str | Path | None = None,
     adapter_config: PathCRFAdapterConfig | None = None,
     inference_config: PathCRFInferenceConfig | None = None,
@@ -325,6 +326,7 @@ def run_pathcrf_pipeline(
 
     resolved_tracks_path = Path(tracks_path).expanduser().resolve() if tracks_path is not None else None
     resolved_tracking_path = Path(tracking_path).expanduser().resolve() if tracking_path is not None else None
+    resolved_video_path = Path(video_path).expanduser().resolve() if video_path is not None else None
     conversion_summary = None
     tracking_summary_path = None
 
@@ -374,6 +376,9 @@ def run_pathcrf_pipeline(
             events=pd.read_parquet(inference_result.events_path),
             fps=effective_render_fps,
             frame_size=(int(render_cfg.width), int(render_cfg.height)),
+            video_path=resolved_video_path,
+            tracks_path=resolved_tracks_path,
+            conversion_summary=asdict(conversion_summary) if conversion_summary is not None else None,
             show=bool(render_cfg.show_window),
         )
 
@@ -381,6 +386,7 @@ def run_pathcrf_pipeline(
     with inference_result.summary_path.open("r", encoding="utf-8") as f:
         summary_payload = json.load(f)
     summary_payload["tracks_path"] = str(resolved_tracks_path) if resolved_tracks_path is not None else None
+    summary_payload["video_path"] = str(resolved_video_path) if resolved_video_path is not None else None
     summary_payload["tracking_path"] = str(resolved_tracking_path)
     summary_payload["tracking_summary_path"] = str(tracking_summary_path) if tracking_summary_path is not None else None
     summary_payload["render_path"] = str(render_path) if render_path is not None else None
