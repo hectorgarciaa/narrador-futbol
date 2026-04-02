@@ -128,6 +128,46 @@ python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/p
 
 ---
 
+### `actions/run_pathcrf.py` — Conversión + inferencia + drawer PathCRF
+
+**Objetivo:** tomar la salida ya guardada de `scripts/track.py`, convertirla a formato PathCRF, ejecutar inferencia con el repo clonado en `football_ai/actions/repo/pathcrf/` y generar una visualización 2D del campo con la arista activa.
+
+**CLI:**
+```bash
+python scripts/actions/run_pathcrf.py video_prueba_corto
+```
+
+También acepta una ruta directa al JSON:
+```bash
+python scripts/actions/run_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
+```
+
+**Opciones útiles:**
+- `--output-dir output/actions/pathcrf/<nombre>`: carpeta donde dejar todos los artefactos.
+- `--trial 120`: selecciona el checkpoint de PathCRF.
+- `--model-file state_dict_best_acc.pt`: checkpoint concreto dentro del trial.
+- `--device auto|cpu|cuda:0`: dispositivo de inferencia.
+- `--no-crf`: fuerza decodificación sin CRF.
+- `--decode indep|greedy|viterbi`: modo de decodificación si `--no-crf`.
+- `--no-render`: omite el MP4 del campo y deja solo parquet/json.
+- `--render-width` / `--render-height`: tamaño del video 2D.
+
+**Flujo:**
+1. Resuelve la entrada: shortcut de `config.yaml`, vídeo, `tracks.json` o parquet ya convertido.
+2. Si la entrada es `tracks.json`, la convierte a `*_tracking.parquet`.
+3. Carga el checkpoint de PathCRF y ejecuta inferencia sobre el parquet ancho.
+4. Exporta:
+   - `*_edge_sequence.parquet`
+   - `*_events.parquet`
+   - `*_macro_prev.parquet`
+   - `*_macro_next.parquet`
+   - `*_summary.json`
+5. Si no se desactiva, genera `*_pitch_pathcrf.mp4` con el nuevo drawer 2D.
+
+**Nota de entorno:** los checkpoints `set_*` del repo clonado funcionan aunque falte `torch_geometric` en la `venv`; el wrapper local mete un stub mínimo porque ese import solo es imprescindible para la variante `gat`.
+
+---
+
 ### `track_partidos_posiciones.py` — Batch de tracking (partidosPosiciones o Kaggle DFL)
 
 **Objetivo:** ejecutar `scripts/track.py` automáticamente en lote:

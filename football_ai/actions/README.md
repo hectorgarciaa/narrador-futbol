@@ -34,3 +34,44 @@ Salida por defecto:
 football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.parquet
 football_ai/actions/pathcrf/data/narrador/tracking_processed/<video>.summary.json
 ```
+
+## `pathcrf_wrapper.py`
+
+Wrapper de inferencia para reutilizar el repo clonado de `PathCRF` desde este proyecto sin tener que invocarlo a mano.
+
+### Qué hace
+
+- carga el checkpoint desde `football_ai/actions/repo/pathcrf/saved/<trial>/model/`;
+- lee el parquet ancho ya convertido o convierte primero un `tracks.json`;
+- ejecuta `PathCRF` sobre ese tracking y exporta:
+  - secuencia de aristas activa por frame (`*_edge_sequence.parquet`);
+  - eventos detectados (`*_events.parquet`);
+  - salidas macro (`*_macro_prev.parquet`, `*_macro_next.parquet`) cuando existen;
+  - resumen de ejecución (`*_summary.json`);
+- opcionalmente llama al drawer 2D específico de PathCRF para generar un MP4 del campo con la arista activa.
+
+### Nota de compatibilidad
+
+Los checkpoints `set_*` incluidos en el repo clonado (`trial=120` por defecto) se pueden cargar aunque en la `venv` no esté instalado `torch_geometric`: el wrapper inyecta un stub mínimo porque ese paquete solo se importa de forma global en el repo upstream. Si se usa un checkpoint `agent_model=gat`, entonces sí hace falta `torch_geometric` real.
+
+### Script recomendado
+
+```bash
+python scripts/actions/run_pathcrf.py video_prueba_corto
+```
+
+También acepta un `tracks.json` directo:
+
+```bash
+python scripts/actions/run_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
+```
+
+Salida típica:
+
+```text
+output/actions/pathcrf/<video>/<video>_tracking.parquet
+output/actions/pathcrf/<video>/<video>_edge_sequence.parquet
+output/actions/pathcrf/<video>/<video>_events.parquet
+output/actions/pathcrf/<video>/<video>_summary.json
+output/actions/pathcrf/<video>/<video>_pitch_pathcrf.mp4
+```

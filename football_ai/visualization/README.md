@@ -112,3 +112,44 @@ Compatibilidad de clases en `tracks`:
 | `draw_tracks(tracks, video, output_path, show, window_name, four_panel, debug_frames, expected_counts)` | Pipeline completo (clásico o 2x2) |
 
 > **Nota:** El método `draw_detection` itera dinámicamente sobre las claves del diccionario `distances` para formatear las distancias, por lo que es compatible con cualquier configuración de equipos en config.yaml.
+
+---
+
+## `pathcrf_drawer.py` — `PathCRFDrawer`
+
+### Objetivo
+
+Renderizar una visualización puramente 2D del campo a partir del parquet ancho de PathCRF y de la secuencia de aristas inferida (`edge_src`, `edge_dst`).
+
+### Método principal
+
+```python
+from football_ai.visualization import PathCRFDrawer
+
+drawer = PathCRFDrawer()
+drawer.render_tracking_and_edges(
+    tracking=tracking_df,
+    edge_sequence=edge_seq_df,
+    output_path="output/actions/pathcrf/partido/partido_pitch_pathcrf.mp4",
+    events=events_df,
+    fps=25.0,
+    frame_size=(1280, 720),
+    show=False,
+)
+```
+
+### Qué pinta
+
+- fondo de campo 2D con líneas, áreas, puntos de penalti y porterías;
+- nodos `home_1..11` y `away_1..11` coloreados por equipo;
+- árbitros `referee_1..3` como nodos grises;
+- nodos exteriores de PathCRF (`out_left`, `out_right`, `out_bottom`, `out_top`);
+- balón estimado (`ball_x`, `ball_y`);
+- arista activa del frame:
+  - flecha si `edge_src != edge_dst`;
+  - anillo de control si es self-loop;
+- overlay con `frame`, `timestamp`, arista activa y, si toca exactamente en ese frame, el evento derivado (`kick`, `control`, `out`, ...).
+
+### Uso típico
+
+No suele llamarse a mano: `scripts/actions/run_pathcrf.py` lo usa automáticamente al final del pipeline salvo que se pase `--no-render`.

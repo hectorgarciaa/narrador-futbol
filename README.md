@@ -625,6 +625,28 @@ python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/p
 ```
 Este paso genera un parquet ancho en `football_ai/actions/pathcrf/data/narrador/tracking_processed/` con 22 slots fijos de jugadores, 3 árbitros, balón aproximado y variables de estado por frame. Si faltan tracks en algún frame, el adaptador interpola huecos internos y rellena ausencias persistentes con una plantilla simple de formación alineada al equipo visible. Para estimar el portador, prioriza `player_id`/`ball_owning_player_id` cuando el tracker ya trae posesión online; si no, usa el fallback por jugador visible más cercano.
 
+### Ejecutar inferencia PathCRF sobre la salida del tracker
+```bash
+python scripts/actions/run_pathcrf.py video_prueba_corto
+```
+
+También acepta directamente el JSON ya exportado por `track.py`:
+
+```bash
+python scripts/actions/run_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
+```
+
+El script:
+- resuelve la salida de `track.py` desde el shortcut o desde la ruta que le pases;
+- convierte el `tracks.json` a `*_tracking.parquet` si hace falta;
+- carga el checkpoint de PathCRF del repo clonado en `football_ai/actions/repo/pathcrf/` (por defecto `trial=120`, `state_dict_best_acc.pt`);
+- exporta `*_edge_sequence.parquet`, `*_events.parquet`, `*_macro_prev.parquet`, `*_macro_next.parquet` y `*_summary.json` en `output/actions/pathcrf/<video>/`;
+- genera además `*_pitch_pathcrf.mp4` con un drawer 2D del campo que pinta los tracks de entrada y la arista activa en cada frame.
+
+Notas:
+- el wrapper local soporta los checkpoints `set_*` incluidos en el repo clonado aunque la `venv` no tenga `torch_geometric`; si se quisiera usar un checkpoint `gat`, entonces sí habría que instalar esa dependencia;
+- si el `tracks.json` trae `field_position_m` del balón, el adaptador lo usa; si no, el balón cae al portador inferido o al último estado válido.
+
 ### Grid search de hiperparámetros del tracker
 ```bash
 python scripts/track_experiments.py

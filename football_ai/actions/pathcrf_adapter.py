@@ -355,7 +355,7 @@ class PathCRFTracksAdapter:
         self._fill_team_templates(slot_tracks, "away")
         self._fill_referee_templates(referee_tracks)
 
-        ball_df, carrier_series = self._build_ball_and_carrier_series(
+        ball_df, carrier_series, owning_team_series = self._build_ball_and_carrier_series(
             tracks=tracks,
             frame_count=frame_count,
             raw_to_slot=raw_to_slot,
@@ -370,7 +370,7 @@ class PathCRFTracksAdapter:
                 "phase_id": np.ones(frame_count, dtype=np.int16),
                 "episode_id": np.ones(frame_count, dtype=np.int16),
                 "ball_state": np.full(frame_count, "alive", dtype=object),
-                "ball_owning_team_id": carrier_series.apply(self._team_from_slot),
+                "ball_owning_team_id": owning_team_series,
                 "player_id": carrier_series,
             }
         )
@@ -490,15 +490,20 @@ class PathCRFTracksAdapter:
         frame_count: int,
         raw_to_slot: Mapping[str, str],
         slot_tracks: Mapping[str, pd.DataFrame],
-    ) -> tuple[pd.DataFrame, pd.Series]:
+    ) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
         ball_df = pd.DataFrame(index=np.arange(frame_count), columns=["x", "y"], dtype=np.float32)
         carriers: list[str | None] = []
+        owning_teams: list[str | None] = []
         previous_carrier: str | None = None
+        previous_team: str | None = None
         previous_ball_xy: tuple[float, float] | None = None
 
         for frame_id in range(frame_count):
             ball_payload = self._first_payload(tracks.get("ball", []), frame_id)
             ball_center = self._bbox_center(self._safe_bbox(ball_payload.get("bbox") if ball_payload else None))
+            ball_field_position = self._safe_field_position(
+                ball_payload.get("field_position_m") if isinstance(ball_payload, Mapping) else None
+            )
             carrier_slot = None
             if isinstance(ball_payload, Mapping):
                 owning_player_id = ball_payload.get("player_id")
@@ -512,20 +517,35 @@ class PathCRFTracksAdapter:
             if carrier_slot is None:
                 carrier_slot = previous_carrier
 
+            carrier_xy = None
             if carrier_slot is not None:
                 carrier_xy = slot_tracks[carrier_slot].iloc[frame_id]
                 ball_xy = (float(carrier_xy["x"]), float(carrier_xy["y"]))
+                if not np.all(np.isfinite(ball_xy)):
+                    ball_xy = None
+                else:
+                    carrier_xy = ball_xy
+            if ball_field_position is not None:
+                ball_xy = ball_field_position
+            elif carrier_xy is not None:
+                ball_xy = carrier_xy
             elif previous_ball_xy is not None:
                 ball_xy = previous_ball_xy
             else:
                 ball_xy = (self.config.pitch_length_m / 2.0, self.config.pitch_width_m / 2.0)
 
+            owning_team = self._team_from_slot(carrier_slot)
+            if owning_team is None:
+                owning_team = previous_team
+
             carriers.append(carrier_slot)
+            owning_teams.append(owning_team)
             ball_df.loc[frame_id, ["x", "y"]] = ball_xy
             previous_carrier = carrier_slot
+            previous_team = owning_team
             previous_ball_xy = ball_xy
 
-        return ball_df, pd.Series(carriers, dtype=object)
+        return ball_df, pd.Series(carriers, dtype=object), pd.Series(owning_teams, dtype=object)
 
     @staticmethod
     def _first_payload(class_frames: Any, frame_id: int) -> Mapping[str, Any] | None:
