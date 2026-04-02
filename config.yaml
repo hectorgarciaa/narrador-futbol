@@ -26,6 +26,9 @@ paths:
     video_prueba_corto: "data/partidoPrueba/partido_corto.mp4"
     video_prueba_medio: "data/partidoPrueba/partido_medio.mp4"
 
+    video_yt_30s: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_30s.mp4"
+    video_yt_8m: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_2-10.mp4"
+
     video_08fd33: "data/partidoPrueba/08fd33_4.mp4"
     video_08fd33_medio: "data/partidoPrueba/08fd33_4_medio.mp4"
 
@@ -118,7 +121,7 @@ tracking:
       device: null
 
   bytetracker:
-    track_activation_threshold: 0.05
+    track_activation_threshold: 0.01
     lost_track_buffer: 90
     minimum_matching_threshold: 0.945
     frame_rate: 25
