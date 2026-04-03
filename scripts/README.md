@@ -71,6 +71,12 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto el mismo comportamiento que
 **Flujo:**
 1. Carga toda la configuración de `config.yaml` (modelo, video, output, confianza, tracker, equipos).
 2. Instancia `Tracker` y llama a `get_tracks()`.
+   - Nada más entrar, normaliza las clases YOLO a las clases internas del proyecto.
+   - Solo deja pasar detecciones de `player`, `goalkeeper`, `referee`, `ball` y alias comunes.
+   - Si el modelo base devuelve `person`, esa detección se remapea automáticamente a `player`.
+   - Si el modelo base devuelve `sports ball`, esa detección se remapea automáticamente a `ball`.
+   - Cualquier otra clase YOLO se descarta antes de `supervision`, PnLCalib y ByteTrack.
+   - Si `PnLCalib` devuelve una proyección válida para una detección y esa posición cae fuera del campo, la detección se descarta antes de identificación de equipos, ByteTrack y canonización, salvo dos excepciones: se permite un margen de 1 metro solo en las bandas laterales para conservar linieres y, además, cualquier caja fuera del campo se mantiene si solapa con un track activo de ByteTrack en ese frame.
 3. Guarda los tracks en JSON con `json.dump` + `convert_to_serializable` en:
    - `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (ruta principal para `experiments/positions`)
    - `output/tracks_json/tracker/tracks.json` (legacy, compatibilidad)

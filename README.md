@@ -23,8 +23,10 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 
 ### ✅ Fase 1: Detección, tracking e identificación de equipos
 - Fine-tuning de YOLOv11 para las clases `player`, `goalkeeper`, `referee`, `ball`.
+- En el tracking, la entrada de YOLO se filtra al arrancar: solo se aceptan `player`, `goalkeeper`, `referee`, `ball` y alias comunes; si el modelo base devuelve `person`, esa clase se remapea automáticamente a `player`, y si devuelve `sports ball`, se remapea a `ball`.
 - Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo, doble señal de clase (YOLO + reetiquetado por color) y remapeo controlado por consenso.
 - Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
+- Tras proyectar con `PnLCalib`, el tracking descarta cualquier detección cuya posición métrica válida quede fuera del terreno, pero mantiene una tolerancia extra de 1 metro solo sobre las bandas laterales para no perder a los linieres. Además, si una detección proyectada fuera del campo solapa con un track activo de ByteTrack, tampoco se filtra en ese frame.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
 - Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
 - Anti-solape de ByteTrack limitado al nacimiento de tracks nuevos: los `unconfirmed` ya nacidos siguen el matching normal y el filtro duro de solape solo se aplica antes de crear un track nuevo frente a activos, `unconfirmed` previos y otros candidatos del mismo frame, con thresholds independientes para cada comparación.
