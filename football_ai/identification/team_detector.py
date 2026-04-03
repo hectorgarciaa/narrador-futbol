@@ -61,11 +61,11 @@ class TeamDetector:
                 ):
                     self.updated[sample_bucket] = self._update_class_colors(sample_bucket)
                 
-                class_name, team, distances = self._reassign_class(object_detected, shirt_color)
+                class_name, team, distances = self._reassign_class(shirt_color, sample_bucket)
 
                 teams_of_detected_objects.append(
                     {
-                        "class": sample_bucket,
+                        "class": class_name,
                         "team": team,
                         "shirt_color": self._serialize_color(shirt_color),
                         "distances": distances,
@@ -76,7 +76,7 @@ class TeamDetector:
             else:
                 teams_of_detected_objects.append(
                     {
-                        "class": sample_bucket,
+                        "class": class_name,
                         "team": None,
                         "shirt_color": None,
                         "distances": None,
@@ -270,17 +270,16 @@ class TeamDetector:
             "upper_bound": upper_bound,
         }
 
-    def _reassign_class(self, object_detected, shirt_color):
-        raw_class_name = object_detected.names[object_detected.boxes.cls.item()]
+    def _reassign_class(self, shirt_color, class_name):
         team, distances = self._assign_team(shirt_color)
         if team == "referee":
             return "referee", None, distances
         elif team in self.team_colors:
-            if raw_class_name == "goalkeeper":
+            if class_name == "goalkeeper":
                 return "goalkeeper", team, distances
             return "player", team, distances
         else:
-            return raw_class_name, team, distances
+            return class_name, team, distances
         
     def _assign_team(self, shirt_color):
         if shirt_color is None:
