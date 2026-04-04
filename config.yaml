@@ -114,8 +114,8 @@ tracking:
       field_width_m: 68.0
       max_width: 1280
       bottom_offset_ratio: 0.04
-      keypoint_threshold: 0.3434
-      line_threshold: 0.7867
+      keypoint_threshold: 0.30
+      line_threshold: 0.60
       pnl_refine: false
       temporal_blend: 0.20
       pixels_per_meter: 8
