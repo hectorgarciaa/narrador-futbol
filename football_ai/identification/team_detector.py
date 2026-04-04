@@ -60,8 +60,8 @@ class TeamDetector:
                     and not self.updated[sample_bucket]
                 ):
                     self.updated[sample_bucket] = self._update_class_colors(sample_bucket)
-                
-                class_name, team, distances = self._reassign_class(shirt_color, sample_bucket)
+                    
+                class_name, team, distances = self._reassign_class(shirt_color, sample_bucket, x_positions, field_position, field_width_m, sideline_band_distance_m)
 
                 teams_of_detected_objects.append(
                     {
@@ -128,29 +128,13 @@ class TeamDetector:
             return "player"
         
         else:
-            field_position = self._field_position_to_tuple(field_position)
-
-            is_in_middle = False
-            if len(x_positions) >= 8:
-                x_positions.sort()
-                left_x_bound = float(x_positions[3])
-                right_x_bound = float(x_positions[-4])
-                is_in_middle = left_x_bound <= float(field_position[0]) <= right_x_bound
-
-            lower_sideline_limit = float(sideline_band_distance_m)
-            upper_sideline_limit = float(field_width_m) - float(sideline_band_distance_m)
-            is_near_sidelines = float(field_position[1]) <= lower_sideline_limit or float(field_position[1]) >= upper_sideline_limit
-            
-            if is_in_middle or is_near_sidelines:
+            can_be_ref = self._check_ref_pos(x_positions, field_position, field_width_m, sideline_band_distance_m)
+            if can_be_ref:
                 return "referee"
             
             else:
-                left_x_bound = float(x_positions[2])
-                right_x_bound = float(x_positions[-3])
-
-                outside_x_bounds = field_position[0] < left_x_bound or field_position[0] > right_x_bound
-                far_from_sidelines = field_position[1] > lower_sideline_limit and field_position[1] < upper_sideline_limit
-                if outside_x_bounds and far_from_sidelines:
+                can_be_goalkeeper = self._check_goalkeeper_pos(x_positions, field_position, field_width_m, sideline_band_distance_m)
+                if can_be_goalkeeper:
                     return "goalkeeper"            
         return None
     
@@ -270,13 +254,21 @@ class TeamDetector:
             "upper_bound": upper_bound,
         }
 
-    def _reassign_class(self, shirt_color, class_name):
+    def _reassign_class(self, shirt_color, class_name, x_positions, field_position, field_width_m, sideline_band_distance_m):
         team, distances = self._assign_team(shirt_color)
         if team == "referee":
-            return "referee", None, distances
+            if class_name == "referee":
+                return "referee", None, distances
+            
+            can_be_ref = self._check_ref_pos(x_positions, field_position, field_width_m, sideline_band_distance_m)
+            if can_be_ref:
+                return "referee", None, distances
+            else: 
+                return "goalkeeper", None, distances
         elif team in self.team_colors:
             if class_name == "goalkeeper":
                 return "goalkeeper", team, distances
+            
             return "player", team, distances
         else:
             return class_name, team, distances
@@ -294,6 +286,36 @@ class TeamDetector:
         team_idx = np.argmin([d for d in valid_distances.values()])
         team_name = list(valid_distances.keys())[team_idx]
         return team_name, distances
+    
+    def _check_ref_pos(self, x_positions, field_position, field_width_m, sideline_band_distance_m):
+        field_position = self._field_position_to_tuple(field_position)
+
+        is_in_middle = False
+        if len(x_positions) >= 8:
+            x_positions.sort()
+            left_x_bound = float(x_positions[3])
+            right_x_bound = float(x_positions[-4])
+            is_in_middle = left_x_bound <= float(field_position[0]) <= right_x_bound
+
+        lower_sideline_limit = float(sideline_band_distance_m)
+        upper_sideline_limit = float(field_width_m) - float(sideline_band_distance_m)
+        is_near_sidelines = float(field_position[1]) <= lower_sideline_limit or float(field_position[1]) >= upper_sideline_limit
+        
+        return is_near_sidelines or is_in_middle
+    
+    def _check_goalkeeper_pos(self, x_positions, field_position, field_width_m, sideline_band_distance_m):
+        field_position = self._field_position_to_tuple(field_position)
+        if len(x_positions) < 6:
+            return False
+        left_x_bound = float(x_positions[2])
+        right_x_bound = float(x_positions[-3])
+
+        outside_x_bounds = field_position[0] < left_x_bound or field_position[0] > right_x_bound
+        lower_sideline_limit = float(sideline_band_distance_m)
+        upper_sideline_limit = float(field_width_m) - float(sideline_band_distance_m)
+        far_from_sidelines = field_position[1] > lower_sideline_limit and field_position[1] < upper_sideline_limit
+        
+        return outside_x_bounds and far_from_sidelines
 
     @staticmethod
     def _field_position_to_tuple(field_position):

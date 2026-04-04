@@ -549,6 +549,7 @@ class Tracker(TrackerLogicMixin):
                     else:
                         resolved_class, resolved_reason = (
                             self._resolve_raw_tracker_continuity_for_detection_debug(
+                                canonical_id,
                                 previous_state,
                                 class_name,
                                 detected_team,
@@ -806,6 +807,7 @@ class Tracker(TrackerLogicMixin):
                 next_free_id = self._next_free_canonical_id(
                     canonical_state,
                     class_name=output_class_name,
+                    field_position=pending.get("field_position"),
                 )
                 if next_free_id is None:
                     if collect_visual_debug and pending.get("raw_detection_idx") is not None:
@@ -1345,8 +1347,8 @@ class Tracker(TrackerLogicMixin):
             sideline_margin_mask = (
                 (x_coords >= 0.0)
                 & (x_coords <= float(self.referee_field_length_m))
-                & (y_coords >= -1.0)
-                & (y_coords <= float(self.referee_field_width_m) + 1.0)
+                & (y_coords >= -0.75)
+                & (y_coords <= float(self.referee_field_width_m) + 0.75)
             )
             inside_mask[finite_mask] = np.logical_or(base_inside_mask, sideline_margin_mask)
 

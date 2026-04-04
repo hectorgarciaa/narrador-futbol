@@ -83,8 +83,10 @@ class ByteTrack:
         new_track_active_overlap_iou: float = 0.0,
         new_track_unconfirmed_overlap_iou: float = 0.0,
         new_track_candidate_overlap_iou: float = 0.0,
+        extra_conf_to_init_a_track: float = 0.1,
     ):
         self.track_activation_threshold = track_activation_threshold
+        self.extra_conf_to_init_a_track = extra_conf_to_init_a_track
         self.minimum_matching_threshold = minimum_matching_threshold
         self.max_tracks_per_class = max_tracks_per_class or {}
         self.team_mismatch_penalty = team_mismatch_penalty
@@ -169,7 +171,7 @@ class ByteTrack:
         }
 
         self.frame_id = 0
-        self.det_thresh = self.track_activation_threshold + 0.1
+        self.det_thresh = self.track_activation_threshold + self.extra_conf_to_init_a_track
         self.max_time_lost = int(frame_rate / 30.0 * lost_track_buffer)
         self.minimum_consecutive_frames = minimum_consecutive_frames
         self.kalman_filter = KalmanFilter()

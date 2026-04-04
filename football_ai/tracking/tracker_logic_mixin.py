@@ -208,6 +208,23 @@ class TrackerLogicMixin:
             return stored_zone
         return self._referee_zone_from_field_position(state.get("field_position"))
 
+    def _referee_reserved_zone_by_canonical_id(self, canonical_id):
+        zone_order = ("central", "sideline_top", "sideline_bottom")
+        referee_ids = tuple(getattr(self, "referee_canonical_ids", ()))
+        for zone_name, reserved_id in zip(zone_order, referee_ids):
+            if int(reserved_id) == int(canonical_id):
+                return zone_name
+        return None
+
+    def _required_referee_canonical_id_for_zone(self, referee_zone):
+        normalized_zone = str(referee_zone or "").strip().lower()
+        zone_order = ("central", "sideline_top", "sideline_bottom")
+        referee_ids = tuple(getattr(self, "referee_canonical_ids", ()))
+        for zone_name, reserved_id in zip(zone_order, referee_ids):
+            if zone_name == normalized_zone:
+                return int(reserved_id)
+        return None
+
     def _referee_zone_from_field_position(self, field_position):
         field_position = self._field_position_to_tuple(field_position)
         if field_position is None:
@@ -236,8 +253,26 @@ class TrackerLogicMixin:
         x_coord = float(field_position[0])
         return float(min_x_bound) <= x_coord <= float(max_x_bound)
 
+    def _is_referee_canonical_slot_compatible(
+        self,
+        canonical_id,
+        detection_field_position,
+    ):
+        expected_zone = self._referee_reserved_zone_by_canonical_id(canonical_id)
+        if expected_zone is None:
+            return True
+        detection_zone = self._referee_zone_from_field_position(detection_field_position)
+        if detection_zone is None or detection_zone != expected_zone:
+            return False
+        if expected_zone == "central":
+            return self._is_field_position_within_central_referee_x_bounds(
+                detection_field_position
+            )
+        return True
+
     def _resolve_referee_candidate_class_for_detection(
         self,
+        candidate_canonical_id,
         candidate_state,
         detection_class,
         detection_team,
@@ -257,17 +292,16 @@ class TrackerLogicMixin:
             return None
         if candidate_zone != detection_zone:
             return None
-        if (
-            candidate_zone == "central"
-            and not self._is_field_position_within_central_referee_x_bounds(
-                detection_field_position
-            )
+        if not self._is_referee_canonical_slot_compatible(
+            candidate_canonical_id,
+            detection_field_position,
         ):
             return None
         return "referee"
 
     def _resolve_referee_candidate_class_for_detection_debug(
         self,
+        candidate_canonical_id,
         candidate_state,
         detection_class,
         detection_team,
@@ -289,21 +323,35 @@ class TrackerLogicMixin:
             return None, "referee_detection_zone_unknown"
         if candidate_zone != detection_zone:
             return None, "referee_zone_incompatible"
-        if (
-            candidate_zone == "central"
-            and not self._is_field_position_within_central_referee_x_bounds(
-                detection_field_position
-            )
+        if not self._is_referee_canonical_slot_compatible(
+            candidate_canonical_id,
+            detection_field_position,
         ):
-            return None, "referee_detection_outside_player_lane"
+            expected_zone = self._referee_reserved_zone_by_canonical_id(
+                candidate_canonical_id
+            )
+            if expected_zone == "central":
+                return None, "referee_detection_outside_central_slot"
+            return None, "referee_detection_outside_reserved_sideline_slot"
         return "referee", None
 
-    def _next_free_canonical_id(self, canonical_state, class_name=None):
+    def _next_free_canonical_id(
+        self,
+        canonical_state,
+        class_name=None,
+        field_position=None,
+    ):
         reserved_referee_ids = set(getattr(self, "referee_canonical_ids", ()))
         reserved_goalkeeper_ids = set(getattr(self, "special_seed_canonical_ids", (1, 2)))
         normalized_class_name = self._normalize_class_label(class_name)
         if normalized_class_name == "referee":
-            candidate_range = [canonical_id for canonical_id in self.referee_canonical_ids]
+            detection_zone = self._referee_zone_from_field_position(field_position)
+            required_id = self._required_referee_canonical_id_for_zone(detection_zone)
+            if required_id is None:
+                return None
+            if not self._is_referee_canonical_slot_compatible(required_id, field_position):
+                return None
+            candidate_range = [required_id]
         elif normalized_class_name == "goalkeeper":
             candidate_range = [
                 canonical_id for canonical_id in self.special_seed_canonical_ids
@@ -979,6 +1027,7 @@ class TrackerLogicMixin:
 
     def _resolve_raw_tracker_continuity_for_detection(
         self,
+        candidate_canonical_id,
         candidate_state,
         detection_class,
         detection_team,
@@ -1033,6 +1082,7 @@ class TrackerLogicMixin:
 
         if candidate_class == "referee":
             return self._resolve_referee_candidate_class_for_detection(
+                candidate_canonical_id,
                 candidate_state,
                 detection_class,
                 detection_team,
@@ -1062,6 +1112,7 @@ class TrackerLogicMixin:
 
     def _resolve_raw_tracker_continuity_for_detection_debug(
         self,
+        candidate_canonical_id,
         candidate_state,
         detection_class,
         detection_team,
@@ -1072,6 +1123,7 @@ class TrackerLogicMixin:
         detection_shirt_color=None,
     ):
         resolved_class = self._resolve_raw_tracker_continuity_for_detection(
+            candidate_canonical_id,
             candidate_state,
             detection_class,
             detection_team,
@@ -1096,6 +1148,7 @@ class TrackerLogicMixin:
             return None, "detection_class_missing"
         if candidate_class == "referee":
             return self._resolve_referee_candidate_class_for_detection_debug(
+                candidate_canonical_id,
                 candidate_state,
                 detection_class,
                 detection_team,
@@ -1493,6 +1546,7 @@ class TrackerLogicMixin:
 
     def _resolve_candidate_class_for_detection(
         self,
+        candidate_canonical_id,
         candidate_state,
         detection_class,
         detection_team,
@@ -1545,6 +1599,7 @@ class TrackerLogicMixin:
 
         if candidate_class == "referee":
             return self._resolve_referee_candidate_class_for_detection(
+                candidate_canonical_id,
                 candidate_state,
                 detection_class,
                 detection_team,
@@ -1572,6 +1627,7 @@ class TrackerLogicMixin:
 
     def _resolve_candidate_class_for_detection_debug(
         self,
+        candidate_canonical_id,
         candidate_state,
         detection_class,
         detection_team,
@@ -1691,6 +1747,7 @@ class TrackerLogicMixin:
                     continue
 
                 output_class_name = self._resolve_candidate_class_for_detection(
+                    canonical_id,
                     candidate_state,
                     pending["preferred_class_name"],
                     pending["detected_team"],
@@ -1989,6 +2046,7 @@ class TrackerLogicMixin:
                 continue
 
             output_class_name = self._resolve_candidate_class_for_detection(
+                canonical_id,
                 candidate_state,
                 detection_class,
                 detection_team,

@@ -735,8 +735,10 @@ tracking:
   motion_std_floor: 0.5
   referee_canonical_ids: [23, 24, 25]
   referee_sideline_band_distance_m: 3.0
-  # El árbitro central solo puede reabsorber dentro del carril definido por la
-  # segunda x más a la izquierda y la segunda más a la derecha de los jugadores visibles.
+  # Los slots de árbitro quedan fijados por zona:
+  # 23 -> árbitro central (fuera de la franja lateral y dentro del carril central de jugadores)
+  # 24 -> linier de la banda superior
+  # 25 -> linier de la banda inferior
   ball:
     expected_position_gate_px: 90.0
     expected_position_gate_growth_per_frame: 35.0
