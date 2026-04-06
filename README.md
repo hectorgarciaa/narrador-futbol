@@ -299,7 +299,7 @@ python -m football_ai.commentaries \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}'
 ```
 
-El modelo por defecto es `qwen3:1.7b` con temperatura `0.4`. En general el comentario sale corto, debe incluir literalmente la accion del evento y el minuto solo se menciona en `gol`. Para `gol`, el prompt deja ahora mas libertad para una narracion mas larga y emocionante. Tambien existe una accion especial `intro` para abrir la retransmision sin jugador asociado.
+El modelo por defecto es `gemma4:e2b` con temperatura `0.4`. En general el comentario sale corto, debe incluir literalmente la accion del evento y el minuto solo se menciona en `gol`. Para `gol`, el prompt deja ahora mas libertad para una narracion mas larga y emocionante. Tambien existe una accion especial `intro` para abrir la retransmision sin jugador asociado.
 
 Ejemplo de apertura:
 

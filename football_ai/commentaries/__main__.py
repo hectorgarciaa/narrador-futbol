@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        default="qwen3:1.7b",
+        default="gemma4:e2b",
         help="Modelo de Ollama a usar.",
     )
     parser.add_argument(

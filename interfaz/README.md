@@ -28,7 +28,7 @@ Opciones:
 
 ```bash
 python interfaz/app.py --host 127.0.0.1 --port 8767
-python interfaz/app.py --commentary-port 8788 --commentary-model qwen3:1.7b
+python interfaz/app.py --commentary-port 8788 --commentary-model gemma4:e2b
 ```
 
 Después abre `http://127.0.0.1:8767`.

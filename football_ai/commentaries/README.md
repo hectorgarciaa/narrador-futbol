@@ -55,7 +55,7 @@ ollama serve
 Modelo:
 
 ```bash
-ollama pull qwen3:1.7b
+ollama pull gemma4:e2b
 ```
 
 Sintesis de voz:
@@ -239,7 +239,7 @@ El prompt esta pensado para:
 
 ## Notas
 
-- El backend por defecto del modulo principal sigue siendo Ollama y el modelo por defecto es `qwen3:1.7b`.
+- El backend por defecto del modulo principal sigue siendo Ollama y el modelo por defecto es `gemma4:e2b`.
 - Si existe `OLLAMA_HOST` en el entorno, se usa como base URL automaticamente.
 - Para evaluar solo el comportamiento del LLM sin la parte de voz existe `python -m football_ai.commentaries.eval_llm`, con `--backend ollama` o `--backend transformers`.
 - El fallback del comentario esta desactivado temporalmente: `FINAL_COMMENTARY` devuelve el texto del modelo tras la limpieza basica.

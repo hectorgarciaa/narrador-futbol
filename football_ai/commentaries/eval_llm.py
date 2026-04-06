@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         default=None,
         help=(
-            "Modelo a usar. En `ollama`, por defecto `qwen3:1.7b`. "
+            "Modelo a usar. En `ollama`, por defecto `gemma4:e2b`. "
             f"En `transformers`, por defecto `{DEFAULT_HYMBA_MODEL}`."
         ),
     )
@@ -147,7 +147,7 @@ def main() -> None:
     event = load_event(args)
     if args.backend == "ollama":
         generator = OllamaCommentaryGenerator(
-            model=args.model or "qwen3:1.7b",
+            model=args.model or "gemma4:e2b",
             temperature=args.temperature,
             top_p=args.top_p,
             base_url=args.base_url,

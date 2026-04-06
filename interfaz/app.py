@@ -126,13 +126,13 @@ class CommentaryServerManager:
         host=DEFAULT_COMMENTARY_HOST,
         port=DEFAULT_COMMENTARY_PORT,
         *,
-        model="qwen3:1.7b",
+        model="gemma4:e2b",
         temperature=0.4,
         base_url=None,
     ):
         self.host = str(host).strip() or DEFAULT_COMMENTARY_HOST
         self.port = int(port)
-        self.model = str(model).strip() or "qwen3:1.7b"
+        self.model = str(model).strip() or "gemma4:e2b"
         self.temperature = float(temperature)
         self.base_url = str(base_url).strip() if base_url else None
         self._start_lock = threading.Lock()
@@ -999,7 +999,7 @@ def parse_args():
     )
     parser.add_argument(
         "--commentary-model",
-        default="qwen3:1.7b",
+        default="gemma4:e2b",
         help="Modelo Ollama por defecto para comentarios.",
     )
     parser.add_argument(

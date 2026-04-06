@@ -330,14 +330,14 @@ class CommentaryPromptBuilder:
 class OllamaCommentaryGenerator:
     def __init__(
         self,
-        model: str = "qwen3:1.7b",
+        model: str = "gemma4:e2b",
         base_url: str | None = None,
         temperature: float = 0.4,
         top_p: float = 0.95,
         timeout_s: float = 90.0,
         prompt_builder: CommentaryPromptBuilder | None = None,
     ) -> None:
-        self.model = _clean_text(model) or "qwen3:1.7b"
+        self.model = _clean_text(model) or "gemma4:e2b"
         self.base_url = (_clean_text(base_url) or _default_ollama_base_url()).rstrip("/")
         self.temperature = float(temperature)
         self.top_p = float(top_p)
