@@ -318,22 +318,61 @@ python -m football_ai.commentaries.eval_llm \
   --show-raw-response
 ```
 
-Ese mismo módulo puede convertir el comentario a audio con clonación de voz basada en XTTS:
+Ese mismo módulo puede convertir el comentario a audio. El backend estable sigue siendo XTTS, pero ahora también puedes probar dos rutas de Qwen:
+
+- `qwen`: flujo Python `VoiceDesign -> Base`, primero diseña una voz de narrador y luego la reutiliza.
+- `qwen_cpp`: runtime experimental con `qwen3-tts.cpp`, speaker embedding cacheado y modelos GGUF.
+
+El informe técnico completo de todas las pruebas realizadas con Qwen, incluyendo tiempos reales, FlashAttention, `qwen3-tts.cpp`, el papel de `vLLM-Omni` y la decisión final, está en [football_ai/report/qwen_tts_evaluation_report.md](/home/cmantill/narrador-futbol/football_ai/report/qwen_tts_evaluation_report.md).
+
+La salida del LLM pasa por una limpieza final que evita interjecciones exageradas tipo `GOOOOOOOOL` o palabras con letras estiradas de forma poco natural.
+En GPU, el backend `qwen` intenta cargar el modelo siguiendo la ruta recomendada por la demo oficial de Qwen TTS, con `device_map="cuda:0"` y `flash_attention_2` cuando esta disponible.
 
 ```bash
 python -m football_ai.commentaries \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}' \
-  --speaker-wav "football_ai/commentaries/mi_Voz.wav" \
+  --tts-backend qwen \
   --audio-out output/commentaries/audio/demo.wav
 ```
 
-Para baja latencia, puedes mantener XTTS en caliente con un servidor HTTP local:
+Para baja latencia, puedes mantener el backend TTS en caliente con un servidor HTTP local:
 
 ```bash
-python -m football_ai.commentaries --http-server
+python -m football_ai.commentaries \
+  --http-server \
+  --tts-backend qwen \
+  --model gemma4:e2b \
+  --base-url http://127.0.0.1:11435
 ```
 
 El servidor escucha por defecto en `http://127.0.0.1:8788` y acepta `POST /api/commentaries`.
+
+También expone `POST /api/commentaries/stream` como SSE. Ese endpoint emite `accepted`, `commentary`, `tts_start` y `completed`, de modo que el cliente recibe el texto del LLM antes de que termine la síntesis del WAV.
+
+Ejemplo con `qwen_cpp`:
+
+```bash
+python -m football_ai.commentaries \
+  --http-server \
+  --tts-backend qwen_cpp \
+  --qwen-cpp-repo-dir /tmp/qwen3-tts.cpp \
+  --qwen-cpp-model-dir output/commentaries/qwen_cpp_runtime/models \
+  --qwen-cpp-threads 6 \
+  --model gemma4:e2b \
+  --base-url http://127.0.0.1:11435
+```
+
+Si necesitas volver al backend estable:
+
+```bash
+python -m football_ai.commentaries --tts-backend xtts
+```
+
+En esta maquina, la mejor configuracion Qwen para latencia sigue siendo `Qwen3-TTS-12Hz-0.6B-Base` por la ruta Python, sin FlashAttention y manteniendo el proceso vivo. El servidor hace warmup real antes de quedar listo, de modo que el arranque cuesta unos `14 s`, pero luego un `pase largo` ha bajado de ~`15.8 s` en ejecucion puntual a ~`7.6-9.0 s` por peticion en caliente. Cuando Qwen entra por GPU, el backend intenta cargar el modelo completo en VRAM sin offload, asi que lo normal es usar un unico worker persistente y no lanzar varios procesos Qwen a la vez.
+
+La ruta `qwen_cpp` ya queda integrada y funcional. Ahora intenta construir `ggml` con CUDA y enlazar una build-wrapper propia de `qwen3-tts.cpp`; si esa ruta no entra en la maquina actual, cae a CPU y sigue funcionando. La primera pasada puede tardar bastante por la compilacion de `ggml-cuda`, pero despues reutiliza la libreria resultante. En la RTX 3080 de desarrollo, `6` hilos ha sido la configuracion mas rapida y estable en servidor persistente.
+
+La decision de arquitectura actual para produccion es mantener `XTTS` como backend estable y reutilizar `Qwen VoiceDesign` solo para generar una voz de locutor de referencia. El codigo experimental de Qwen esta aislado en `football_ai/commentaries/experimental/` para no sobrecargar `football_ai/commentaries/voice.py`.
 
 ---
 

@@ -57,6 +57,8 @@ ACTION_TONE_GUIDANCE = {
     ),
 }
 
+DEFAULT_OLLAMA_KEEP_ALIVE = "30m"
+
 
 def _clean_text(value: str | None) -> str | None:
     if value is None:
@@ -188,6 +190,18 @@ class CommentaryEvent:
         return cls(**payload)
 
 
+def build_default_warmup_event() -> CommentaryEvent:
+    return CommentaryEvent(
+        action="control",
+        player_name="Modric",
+        player_position="MC",
+        event_time_s=12.0,
+        team_name="Real Madrid",
+        field_zone="medio campo",
+        action_index=1,
+    )
+
+
 @dataclass(slots=True)
 class CommentaryGenerationResult:
     commentary: str
@@ -232,6 +246,7 @@ class CommentaryPromptBuilder:
                 "Eres un narrador de futbol de television en espanol de Espana. "
                 "Si hay un gol, puedes sonar mas emocional, mas expresivo y algo mas largo que en el resto de acciones. "
                 "Debe quedar clarisimo quien marca y a quien se lo marca, sin inventar jugadas que no esten en el evento ni consecuencias posteriores. "
+                "No alargues interjecciones ni palabras con letras repetidas como gooool, nooooo o vaaaaya. "
                 "No uses emojis."
             )
         return (
@@ -271,6 +286,8 @@ class CommentaryPromptBuilder:
                 "Puedes escribir una narracion mas larga y emocionante que en el resto de acciones.",
                 "Se permiten una o dos frases, con tono de retransmision, y entre 20 y 45 palabras.",
                 f"Menciona exactamente una vez el {event.match_minute_text}.",
+                "No alargues interjecciones ni palabras con letras repetidas como gooool, nooooo o vaaaaya.",
+                "Si mencionas gol o una exclamacion, escribelos de forma normal, sin estirar letras.",
                 "No inventes que decide el partido, que es el mejor gol del ano, ni la respuesta del rival.",
                 "No inventes asistencia, remate concreto, jugada previa ni consecuencias si no vienen en el evento.",
                 "Usa solo los datos del evento: autor, equipo que marca, equipo que encaja, minuto y zona si existe.",
@@ -335,6 +352,7 @@ class OllamaCommentaryGenerator:
         temperature: float = 0.4,
         top_p: float = 0.95,
         timeout_s: float = 90.0,
+        keep_alive: str | int | None = DEFAULT_OLLAMA_KEEP_ALIVE,
         prompt_builder: CommentaryPromptBuilder | None = None,
     ) -> None:
         self.model = _clean_text(model) or "gemma4:e2b"
@@ -342,6 +360,7 @@ class OllamaCommentaryGenerator:
         self.temperature = float(temperature)
         self.top_p = float(top_p)
         self.timeout_s = float(timeout_s)
+        self.keep_alive = keep_alive
         self.prompt_builder = prompt_builder or CommentaryPromptBuilder()
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -406,7 +425,7 @@ class OllamaCommentaryGenerator:
         return commentary_event, system_prompt, user_prompt
 
     def build_chat_payload(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        return {
+        payload = {
             "model": self.model,
             "stream": False,
             "think": False,
@@ -419,6 +438,9 @@ class OllamaCommentaryGenerator:
                 "top_p": self.top_p,
             },
         }
+        if self.keep_alive is not None:
+            payload["keep_alive"] = self.keep_alive
+        return payload
 
     def chat(
         self,
@@ -432,11 +454,30 @@ class OllamaCommentaryGenerator:
         )
         return payload, raw_response
 
+    def prepare(
+        self,
+        warmup_event: CommentaryEvent | dict[str, Any] | None = None,
+    ) -> CommentaryGenerationResult:
+        return self.generate(warmup_event or build_default_warmup_event())
+
     def _clean_commentary(self, raw_text: str) -> str:
         text = str(raw_text or "").strip()
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"^comentario:\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s+", " ", text).strip().strip('"').strip()
+        text = re.sub(
+            r"\b[Gg][Oo]{2,}[Ll]\b",
+            "gol",
+            text,
+        )
+        text = re.sub(
+            r"([A-Za-zÁÉÍÓÚáéíóúÑñ])\1{2,}",
+            r"\1\1",
+            text,
+        )
+        text = re.sub(r"([!?])\1{1,}", r"\1", text)
+        text = re.sub(r"^gol\b", "Gol", text)
+        text = re.sub(r"^¡gol\b", "¡Gol", text, flags=re.IGNORECASE)
         return text
 
     def _looks_like_prompt_leakage(self, commentary: str) -> bool:

@@ -4,7 +4,12 @@ Generacion de comentarios sinteticos de futbol a partir de eventos ya detectados
 
 ## Objetivo
 
-Tomar un evento estructurado en JSON y convertirlo en un comentario corto de narrador usando un backend LLM local y convertirlo despues a audio con una voz clonada usando XTTS.
+Tomar un evento estructurado en JSON y convertirlo en un comentario corto de narrador usando un backend LLM local y convertirlo despues a audio. El backend estable sigue siendo XTTS, pero ahora tambien puedes probar dos rutas de Qwen TTS:
+
+- `qwen`: flujo Python `VoiceDesign -> Base`, donde primero diseñas una voz de narrador y luego reutilizas esa identidad vocal.
+- `qwen_cpp`: runtime experimental con `qwen3-tts.cpp`, speaker embedding cacheado y modelos GGUF (`q8_0` para el TTS principal + `f16` para tokenizer/vocoder).
+
+El informe tecnico completo de todas las pruebas de Qwen, con tiempos reales, intentos de optimizacion y decision final, esta en [`football_ai/report/qwen_tts_evaluation_report.md`](../report/qwen_tts_evaluation_report.md).
 
 ## Campos minimos del evento
 
@@ -61,7 +66,7 @@ ollama pull gemma4:e2b
 Sintesis de voz:
 
 ```bash
-pip install coqui-tts torchaudio torchcodec
+pip install qwen-tts
 ```
 
 Generar comentario con demo integrada:
@@ -104,6 +109,8 @@ python -m football_ai.commentaries.eval_llm \
 
 En este modo `FINAL_COMMENTARY` devuelve directamente el texto del modelo ya limpiado y `TOTAL_DURATION_SEC` muestra el tiempo total del backend en segundos.
 
+La limpieza final del comentario tambien recorta interjecciones exageradas del modelo, para evitar salidas tipo `GOOOOOOOOL` o palabras con letras estiradas de forma poco natural.
+
 Probar Hymba-1.5B-Instruct directamente desde Hugging Face con `transformers`, sin tocar el flujo de Ollama:
 
 ```bash
@@ -133,14 +140,82 @@ Si quieres cambiar cache o dispositivo:
   --max-new-tokens 80
 ```
 
-Generar comentario y audio con la voz clonada:
+Generar comentario y audio con la voz disenada por Qwen3-TTS y reutilizada con el modelo Base:
 
 ```bash
 python -m football_ai.commentaries \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}' \
-  --speaker-wav "football_ai/commentaries/mi_Voz.wav" \
+  --tts-backend qwen \
   --audio-out output/commentaries/audio/demo.wav
 ```
+
+En la primera ejecucion, el backend Qwen:
+
+- genera un clip de referencia con `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign`;
+- construye un `voice_clone_prompt` reutilizable con `Qwen/Qwen3-TTS-12Hz-0.6B-Base`;
+- guarda ambos artefactos en `output/commentaries/qwen_voices/<voice_id>/`.
+- en GPU intenta cargar el modelo con una ruta alineada con la demo oficial: `device_map="cuda:0"` y `flash_attention_2` cuando esta disponible.
+
+Puedes cambiar el prompt de diseno y el texto base de referencia:
+
+```bash
+python -m football_ai.commentaries \
+  --tts-backend qwen \
+  --qwen-voice-design-prompt "Design a voice for a professional football commentator speaking in Spanish from Spain..." \
+  --qwen-reference-text "Buenas tardes, bienvenidos a una gran noche de futbol." \
+  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo"}'
+```
+
+Si quieres volver al backend estable:
+
+```bash
+python -m football_ai.commentaries --tts-backend xtts
+```
+
+Si lo que buscas es la mejor solucion practica ahora mismo, la combinacion recomendada es:
+
+- `XTTS` para el backend estable y de baja latencia;
+- `Qwen VoiceDesign` solo para generar una voz de locutor de referencia y reutilizarla como `speaker_wav` de XTTS.
+
+## Backend `qwen_cpp`
+
+El backend `qwen_cpp` usa la libreria compartida de `qwen3-tts.cpp` y mantiene el runtime cargado en memoria dentro del proceso Python. Ademas:
+
+- cachea el `speaker embedding` extraido de la voz de referencia;
+- reutiliza por defecto el `voice_design_reference.wav` ya generado por el backend `qwen`;
+- busca el repo de `qwen3-tts.cpp` en `QWEN_CPP_REPO_DIR` o en `/tmp/qwen3-tts.cpp`;
+- usa por defecto los GGUF en `output/commentaries/qwen_cpp_runtime/models/`.
+
+Ejemplo de una ejecucion puntual:
+
+```bash
+python -m football_ai.commentaries \
+  --model gemma4:e2b \
+  --base-url http://127.0.0.1:11435 \
+  --tts-backend qwen_cpp \
+  --qwen-cpp-repo-dir /tmp/qwen3-tts.cpp \
+  --qwen-cpp-model-dir output/commentaries/qwen_cpp_runtime/models \
+  --qwen-cpp-threads 6 \
+  --event-json '{"action":"pase largo","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"medio campo","action_index":30}' \
+  --audio-out output/commentaries/audio/qwen_cpp_pipeline.wav \
+  --print-timings
+```
+
+Comportamiento actual importante de `qwen_cpp` en esta maquina:
+
+- el backend intenta compilar `ggml` con CUDA y generar una build-wrapper propia de `qwen3-tts.cpp`;
+- si esa ruta CUDA no entra, cae automaticamente a la build CPU anterior;
+- la primera ejecucion puede tardar bastante porque compila `ggml-cuda`, pero despues reutiliza la libreria ya construida.
+- con esta RTX 3080, `6` hilos ha dado la mejor latencia estable en las pruebas locales.
+
+Importante sobre hardware:
+
+- `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` y `Qwen/Qwen3-TTS-12Hz-0.6B-Base` son bastante mas pesados que XTTS.
+- En una GPU de `10 GB` compartida con tracking, lo normal es que necesites tener la GPU libre o lanzar Qwen con `--cpu`.
+- Cuando Qwen se usa en GPU, el backend intenta cargar el modelo entero en VRAM, sin offload a CPU. Si no cabe, esa ejecucion fallara y tendras que liberar GPU o usar `--cpu`.
+- `flash-attn` es opcional: una vez instalado en la misma `.venv`, Qwen lo detecta automaticamente y puede usar `flash_attention_2`, pero en esta maquina las mejores latencias han salido con FlashAttention desactivado.
+- La integracion queda disponible para pruebas y comparativas, pero XTTS sigue siendo la opcion mas estable para el flujo en directo mientras el tracking tambien usa CUDA.
+- El codigo experimental de Qwen ya no vive dentro de `voice.py`; ahora esta aislado en `football_ai/commentaries/experimental/qwen_voice.py`.
 
 Medir tiempos de una ejecucion puntual:
 
@@ -151,7 +226,7 @@ python -m football_ai.commentaries \
   --print-timings
 ```
 
-Modo caliente para procesar muchos eventos y no recargar XTTS en cada comentario:
+Modo caliente para procesar muchos eventos y no recargar el backend TTS en cada comentario:
 
 ```bash
 python -m football_ai.commentaries --jsonl-stdin
@@ -159,13 +234,31 @@ python -m football_ai.commentaries --jsonl-stdin
 
 Luego envias un JSON por linea y recibes una respuesta JSON por linea con `commentary`, `audio_path`, `llm_seconds`, `tts_seconds` y `total_seconds`.
 
-Servidor HTTP local para mandar eventos por `POST` sin recargar XTTS:
+En `jsonl-stdin` y `http-server`, el proceso hace warmup real antes de anunciarse como listo:
+
+- precalienta Ollama con un evento corto para dejar el modelo cargado;
+- precalienta Qwen TTS sintetizando una frase breve dentro del mismo proceso;
+- usa `keep_alive=30m` en Ollama para evitar que el modelo se descargue enseguida por inactividad.
+
+Servidor HTTP local para mandar eventos por `POST` sin recargar el backend TTS:
 
 ```bash
 python -m football_ai.commentaries --http-server
 ```
 
 El servidor escucha por defecto en `http://127.0.0.1:8788`.
+
+Si quieres la configuracion de menor latencia que mejor ha salido aqui con Qwen:
+
+```bash
+python -m football_ai.commentaries \
+  --http-server \
+  --tts-backend qwen \
+  --model gemma4:e2b \
+  --base-url http://127.0.0.1:11435
+```
+
+Con esa ruta, el arranque tarda unos `14 s` por el warmup, pero despues un `pase largo` ha bajado de ~`15.8 s` en ejecucion puntual a una banda de ~`7.6-9.0 s` por peticion en servidor caliente.
 
 Comprobar salud:
 
@@ -195,6 +288,25 @@ Tambien puedes pasar un objeto con `event`, `audio_out` y `text_only`:
   "text_only": false
 }
 ```
+
+## Streaming HTTP
+
+El servidor tambien expone un endpoint SSE para recibir el comentario tan pronto como lo genera el LLM y cerrar la peticion cuando el audio ya este listo:
+
+```bash
+curl -N -X POST http://127.0.0.1:8788/api/commentaries/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"event":{"action":"pase largo","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"medio campo","action_index":30},"audio_out":"output/commentaries/audio/stream_demo.wav"}'
+```
+
+Los eventos SSE actuales son:
+
+- `accepted`: la peticion ha sido aceptada;
+- `commentary`: el LLM ya ha devuelto el texto;
+- `tts_start`: empieza la sintesis del audio;
+- `completed`: ya existe el WAV y se devuelve su ruta.
+
+Importante: con `qwen_cpp` este stream adelanta el texto y el estado del trabajo, pero no hace streaming PCM real porque `qwen3-tts.cpp` genera primero los `speech codes` y solo despues decodifica el audio completo.
 
 Si quieres que el servidor vaya dejando un manifiesto listo para `live` o `deferred`, puedes añadir `manifest_path`, `mode` y `metadata`:
 
@@ -245,8 +357,10 @@ El prompt esta pensado para:
 - El fallback del comentario esta desactivado temporalmente: `FINAL_COMMENTARY` devuelve el texto del modelo tras la limpieza basica.
 - El backend `transformers` esta pensado para pruebas locales de Hymba en una venv separada como `.venv-hymba`, para no romper el entorno principal del proyecto.
 - La sintesis de voz usa por defecto `tts_models/multilingual/multi-dataset/xtts_v2`.
+- Tambien puedes probar `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` junto con `Qwen/Qwen3-TTS-12Hz-0.6B-Base` usando `--tts-backend qwen`.
 - Si existen varios `.wav` en `football_ai/commentaries/`, el modulo los usa todos por defecto como referencias de voz y prioriza `mi_Voz.wav` si está presente.
-- Las voces clonadas se cachean en `output/commentaries/voices/` para no recalcular la referencia en cada ejecucion.
+- Los artefactos de voz de Qwen se cachean en `output/commentaries/qwen_voices/` para no rediseñar ni reconstruir el prompt de clonacion en cada ejecucion.
+- Las voces clonadas de XTTS se siguen cacheando en `output/commentaries/voices/`.
 - La salida de audio se guarda por defecto en `output/commentaries/audio/`.
-- Si quieres la menor latencia posible, usa `--jsonl-stdin` para mantener XTTS cargado entre eventos.
+- Si quieres la menor latencia posible con Qwen en esta maquina, usa `Qwen/Qwen3-TTS-12Hz-0.6B-Base`, sin FlashAttention, y manten el proceso vivo con `--jsonl-stdin` o `--http-server`.
 - Si prefieres integracion por red local, usa `--http-server` y manda eventos a `POST /api/commentaries`.

@@ -40,5 +40,6 @@ lsq-ellipse>=2.2.1
 
 # Speech
 coqui-tts>=0.27.0
+qwen-tts>=0.1.1
 torchcodec>=0.8.1
 transformers>=4.57,<5.0

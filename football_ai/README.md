@@ -11,6 +11,7 @@ football_ai/
 ├── core/           # Configuración global, logging centralizado, serialización
 ├── detection/      # Inferencia YOLO (jugadores, árbitros, balón)
 ├── positions/      # Roles posicionales online, estabilización y artefactos CSV/PNG
+├── report/         # Informes tecnicos y decisiones de arquitectura
 ├── reference_points/ # Calibración del campo y proyección a coordenadas 2D reales
 ├── tracking/       # Pipeline completo de tracking multi-objeto con ByteTrack
 ├── identification/ # Identificación de equipo por color de camiseta (KMeans)
@@ -26,6 +27,7 @@ football_ai/
 | [`actions`](actions/README.md) | Adaptación de `tracks.json` a datasets de acciones y puente con PathCRF | `PathCRFTracksAdapter` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
 | [`positions`](positions/README.md) | Inferencia online de roles, estabilización táctica y exportes/plots de posiciones | `OnlineSpecialSeedRoleAssigner` |
+| [`report`](report/README.md) | Informes tecnicos, benchmarkings y decisiones documentadas | Documentacion Markdown |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
 | [`tracking`](tracking/README.md) | Orquestación detección → equipo → proyección 2D → ByteTrack → tracks | `Tracker`, `ByteTrack` |
 | [`identification`](identification/README.md) | Extracción de color de camiseta y asignación de equipo | `ShirtDetector`, `TeamDetector` |

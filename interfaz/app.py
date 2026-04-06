@@ -38,7 +38,7 @@ from football_ai.commentaries.server import (
     DEFAULT_SERVER_PORT as DEFAULT_COMMENTARY_PORT,
     create_http_server,
 )
-from football_ai.commentaries.voice import CommentaryAudioPipeline, XTTSVoiceSynthesizer
+from football_ai.commentaries.voice import CommentaryAudioPipeline, build_voice_synthesizer
 from football_ai.positions import (
     LineupSpecError,
     get_formation_catalog,
@@ -179,12 +179,12 @@ class CommentaryServerManager:
                 temperature=self.temperature,
                 base_url=self.base_url,
             )
-            voice_synthesizer = XTTSVoiceSynthesizer()
+            voice_synthesizer = build_voice_synthesizer()
             pipeline = CommentaryAudioPipeline(
                 commentary_generator=generator,
                 voice_synthesizer=voice_synthesizer,
             )
-            voice_synthesizer.prepare()
+            pipeline.prepare()
             self._server = create_http_server(
                 commentary_generator=generator,
                 audio_pipeline=pipeline,
@@ -329,7 +329,7 @@ def generate_startup_intro_commentary_locally():
         temperature=COMMENTARY_SERVER_MANAGER.temperature,
         base_url=COMMENTARY_SERVER_MANAGER.base_url,
     )
-    voice_synthesizer = XTTSVoiceSynthesizer()
+    voice_synthesizer = build_voice_synthesizer()
     voice_synthesizer.prepare()
     pipeline = CommentaryAudioPipeline(
         commentary_generator=generator,

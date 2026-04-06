@@ -26,10 +26,12 @@ from .deferred_media import (
     mux_commentary_track_into_video,
     probe_video_duration_seconds,
 )
+from .experimental import QwenCppSynthesizer, QwenVoiceDesignSynthesizer
 from .voice import (
     CommentaryAudioPipeline,
     CommentaryAudioResult,
     XTTSVoiceSynthesizer,
+    build_voice_synthesizer,
     discover_default_speaker_wavs,
     resolve_speaker_wavs,
 )
@@ -55,7 +57,10 @@ __all__ = [
     "probe_video_duration_seconds",
     "CommentaryAudioPipeline",
     "CommentaryAudioResult",
+    "QwenCppSynthesizer",
+    "QwenVoiceDesignSynthesizer",
     "XTTSVoiceSynthesizer",
+    "build_voice_synthesizer",
     "discover_default_speaker_wavs",
     "resolve_speaker_wavs",
 ]

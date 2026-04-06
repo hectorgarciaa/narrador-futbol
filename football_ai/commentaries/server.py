@@ -65,7 +65,17 @@ class CommentaryHTTPService:
             "uptime_seconds": round(time.time() - self.started_at, 3),
         }
 
-    def process_payload(self, payload: dict[str, Any]) -> CommentaryServiceResult:
+    def _resolve_request(
+        self,
+        payload: dict[str, Any],
+    ) -> CommentaryServiceResult | tuple[
+        CommentaryEvent,
+        str | None,
+        str | None,
+        str | None,
+        dict[str, Any],
+        bool,
+    ]:
         if not isinstance(payload, dict):
             return CommentaryServiceResult(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -88,6 +98,53 @@ class CommentaryHTTPService:
                 status_code=HTTPStatus.BAD_REQUEST,
                 payload={"error": str(exc)},
             )
+        return (
+            event,
+            audio_out,
+            manifest_path,
+            requested_mode,
+            metadata or {},
+            text_only,
+        )
+
+    def _append_manifest(
+        self,
+        manifest_path: str | None,
+        *,
+        event: CommentaryEvent,
+        requested_mode: str | None,
+        metadata: dict[str, Any],
+        text_only: bool,
+        response_payload: dict[str, Any],
+    ) -> None:
+        if not manifest_path:
+            return
+
+        append_jsonl(
+            manifest_path,
+            {
+                "generated_at_utc": now_iso(),
+                "event": event.to_prompt_payload(),
+                "mode": requested_mode,
+                "metadata": metadata,
+                "commentary": response_payload.get("commentary"),
+                "audio_path": response_payload.get("audio_path"),
+                "model": response_payload.get("model"),
+                "tts_model": self.tts_model,
+                "text_only": text_only,
+                "llm_seconds": response_payload.get("llm_seconds"),
+                "tts_seconds": response_payload.get("tts_seconds"),
+                "total_seconds": response_payload.get("total_seconds"),
+            },
+        )
+        response_payload["manifest_path"] = str(Path(manifest_path).expanduser().resolve())
+
+    def process_payload(self, payload: dict[str, Any]) -> CommentaryServiceResult:
+        resolved = self._resolve_request(payload)
+        if isinstance(resolved, CommentaryServiceResult):
+            return resolved
+
+        event, audio_out, manifest_path, requested_mode, metadata, text_only = resolved
 
         try:
             with self.lock:
@@ -122,32 +179,97 @@ class CommentaryHTTPService:
                 payload={"error": str(exc)},
             )
 
-        if manifest_path:
-            append_jsonl(
-                manifest_path,
-                {
-                    "generated_at_utc": now_iso(),
-                    "event": event.to_prompt_payload(),
-                    "mode": requested_mode,
-                    "metadata": metadata or {},
-                    "commentary": response_payload.get("commentary"),
-                    "audio_path": response_payload.get("audio_path"),
-                    "model": response_payload.get("model"),
-                    "tts_model": self.tts_model,
-                    "text_only": text_only,
-                    "llm_seconds": response_payload.get("llm_seconds"),
-                    "tts_seconds": response_payload.get("tts_seconds"),
-                    "total_seconds": response_payload.get("total_seconds"),
-                },
-            )
-            response_payload["manifest_path"] = str(
-                Path(manifest_path).expanduser().resolve()
-            )
+        self._append_manifest(
+            manifest_path,
+            event=event,
+            requested_mode=requested_mode,
+            metadata=metadata,
+            text_only=text_only,
+            response_payload=response_payload,
+        )
 
         return CommentaryServiceResult(
             status_code=HTTPStatus.OK,
             payload=response_payload,
         )
+
+    def process_payload_stream(self, payload: dict[str, Any]):
+        resolved = self._resolve_request(payload)
+        if isinstance(resolved, CommentaryServiceResult):
+            return resolved
+
+        event, audio_out, manifest_path, requested_mode, metadata, text_only = resolved
+
+        def _event_stream():
+            total_start = time.perf_counter()
+            yield "accepted", {
+                "generated_at_utc": now_iso(),
+                "text_only": text_only,
+                "mode": requested_mode,
+            }
+            try:
+                with self.lock:
+                    llm_start = time.perf_counter()
+                    commentary_result = self.commentary_generator.generate(event)
+                    llm_seconds = time.perf_counter() - llm_start
+                    yield "commentary", {
+                        "commentary": commentary_result.commentary,
+                        "model": commentary_result.model,
+                        "llm_seconds": round(llm_seconds, 3),
+                    }
+
+                    if text_only:
+                        response_payload = {
+                            "commentary": commentary_result.commentary,
+                            "model": commentary_result.model,
+                            "llm_seconds": round(llm_seconds, 3),
+                        }
+                    else:
+                        if self.audio_pipeline is None:
+                            raise RuntimeError(
+                                "El servidor se inicio en modo solo texto y no puede generar audio."
+                            )
+                        output_path = (
+                            Path(audio_out).expanduser().resolve()
+                            if audio_out is not None
+                            else self.audio_pipeline.build_output_path(
+                                commentary_result.event
+                            )
+                        )
+                        yield "tts_start", {
+                            "audio_path": str(output_path),
+                        }
+                        tts_start = time.perf_counter()
+                        audio_path_value = self.audio_pipeline.voice_synthesizer.synthesize_to_file(
+                            commentary_result.commentary,
+                            output_path,
+                        )
+                        tts_seconds = time.perf_counter() - tts_start
+                        response_payload = {
+                            "commentary": commentary_result.commentary,
+                            "audio_path": str(audio_path_value),
+                            "model": commentary_result.model,
+                            "llm_seconds": round(llm_seconds, 3),
+                            "tts_seconds": round(tts_seconds, 3),
+                            "total_seconds": round(
+                                time.perf_counter() - total_start,
+                                3,
+                            ),
+                        }
+
+                self._append_manifest(
+                    manifest_path,
+                    event=event,
+                    requested_mode=requested_mode,
+                    metadata=metadata,
+                    text_only=text_only,
+                    response_payload=response_payload,
+                )
+                yield "completed", response_payload
+            except Exception as exc:
+                yield "error", {"error": str(exc)}
+
+        return _event_stream()
 
 
 class CommentaryHTTPServer(ThreadingHTTPServer):
@@ -174,6 +296,14 @@ class CommentaryRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if send_body:
             self.wfile.write(body)
+
+    def _write_sse_event(self, event_name: str, payload: dict[str, Any]) -> None:
+        body = (
+            f"event: {event_name}\n"
+            f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        ).encode("utf-8")
+        self.wfile.write(body)
+        self.wfile.flush()
 
     def _route(self) -> str:
         return urlparse(self.path).path
@@ -206,7 +336,7 @@ class CommentaryRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         route = self._route()
-        if route != "/api/commentaries":
+        if route not in {"/api/commentaries", "/api/commentaries/stream"}:
             self._handle_not_found(send_body=True)
             return
 
@@ -223,6 +353,25 @@ class CommentaryRequestHandler(BaseHTTPRequestHandler):
                 {"error": f"JSON invalido: {exc.msg}"},
                 send_body=True,
             )
+            return
+
+        if route == "/api/commentaries/stream":
+            stream_response = self.server.service.process_payload_stream(payload)
+            if isinstance(stream_response, CommentaryServiceResult):
+                self._write_json(
+                    stream_response.status_code,
+                    stream_response.payload,
+                    send_body=True,
+                )
+                return
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            for event_name, event_payload in stream_response:
+                self._write_sse_event(event_name, event_payload)
             return
 
         result = self.server.service.process_payload(payload)
