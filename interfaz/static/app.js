@@ -8,13 +8,13 @@ const state = {
   commentaryAudio: null,
   teams: [
     {
-      team_name: "Equipo 1",
+      team_name: "",
       team_color: "",
       formation: "4-3-3",
       players_by_slot: {},
     },
     {
-      team_name: "Equipo 2",
+      team_name: "",
       team_color: "",
       formation: "4-3-3",
       players_by_slot: {},
@@ -31,7 +31,61 @@ const runBadge = document.getElementById("run-badge");
 const runSummary = document.getElementById("run-summary");
 const runLog = document.getElementById("run-log");
 const launchButton = document.getElementById("launch-run");
+const nameGateBanner = document.getElementById("name-gate-banner");
+const resultVideo = document.getElementById("result-video");
+const resultVideoEmpty = document.getElementById("result-video-empty");
 const teamTemplate = document.getElementById("team-card-template");
+const DEFAULT_RESULT_VIDEO_EMPTY_TEXT =
+  "El vídeo final aparecerá aquí cuando termine la ejecución y la interfaz tenga el MP4 listo.";
+
+function normalizedTeamName(teamState) {
+  return String(teamState?.team_name || "").trim();
+}
+
+function teamNamesReady() {
+  return state.teams.every((teamState) => normalizedTeamName(teamState));
+}
+
+function syncFormAvailability() {
+  const namesReady = teamNamesReady();
+  const hasVideo = Boolean(videoSelect.value);
+
+  videoSelect.disabled = !namesReady;
+  commentaryModeSelect.disabled = !namesReady;
+  launchButton.disabled = !namesReady || !hasVideo;
+
+  if (!namesReady) {
+    launchButton.textContent = "Primero escribe los dos equipos";
+    nameGateBanner.classList.remove("is-hidden");
+    return;
+  }
+
+  launchButton.textContent = "Guardar alineaciones y ejecutar";
+  nameGateBanner.classList.add("is-hidden");
+}
+
+function setResultVideoPlaceholder(message = DEFAULT_RESULT_VIDEO_EMPTY_TEXT) {
+  resultVideoEmpty.textContent = message;
+}
+
+function describeResultVideoError() {
+  const mediaError = resultVideo.error;
+  if (!mediaError) {
+    return "El navegador no ha podido reproducir el vídeo final.";
+  }
+  switch (mediaError.code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return "La carga del vídeo final se ha cancelado antes de terminar.";
+    case MediaError.MEDIA_ERR_NETWORK:
+      return "Ha fallado la descarga del vídeo final desde la interfaz.";
+    case MediaError.MEDIA_ERR_DECODE:
+      return "El navegador ha rechazado el MP4 final al intentar decodificarlo.";
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "El navegador no soporta el formato del MP4 final servido por la interfaz.";
+    default:
+      return "El navegador no ha podido reproducir el vídeo final.";
+  }
+}
 
 function ensureSlots(teamState) {
   const formation = state.formations[teamState.formation];
@@ -55,11 +109,14 @@ function renderVideoOptions() {
   }
 }
 
-function createSlotCard(teamIndex, slot, coords, value) {
+function createSlotCard(teamIndex, slot, coords, value, disabled) {
   const slotCard = document.createElement("div");
   slotCard.className = "slot-card";
   slotCard.style.left = `${coords.x}%`;
   slotCard.style.top = `${coords.y}%`;
+  if (disabled) {
+    slotCard.classList.add("is-disabled");
+  }
 
   const slotLabel = document.createElement("span");
   slotLabel.className = "slot-label";
@@ -68,14 +125,23 @@ function createSlotCard(teamIndex, slot, coords, value) {
   const slotInput = document.createElement("input");
   slotInput.className = "slot-input";
   slotInput.type = "text";
-  slotInput.placeholder = "Nombre del jugador";
+  slotInput.placeholder = disabled
+    ? "Desbloquea con los equipos"
+    : "Nombre del jugador";
   slotInput.value = value || "";
+  slotInput.disabled = Boolean(disabled);
 
   slotCard.addEventListener("click", () => {
+    if (disabled) {
+      return;
+    }
     slotInput.focus();
     slotInput.select();
   });
   slotInput.addEventListener("focus", () => {
+    if (disabled) {
+      return;
+    }
     slotCard.classList.add("is-active");
   });
   slotInput.addEventListener("blur", () => {
@@ -150,6 +216,7 @@ function appendPitchMarkings(pitch) {
 
 function renderTeams() {
   teamsGrid.innerHTML = "";
+  const namesReady = teamNamesReady();
 
   state.teams.forEach((teamState, teamIndex) => {
     ensureSlots(teamState);
@@ -159,11 +226,23 @@ function renderTeams() {
     const nameInput = fragment.querySelector(".team-name-input");
     const colorInput = fragment.querySelector(".team-color-input");
     const formationSelect = fragment.querySelector(".formation-select");
+    const pitchShell = fragment.querySelector(".pitch-shell");
     const pitch = fragment.querySelector('[data-role="pitch"]');
 
     title.textContent = `Equipo ${teamIndex + 1}`;
     nameInput.value = teamState.team_name;
+    nameInput.placeholder = `Escribe el equipo ${teamIndex + 1}`;
     colorInput.value = teamState.team_color;
+    colorInput.disabled = !namesReady;
+    formationSelect.disabled = !namesReady;
+    if (!namesReady) {
+      card.classList.add("is-locked");
+      const lockNote = document.createElement("p");
+      lockNote.className = "team-lock-note";
+      lockNote.textContent =
+        "Completa el nombre de los dos equipos para desbloquear colores, formación y jugadores.";
+      pitchShell.before(lockNote);
+    }
 
     for (const formationName of Object.keys(state.formations)) {
       const option = document.createElement("option");
@@ -178,6 +257,14 @@ function renderTeams() {
     nameInput.addEventListener("input", (event) => {
       state.teams[teamIndex].team_name = event.target.value;
     });
+    const rerenderIfNameGateChanged = () => {
+      syncFormAvailability();
+      if (namesReady !== teamNamesReady()) {
+        renderTeams();
+      }
+    };
+    nameInput.addEventListener("change", rerenderIfNameGateChanged);
+    nameInput.addEventListener("blur", rerenderIfNameGateChanged);
     colorInput.addEventListener("input", (event) => {
       state.teams[teamIndex].team_color = event.target.value;
     });
@@ -197,6 +284,7 @@ function renderTeams() {
           slot,
           coords,
           teamState.players_by_slot?.[slot] || "",
+          !namesReady,
         ),
       );
     }
@@ -210,11 +298,38 @@ function setRunStatus(status, text) {
   runBadge.textContent = text;
 }
 
+function renderResultVideo(statusPayload) {
+  const resultVideoUrl = statusPayload?.result_video_url || "";
+  if (!resultVideoUrl) {
+    resultVideo.pause();
+    resultVideo.removeAttribute("src");
+    resultVideo.dataset.src = "";
+    resultVideo.load();
+    resultVideo.hidden = true;
+    setResultVideoPlaceholder();
+    resultVideoEmpty.hidden = false;
+    return;
+  }
+
+  const cacheBuster = encodeURIComponent(statusPayload?.updated_at_utc || Date.now());
+  const videoUrl = `${resultVideoUrl}?v=${cacheBuster}`;
+  if (resultVideo.dataset.src !== videoUrl) {
+    resultVideo.pause();
+    setResultVideoPlaceholder("Cargando el vídeo final...");
+    resultVideo.src = videoUrl;
+    resultVideo.dataset.src = videoUrl;
+    resultVideo.load();
+  }
+  resultVideo.hidden = false;
+  resultVideoEmpty.hidden = true;
+}
+
 function renderRunStatus(statusPayload) {
   if (!statusPayload) {
     setRunStatus("idle", "Sin lanzar");
     runSummary.textContent = "Todavía no hay ninguna ejecución activa.";
     runLog.textContent = "Esperando ejecución...";
+    renderResultVideo(null);
     return;
   }
 
@@ -237,6 +352,7 @@ function renderRunStatus(statusPayload) {
     <strong>Manifest:</strong> ${commentary.manifest_path || "-"}
   `;
   runLog.textContent = (statusPayload.log_tail || []).join("\n") || "Sin salida todavía.";
+  renderResultVideo(statusPayload);
 }
 
 function resetCommentaryPlayback() {
@@ -311,6 +427,9 @@ async function pollRunStatus() {
 }
 
 async function submitRun() {
+  if (!teamNamesReady()) {
+    throw new Error("Primero completa el nombre de los dos equipos.");
+  }
   const payload = {
     video_source: videoSelect.value,
     commentary_mode: state.commentaryMode,
@@ -391,6 +510,7 @@ async function loadBootstrapData() {
 
   renderVideoOptions();
   renderTeams();
+  syncFormAvailability();
   renderRunStatus(null);
 }
 
@@ -402,6 +522,22 @@ launchButton.addEventListener("click", () => {
 
 commentaryModeSelect.addEventListener("change", (event) => {
   state.commentaryMode = event.target.value;
+});
+
+videoSelect.addEventListener("change", () => {
+  syncFormAvailability();
+});
+
+resultVideo.addEventListener("loadeddata", () => {
+  resultVideo.hidden = false;
+  resultVideoEmpty.hidden = true;
+});
+
+resultVideo.addEventListener("error", () => {
+  resultVideo.pause();
+  resultVideo.hidden = true;
+  setResultVideoPlaceholder(describeResultVideoError());
+  resultVideoEmpty.hidden = false;
 });
 
 loadBootstrapData().catch((error) => {

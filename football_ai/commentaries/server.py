@@ -44,6 +44,7 @@ class CommentaryHTTPService:
     default_text_only: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     started_at: float = field(default_factory=time.time)
+    last_event_identity: tuple[str, str, str] | None = None
 
     @property
     def model(self) -> str:
@@ -56,12 +57,23 @@ class CommentaryHTTPService:
         return self.audio_pipeline.voice_synthesizer.model_name
 
     def health_payload(self) -> dict[str, Any]:
+        backend_name_getter = getattr(
+            self.commentary_generator,
+            "_backend_display_name",
+            None,
+        )
+        backend_name = (
+            str(backend_name_getter()).strip().lower()
+            if callable(backend_name_getter)
+            else "ollama"
+        )
         return {
             "status": "ok",
             "model": self.model,
             "tts_model": self.tts_model,
             "text_only": self.default_text_only,
-            "ollama_reachable": self.commentary_generator.check_health(),
+            "llm_backend": backend_name,
+            "llm_reachable": self.commentary_generator.check_health(),
             "uptime_seconds": round(time.time() - self.started_at, 3),
         }
 
@@ -139,6 +151,34 @@ class CommentaryHTTPService:
         )
         response_payload["manifest_path"] = str(Path(manifest_path).expanduser().resolve())
 
+    def _event_identity(self, event: CommentaryEvent) -> tuple[str, str, str]:
+        team_scope = event.team_name or event.team_in_favor or ""
+        return (
+            str(event.action or "").strip().casefold(),
+            str(event.player_name or "").strip().casefold(),
+            str(team_scope or "").strip().casefold(),
+        )
+
+    def _build_duplicate_response(self, event: CommentaryEvent) -> dict[str, Any]:
+        team_scope = event.team_name or event.team_in_favor
+        payload = {
+            "skipped": True,
+            "skip_reason": "duplicate_consecutive_event",
+            "commentary": None,
+            "audio_path": None,
+            "model": self.model,
+            "event_identity": {
+                "action": event.action,
+                "player_name": event.player_name,
+            },
+        }
+        if team_scope:
+            payload["event_identity"]["team_name"] = team_scope
+        return payload
+
+    def _remember_event_identity(self, event: CommentaryEvent) -> None:
+        self.last_event_identity = self._event_identity(event)
+
     def process_payload(self, payload: dict[str, Any]) -> CommentaryServiceResult:
         resolved = self._resolve_request(payload)
         if isinstance(resolved, CommentaryServiceResult):
@@ -148,6 +188,11 @@ class CommentaryHTTPService:
 
         try:
             with self.lock:
+                if self._event_identity(event) == self.last_event_identity:
+                    return CommentaryServiceResult(
+                        status_code=HTTPStatus.OK,
+                        payload=self._build_duplicate_response(event),
+                    )
                 if text_only:
                     started = time.perf_counter()
                     result = self.commentary_generator.generate(event)
@@ -173,6 +218,7 @@ class CommentaryHTTPService:
                         "tts_seconds": round(result.tts_seconds or 0.0, 3),
                         "total_seconds": round(result.total_seconds or 0.0, 3),
                     }
+                self._remember_event_identity(event)
         except Exception as exc:
             return CommentaryServiceResult(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -208,54 +254,64 @@ class CommentaryHTTPService:
                 "mode": requested_mode,
             }
             try:
+                duplicate_payload: dict[str, Any] | None = None
                 with self.lock:
-                    llm_start = time.perf_counter()
-                    commentary_result = self.commentary_generator.generate(event)
-                    llm_seconds = time.perf_counter() - llm_start
-                    yield "commentary", {
-                        "commentary": commentary_result.commentary,
-                        "model": commentary_result.model,
-                        "llm_seconds": round(llm_seconds, 3),
-                    }
-
-                    if text_only:
-                        response_payload = {
-                            "commentary": commentary_result.commentary,
-                            "model": commentary_result.model,
-                            "llm_seconds": round(llm_seconds, 3),
-                        }
+                    if self._event_identity(event) == self.last_event_identity:
+                        duplicate_payload = self._build_duplicate_response(event)
                     else:
-                        if self.audio_pipeline is None:
-                            raise RuntimeError(
-                                "El servidor se inicio en modo solo texto y no puede generar audio."
-                            )
-                        output_path = (
-                            Path(audio_out).expanduser().resolve()
-                            if audio_out is not None
-                            else self.audio_pipeline.build_output_path(
-                                commentary_result.event
-                            )
-                        )
-                        yield "tts_start", {
-                            "audio_path": str(output_path),
-                        }
-                        tts_start = time.perf_counter()
-                        audio_path_value = self.audio_pipeline.voice_synthesizer.synthesize_to_file(
-                            commentary_result.commentary,
-                            output_path,
-                        )
-                        tts_seconds = time.perf_counter() - tts_start
-                        response_payload = {
+                        llm_start = time.perf_counter()
+                        commentary_result = self.commentary_generator.generate(event)
+                        llm_seconds = time.perf_counter() - llm_start
+                        yield "commentary", {
                             "commentary": commentary_result.commentary,
-                            "audio_path": str(audio_path_value),
                             "model": commentary_result.model,
                             "llm_seconds": round(llm_seconds, 3),
-                            "tts_seconds": round(tts_seconds, 3),
-                            "total_seconds": round(
-                                time.perf_counter() - total_start,
-                                3,
-                            ),
                         }
+
+                        if text_only:
+                            response_payload = {
+                                "commentary": commentary_result.commentary,
+                                "model": commentary_result.model,
+                                "llm_seconds": round(llm_seconds, 3),
+                            }
+                        else:
+                            if self.audio_pipeline is None:
+                                raise RuntimeError(
+                                    "El servidor se inicio en modo solo texto y no puede generar audio."
+                                )
+                            output_path = (
+                                Path(audio_out).expanduser().resolve()
+                                if audio_out is not None
+                                else self.audio_pipeline.build_output_path(
+                                    commentary_result.event
+                                )
+                            )
+                            yield "tts_start", {
+                                "audio_path": str(output_path),
+                            }
+                            tts_start = time.perf_counter()
+                            audio_path_value = self.audio_pipeline.voice_synthesizer.synthesize_to_file(
+                                commentary_result.commentary,
+                                output_path,
+                            )
+                            tts_seconds = time.perf_counter() - tts_start
+                            response_payload = {
+                                "commentary": commentary_result.commentary,
+                                "audio_path": str(audio_path_value),
+                                "model": commentary_result.model,
+                                "llm_seconds": round(llm_seconds, 3),
+                                "tts_seconds": round(tts_seconds, 3),
+                                "total_seconds": round(
+                                    time.perf_counter() - total_start,
+                                    3,
+                                ),
+                            }
+                        self._remember_event_identity(event)
+
+                if duplicate_payload is not None:
+                    yield "skipped", duplicate_payload
+                    yield "completed", duplicate_payload
+                    return
 
                 self._append_manifest(
                     manifest_path,

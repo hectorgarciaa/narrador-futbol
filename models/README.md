@@ -92,3 +92,11 @@ Si los modelos ya fueron entrenados y están disponibles externamente, simplemen
 ## Configuración en `config.yaml`
 
 Todas las rutas están bajo `paths.models` en `config.yaml`. Modificar ese archivo si se quiere usar un modelo diferente sin tocar el código.
+
+En la configuración actual, el tracking principal lee `paths.models.modelo_base` y esa ruta apunta por defecto a:
+
+```text
+models/finetuning/yolov11m/weights/best.pt
+```
+
+Los pesos base de `models/yolo/` se mantienen para descargas/referencias, pero no son el detector por defecto del pipeline de tracking.

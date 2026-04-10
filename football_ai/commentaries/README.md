@@ -99,6 +99,20 @@ python -m football_ai.commentaries.eval_llm \
   --show-raw-response
 ```
 
+Evaluar el Gemma cuantizado servido por `llama.cpp`, sin pasar por Ollama:
+
+```bash
+python -m football_ai.commentaries.eval_llm \
+  --backend llama_cpp \
+  --base-url http://127.0.0.1:8001 \
+  --model gemma4-q4ks-text \
+  --event-json '{"action":"pase largo","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"medio campo","action_index":30}' \
+  --show-prompts \
+  --show-raw-response
+```
+
+En este caso `llama-server` debe estar levantado de antemano en la URL indicada por `--base-url`.
+
 Lanzar varias generaciones seguidas para comparar comportamiento:
 
 ```bash
@@ -331,6 +345,7 @@ Si quieres que el servidor vaya dejando un manifiesto listo para `live` o `defer
 ```
 
 Ese manifiesto se puede convertir después en una pista completa y muxear dentro del MP4 final del tracking. La interfaz usa ese flujo automáticamente al cerrar un run en modo `deferred`.
+Durante ese flujo, el servidor de comentarios ignora duplicados consecutivos del mismo `(action, player_name, team_name/team_in_favor)` para no sintetizar dos veces la misma jugada seguida, y el ensamblado final reexporta el vídeo como `H.264/AAC` para que el MP4 resultante se reproduzca bien en navegador.
 
 ## Comportamiento del prompt
 
@@ -353,7 +368,8 @@ El prompt esta pensado para:
 
 - El backend por defecto del modulo principal sigue siendo Ollama y el modelo por defecto es `gemma4:e2b`.
 - Si existe `OLLAMA_HOST` en el entorno, se usa como base URL automaticamente.
-- Para evaluar solo el comportamiento del LLM sin la parte de voz existe `python -m football_ai.commentaries.eval_llm`, con `--backend ollama` o `--backend transformers`.
+- Para evaluar solo el comportamiento del LLM sin la parte de voz existe `python -m football_ai.commentaries.eval_llm`, con `--backend ollama`, `--backend llama_cpp` o `--backend transformers`.
+- El backend `llama_cpp` espera un `llama-server` compatible con OpenAI API, por ejemplo en `http://127.0.0.1:8001`.
 - El fallback del comentario esta desactivado temporalmente: `FINAL_COMMENTARY` devuelve el texto del modelo tras la limpieza basica.
 - El backend `transformers` esta pensado para pruebas locales de Hymba en una venv separada como `.venv-hymba`, para no romper el entorno principal del proyecto.
 - La sintesis de voz usa por defecto `tts_models/multilingual/multi-dataset/xtts_v2`.

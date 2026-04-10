@@ -264,6 +264,11 @@ Ahora el proyecto incluye una interfaz web ligera en `interfaz/` para:
 - elegir modo de comentarios `live` o `deferred` (por defecto `live`)
 - lanzar `scripts/track.py` automáticamente con un `lineup_spec.json`
 - arrancar automáticamente el servidor local de comentarios y precalentar un `intro` al abrir la interfaz
+- intentar lanzar automáticamente el backend LLM configurado; por defecto usa `llama.cpp` leyendo `llama.cpp/config.yaml`
+- dejar la interfaz disponible enseguida y mover el warmup de Gemma/XTTS a segundo plano
+- bloquear el resto del formulario hasta que los dos nombres de equipo estén completos
+- no rehacer las tarjetas mientras estás escribiendo el segundo equipo, para que el foco no se pierda a mitad de edición
+- mostrar el MP4 final dentro de la propia interfaz cuando la ejecución termina
 
 Ejecución:
 
@@ -278,7 +283,11 @@ http://127.0.0.1:8767
 ```
 
 La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/lineup_spec.json` y llama a `scripts/track.py --lineup-spec ...`.
-También deja el manifiesto de comentarios en `output/interfaz/runs/<run_id>/commentaries/events_manifest.jsonl`; en `live` intenta reproducir el `intro` precalentado nada más guardar y, cuando el tracking termina, ensambla una pista diferida desde ese manifiesto para incrustarla en el MP4 final.
+También deja el manifiesto de comentarios en `output/interfaz/runs/<run_id>/commentaries/events_manifest.jsonl`; en `live` intenta reproducir el `intro` precalentado nada más guardar y, cuando el tracking termina, ensambla una pista diferida desde ese manifiesto para incrustarla en el MP4 final. Además, cuando la ejecución nace desde la interfaz, el subprocess de tracking activa un bridge incremental `tracking -> PathCRF -> servidor de comentarios` solo para ese run, de modo que los scripts sueltos del repo siguen sin ejecutar PathCRF ni comentar jugadas automáticamente.
+Ese servidor de comentarios omite duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo) para evitar audios solapados cuando PathCRF reenvía la misma jugada dos veces seguidas. El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores lo mostraban en negro.
+Si `--commentary-backend auto` no se toca, la interfaz intenta usar `llama.cpp` cuando existe `llama.cpp/config.yaml`; si no, cae a `ollama`. Si `--commentary-base-url` apunta a una URL local, la interfaz intenta arrancar ese backend localmente; si apuntas a un backend remoto, ese autoarranque no se intenta.
+El fichero `llama.cpp/config.yaml` fija el binario `llama-server`, el alias expuesto por la API y el GGUF que se cargará al abrir la interfaz.
+Ese precalentado ya no bloquea el arranque visible de la UI: la interfaz HTTP sube primero y el warmup de Gemma/XTTS sigue en segundo plano.
 
 Cuando el tracker estabiliza los slots:
 
@@ -316,6 +325,16 @@ python -m football_ai.commentaries.eval_llm \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}' \
   --show-prompts \
   --show-raw-response
+```
+
+Si quieres evaluar el Gemma cuantizado servido por `llama.cpp`:
+
+```bash
+python -m football_ai.commentaries.eval_llm \
+  --backend llama_cpp \
+  --base-url http://127.0.0.1:8001 \
+  --model gemma4-q4ks-text \
+  --event-json '{"action":"pase largo","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"medio campo","action_index":30}'
 ```
 
 Ese mismo módulo puede convertir el comentario a audio. El backend estable sigue siendo XTTS, pero ahora también puedes probar dos rutas de Qwen:
@@ -682,12 +701,17 @@ El script:
 - resuelve la salida de `track.py` desde el shortcut o desde la ruta que le pases;
 - convierte el `tracks.json` a `*_tracking.parquet` si hace falta;
 - carga el checkpoint de PathCRF del repo clonado en `football_ai/actions/repo/pathcrf/` (por defecto `trial=120`, `state_dict_best_acc.pt`);
-- exporta `*_edge_sequence.parquet`, `*_events.parquet`, `*_macro_prev.parquet`, `*_macro_next.parquet` y `*_summary.json` en `output/actions/pathcrf/<video>/`;
+- exporta `*_edge_sequence.parquet`, `*_events.parquet`, `*_events_semantic.parquet`, `*_macro_prev.parquet`, `*_macro_next.parquet` y `*_summary.json` en `output/actions/pathcrf/<video>/`;
+- si también dispone de `tracks.json`, genera además `*_commentary_events.json` con:
+  - el mapeo invertido `pathcrf_id -> track_id`;
+  - nombre del jugador, equipo, rival y posición cuando se pueden resolver desde el tracking enriquecido;
+  - un subpayload `commentary_event` listo para la fase posterior de Gemma;
 - genera además `*_pitch_pathcrf.mp4` con un drawer que, si conoce el vídeo original y el `tracks.json`, renderiza sobre el broadcast real usando las `bbox` reales e incrusta un mini-mapa 2D semitransparente en la esquina superior derecha; si no, cae al modo 2D puro.
 
 Notas:
 - el wrapper local soporta los checkpoints `set_*` incluidos en el repo clonado aunque la `venv` no tenga `torch_geometric`; si se quisiera usar un checkpoint `gat`, entonces sí habría que instalar esa dependencia;
 - `ball_x/ball_y` se deja vacío de forma deliberada para no contaminar PathCRF con una proyección de balón poco fiable.
+- el postproceso semántico actual añade dos capas encima de `detect_events`: reclasificación de inicios de episodio a `corner`, `throw_in` y `goalkick`, y una heurística de `shot` adaptada al flujo local basado en `kick/control/out`.
 
 ### Grid search de hiperparámetros del tracker
 ```bash

@@ -363,6 +363,12 @@ class OllamaCommentaryGenerator:
         self.keep_alive = keep_alive
         self.prompt_builder = prompt_builder or CommentaryPromptBuilder()
 
+    def _backend_display_name(self) -> str:
+        return "Ollama"
+
+    def _backend_start_hint(self) -> str:
+        return "Asegurate de que `ollama serve` este corriendo."
+
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         raw_body = json.dumps(payload).encode("utf-8")
@@ -378,12 +384,12 @@ class OllamaCommentaryGenerator:
         except error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
-                f"Error HTTP de Ollama ({exc.code}) en {path}: {body}"
+                f"Error HTTP de {self._backend_display_name()} ({exc.code}) en {path}: {body}"
             ) from exc
         except error.URLError as exc:
             raise RuntimeError(
-                "No se pudo conectar con Ollama. "
-                "Asegurate de que `ollama serve` este corriendo."
+                f"No se pudo conectar con {self._backend_display_name()}. "
+                f"{self._backend_start_hint()}"
             ) from exc
         return json.loads(raw_response)
 

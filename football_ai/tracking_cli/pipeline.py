@@ -30,6 +30,7 @@ from .paths import (
     build_tracks_output_paths,
     resolve_video_path,
 )
+from .live_commentary import compose_frame_hooks, create_app_live_commentary_bridge_from_env
 from .persistence import save_debug_frames, save_result, save_summary, upsert_tracking_metrics_dataset
 
 COLOR_NAME_TO_RGB = {
@@ -190,6 +191,8 @@ def _resolve_frame_hook_device(frame_hook):
     hook_owner = getattr(frame_hook, "__self__", None)
     role_session = getattr(hook_owner, "role_session", None)
     if role_session is None:
+        role_session = getattr(frame_hook, "role_session", None)
+    if role_session is None:
         return "cpu (frame_hook sin backend torch)"
     runtime_device = getattr(role_session, "device", "cpu")
     return _resolve_runtime_device_label(runtime_device)
@@ -307,7 +310,13 @@ def run_tracking_pipeline(args):
             expected_roles_by_team_override=lineup_expected_roles_by_team,
             lineup_matcher=lineup_matcher,
         )
-        frame_hook = online_special_seed_role_assigner.on_frame
+        online_commentary_bridge = create_app_live_commentary_bridge_from_env()
+        if online_commentary_bridge is not None:
+            logger.info("PathCRF live commentary bridge activado para esta ejecución.")
+        frame_hook = compose_frame_hooks(
+            online_special_seed_role_assigner.on_frame,
+            (online_commentary_bridge.on_frame if online_commentary_bridge is not None else None),
+        )
 
         if bool(tracker_conf.get("print_runtime_devices", True)):
             print(
@@ -378,6 +387,11 @@ def run_tracking_pipeline(args):
         save_result(tracks, output_path_named, logger)
         if output_path_legacy != output_path_named:
             save_result(tracks, output_path_legacy, logger)
+        if online_commentary_bridge is not None:
+            try:
+                online_commentary_bridge.finalize(output_path_named)
+            except Exception:
+                logger.exception("Fallo en el flush final del bridge PathCRF live.")
         if online_special_seed_role_assigner.enabled:
             role_frame_df, role_player_df, role_greedy_df = online_special_seed_role_assigner.build_role_export_dataframes(tracks)
             save_dataframe_csv(role_frame_df, role_frame_csv_path, logger, "Frame role predictions CSV")

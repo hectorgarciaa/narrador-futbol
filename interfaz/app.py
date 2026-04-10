@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 import re
 import shutil
 import subprocess
@@ -23,6 +24,8 @@ from pathlib import Path
 from urllib import error, request
 from urllib.parse import parse_qs, quote, urlparse
 
+import yaml
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -33,6 +36,7 @@ from football_ai.commentaries.deferred_media import (
     assemble_deferred_commentary_video,
 )
 from football_ai.commentaries.generator import OllamaCommentaryGenerator
+from football_ai.commentaries.llama_cpp_backend import LlamaCppCommentaryGenerator
 from football_ai.commentaries.server import (
     DEFAULT_SERVER_HOST as DEFAULT_COMMENTARY_HOST,
     DEFAULT_SERVER_PORT as DEFAULT_COMMENTARY_PORT,
@@ -58,12 +62,33 @@ COMMENTARY_CACHE_ROOT = PROJECT_ROOT / "output" / "interfaz" / "commentary_cache
 COMMENTARY_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 STARTUP_INTRO_AUDIO_PATH = COMMENTARY_CACHE_ROOT / "startup_intro.wav"
 STARTUP_INTRO_META_PATH = COMMENTARY_CACHE_ROOT / "startup_intro.json"
+OLLAMA_SERVE_LOG_PATH = COMMENTARY_CACHE_ROOT / "ollama_serve.log"
+LLAMA_CPP_CONFIG_PATH = PROJECT_ROOT / "llama.cpp" / "config.yaml"
+LLAMA_CPP_SERVER_LOG_PATH = COMMENTARY_CACHE_ROOT / "llama_cpp_server.log"
+OLLAMA_STARTUP_TIMEOUT_SECONDS = 90.0
+OLLAMA_STARTUP_POLL_SECONDS = 0.5
 
 RUNS = {}
 RUNS_LOCK = threading.Lock()
 DEFAULT_COMMENTARY_MODE = "live"
 COMMENTARY_MODE_CHOICES = {"live", "deferred"}
 COMMENTARY_SERVER_MANAGER = None
+STARTUP_INTRO_LOCK = threading.Lock()
+STARTUP_INTRO_STATE = {
+    "status": "idle",
+    "started_at_utc": None,
+    "finished_at_utc": None,
+    "error": None,
+    "thread_name": None,
+}
+
+APP_LIVE_COMMENTARY_ENV = "NARRADOR_APP_ENABLE_LIVE_COMMENTARY"
+APP_COMMENTARY_SERVICE_URL_ENV = "NARRADOR_APP_COMMENTARY_SERVICE_URL"
+APP_COMMENTARY_MANIFEST_PATH_ENV = "NARRADOR_APP_COMMENTARY_MANIFEST_PATH"
+APP_COMMENTARY_AUDIO_DIR_ENV = "NARRADOR_APP_COMMENTARY_AUDIO_DIR"
+APP_COMMENTARY_MODE_ENV = "NARRADOR_APP_COMMENTARY_MODE"
+APP_RUN_DIR_ENV = "NARRADOR_APP_RUN_DIR"
+APP_RUN_ID_ENV = "NARRADOR_APP_RUN_ID"
 
 
 def now_iso():
@@ -120,34 +145,201 @@ def normalize_commentary_mode(value):
     return mode
 
 
+def get_startup_intro_state():
+    with STARTUP_INTRO_LOCK:
+        return dict(STARTUP_INTRO_STATE)
+
+
+def update_startup_intro_state(**changes):
+    with STARTUP_INTRO_LOCK:
+        STARTUP_INTRO_STATE.update(changes)
+        return dict(STARTUP_INTRO_STATE)
+
+
+def _resolve_optional_local_path(base_dir, value):
+    if value in {None, ""}:
+        return None
+    path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        path = (Path(base_dir) / path).resolve()
+    else:
+        path = path.resolve()
+    return path
+
+
+def load_llama_cpp_launch_config(config_path=None):
+    resolved_config_path = Path(config_path or LLAMA_CPP_CONFIG_PATH).expanduser().resolve()
+    if not resolved_config_path.exists():
+        return None
+
+    with open(resolved_config_path, "r", encoding="utf-8") as f:
+        payload = yaml.safe_load(f) or {}
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"El config de llama.cpp debe ser un objeto YAML: {resolved_config_path}"
+        )
+
+    runtime_cfg = dict(payload.get("runtime") or {})
+    server_cfg = dict(payload.get("server") or {})
+    model_cfg = dict(payload.get("model") or {})
+    config_dir = resolved_config_path.parent
+
+    executable_path = _resolve_optional_local_path(
+        config_dir,
+        server_cfg.get("executable") or "./llama-server",
+    )
+    model_path = _resolve_optional_local_path(
+        config_dir,
+        model_cfg.get("path"),
+    )
+    host = str(server_cfg.get("host") or "127.0.0.1").strip() or "127.0.0.1"
+    port = int(server_cfg.get("port") or 8001)
+    alias = str(server_cfg.get("alias") or "gemma4-q4ks-text").strip() or "gemma4-q4ks-text"
+    extra_args = server_cfg.get("extra_args") or runtime_cfg.get("extra_args") or []
+    if not isinstance(extra_args, list):
+        raise ValueError(
+            f"`server.extra_args` debe ser una lista en {resolved_config_path}"
+        )
+
+    return {
+        "config_path": resolved_config_path,
+        "config_dir": config_dir,
+        "enabled": bool(runtime_cfg.get("enabled", True)),
+        "executable_path": executable_path,
+        "model_path": model_path,
+        "host": host,
+        "port": port,
+        "base_url": f"http://{host}:{port}",
+        "alias": alias,
+        "ctx_size": server_cfg.get("ctx_size", 512),
+        "n_gpu_layers": server_cfg.get("n_gpu_layers", 999),
+        "reasoning": str(server_cfg.get("reasoning") or "off").strip() or "off",
+        "no_warmup": bool(server_cfg.get("no_warmup", True)),
+        "extra_args": [str(item) for item in extra_args],
+    }
+
+
+def resolve_commentary_runtime_settings(args):
+    backend = str(args.commentary_backend or "auto").strip().lower() or "auto"
+    llama_cpp_config = load_llama_cpp_launch_config(args.llama_cpp_config)
+    if backend == "auto":
+        if llama_cpp_config is not None and llama_cpp_config.get("enabled", True):
+            backend = "llama_cpp"
+        else:
+            backend = "ollama"
+    if backend not in {"ollama", "llama_cpp"}:
+        raise ValueError(f"Backend de comentarios no soportado: {backend}")
+
+    if backend == "llama_cpp":
+        if llama_cpp_config is None:
+            raise FileNotFoundError(
+                "No se encontró el fichero de configuración de llama.cpp. "
+                f"Esperado en {Path(args.llama_cpp_config).expanduser().resolve()}"
+            )
+        model = str(args.commentary_model or llama_cpp_config.get("alias") or "").strip()
+        if not model:
+            raise ValueError("No se pudo resolver el alias del modelo para llama.cpp.")
+        base_url = str(
+            args.commentary_base_url
+            or llama_cpp_config.get("base_url")
+            or "http://127.0.0.1:8001"
+        ).strip()
+        return {
+            "backend": backend,
+            "model": model,
+            "base_url": base_url,
+            "llama_cpp_config": llama_cpp_config,
+        }
+
+    return {
+        "backend": backend,
+        "model": str(args.commentary_model or "gemma4:e2b").strip() or "gemma4:e2b",
+        "base_url": str(args.commentary_base_url).strip() if args.commentary_base_url else None,
+        "llama_cpp_config": None,
+    }
+
+
 class CommentaryServerManager:
     def __init__(
         self,
         host=DEFAULT_COMMENTARY_HOST,
         port=DEFAULT_COMMENTARY_PORT,
         *,
+        backend="ollama",
         model="gemma4:e2b",
         temperature=0.4,
         base_url=None,
+        llama_cpp_config=None,
     ):
         self.host = str(host).strip() or DEFAULT_COMMENTARY_HOST
         self.port = int(port)
-        self.model = str(model).strip() or "gemma4:e2b"
+        self.backend = str(backend or "ollama").strip().lower() or "ollama"
+        default_model = "gemma4-q4ks-text" if self.backend == "llama_cpp" else "gemma4:e2b"
+        self.model = str(model).strip() or default_model
         self.temperature = float(temperature)
         self.base_url = str(base_url).strip() if base_url else None
+        self.llama_cpp_config = dict(llama_cpp_config or {})
         self._start_lock = threading.Lock()
         self._ready_event = threading.Event()
         self._thread = None
         self._server = None
         self._start_error = None
         self._reused_external = False
+        self._ollama_process = None
+        self._ollama_log_handle = None
+        self._ollama_managed_by_interface = False
 
     @property
     def service_url(self):
         return f"http://{self.host}:{self.port}"
 
+    @property
+    def backend_display_name(self):
+        return "llama.cpp" if self.backend == "llama_cpp" else "Ollama"
+
+    @property
+    def managed_backend_log_path(self):
+        if self.backend == "llama_cpp":
+            return LLAMA_CPP_SERVER_LOG_PATH
+        return OLLAMA_SERVE_LOG_PATH
+
+    @property
+    def llm_base_url(self):
+        if self.backend == "llama_cpp":
+            base_url = str(self.base_url).strip() if self.base_url else None
+            if base_url:
+                return base_url.rstrip("/")
+            config_base_url = str(self.llama_cpp_config.get("base_url") or "").strip()
+            if config_base_url:
+                return config_base_url.rstrip("/")
+            env_base_url = str(os.environ.get("LLAMA_CPP_BASE_URL") or "").strip()
+            if not env_base_url:
+                return "http://127.0.0.1:8001"
+            if re.match(r"^https?://", env_base_url, flags=re.IGNORECASE):
+                return env_base_url.rstrip("/")
+            return f"http://{env_base_url}".rstrip("/")
+
+        base_url = str(self.base_url).strip() if self.base_url else None
+        if base_url:
+            return base_url.rstrip("/")
+        env_host = str(os.environ.get("OLLAMA_HOST") or "").strip()
+        if not env_host:
+            return "http://127.0.0.1:11434"
+        if re.match(r"^https?://", env_host, flags=re.IGNORECASE):
+            return env_host.rstrip("/")
+        return f"http://{env_host}".rstrip("/")
+
+    @property
+    def ollama_managed_by_interface(self):
+        return bool(self._ollama_managed_by_interface)
+
     def _health_url(self):
         return f"{self.service_url}/health"
+
+    def _llm_health_url(self):
+        if self.backend == "llama_cpp":
+            return f"{self.llm_base_url}/v1/models"
+        return f"{self.llm_base_url}/api/tags"
 
     def _probe_health(self, timeout=1.5):
         try:
@@ -160,13 +352,190 @@ class CommentaryServerManager:
         except Exception:
             return None
 
+    def _probe_llm(self, timeout=1.5):
+        try:
+            with request.urlopen(self._llm_health_url(), timeout=timeout) as response:
+                if response.status != 200:
+                    return None
+                payload = json.loads(response.read().decode("utf-8"))
+                if isinstance(payload, dict):
+                    payload["base_url"] = self.llm_base_url
+                    payload["backend"] = self.backend
+                return payload
+        except Exception:
+            return None
+
+    def _llm_target_is_local(self):
+        parsed = urlparse(self.llm_base_url)
+        host = str(parsed.hostname or "").strip().casefold()
+        return host in {"", "127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+    def _close_ollama_log_handle(self):
+        if self._ollama_log_handle is None:
+            return
+        try:
+            self._ollama_log_handle.close()
+        finally:
+            self._ollama_log_handle = None
+
+    def _spawn_ollama_process(self):
+        ollama_bin = shutil.which("ollama")
+        if not ollama_bin:
+            raise RuntimeError(
+                "No se encontró el binario `ollama` en el PATH para lanzar `ollama serve`."
+            )
+        if self._ollama_process is not None and self._ollama_process.poll() is None:
+            return
+        self._close_ollama_log_handle()
+        OLLAMA_SERVE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self._ollama_log_handle = open(
+            OLLAMA_SERVE_LOG_PATH,
+            "a",
+            encoding="utf-8",
+        )
+        self._ollama_log_handle.write(
+            f"\n[{now_iso()}] Lanzando `ollama serve` desde la interfaz.\n"
+        )
+        self._ollama_log_handle.flush()
+        self._ollama_process = subprocess.Popen(
+            [ollama_bin, "serve"],
+            cwd=str(PROJECT_ROOT),
+            stdout=self._ollama_log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        self._ollama_managed_by_interface = True
+
+    def _spawn_llama_cpp_process(self):
+        executable_path = _resolve_optional_local_path(
+            self.llama_cpp_config.get("config_dir") or (PROJECT_ROOT / "llama.cpp"),
+            self.llama_cpp_config.get("executable_path"),
+        )
+        model_path = _resolve_optional_local_path(
+            self.llama_cpp_config.get("config_dir") or (PROJECT_ROOT / "llama.cpp"),
+            self.llama_cpp_config.get("model_path"),
+        )
+        if executable_path is None or not executable_path.exists():
+            raise RuntimeError(
+                "No se encontró el binario `llama-server`. "
+                f"Revisa {self.llama_cpp_config.get('config_path') or LLAMA_CPP_CONFIG_PATH}."
+            )
+        if model_path is None or not model_path.exists():
+            raise RuntimeError(
+                "No se encontró el modelo GGUF para llama.cpp. "
+                f"Esperado en {model_path}."
+            )
+        if self._ollama_process is not None and self._ollama_process.poll() is None:
+            return
+
+        parsed = urlparse(self.llm_base_url)
+        host = str(parsed.hostname or self.llama_cpp_config.get("host") or "127.0.0.1").strip() or "127.0.0.1"
+        port = int(parsed.port or self.llama_cpp_config.get("port") or 8001)
+        command = [
+            str(executable_path),
+            "-m",
+            str(model_path),
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "-a",
+            self.model,
+        ]
+
+        ctx_size = self.llama_cpp_config.get("ctx_size")
+        if ctx_size is not None:
+            command.extend(["-c", str(int(ctx_size))])
+        n_gpu_layers = self.llama_cpp_config.get("n_gpu_layers")
+        if n_gpu_layers is not None:
+            command.extend(["-ngl", str(int(n_gpu_layers))])
+        reasoning = str(self.llama_cpp_config.get("reasoning") or "").strip()
+        if reasoning:
+            command.extend(["--reasoning", reasoning])
+        if bool(self.llama_cpp_config.get("no_warmup", True)):
+            command.append("--no-warmup")
+        command.extend(self.llama_cpp_config.get("extra_args") or [])
+
+        self._close_ollama_log_handle()
+        LLAMA_CPP_SERVER_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self._ollama_log_handle = open(
+            LLAMA_CPP_SERVER_LOG_PATH,
+            "a",
+            encoding="utf-8",
+        )
+        self._ollama_log_handle.write(
+            f"\n[{now_iso()}] Lanzando `llama-server` desde la interfaz.\n"
+        )
+        self._ollama_log_handle.write(
+            f"[{now_iso()}] Comando: {' '.join(command)}\n"
+        )
+        self._ollama_log_handle.flush()
+        self._ollama_process = subprocess.Popen(
+            command,
+            cwd=str(executable_path.parent),
+            stdout=self._ollama_log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            start_new_session=True,
+        )
+        self._ollama_managed_by_interface = True
+
+    def _ensure_llm_ready(self, timeout=OLLAMA_STARTUP_TIMEOUT_SECONDS):
+        payload = self._probe_llm(timeout=1.5)
+        if payload is not None:
+            return payload
+        if not self._llm_target_is_local():
+            return None
+
+        if self.backend == "llama_cpp":
+            self._spawn_llama_cpp_process()
+        else:
+            self._spawn_ollama_process()
+        deadline = time.perf_counter() + float(timeout)
+        while time.perf_counter() < deadline:
+            payload = self._probe_llm(timeout=1.5)
+            if payload is not None:
+                return payload
+            if self._ollama_process is not None and self._ollama_process.poll() is not None:
+                raise RuntimeError(
+                    f"`{self.backend_display_name}` terminó antes de exponer la API. "
+                    f"Revisa el log en {self.managed_backend_log_path}."
+                )
+            time.sleep(OLLAMA_STARTUP_POLL_SECONDS)
+        raise TimeoutError(
+            f"La interfaz lanzó `{self.backend_display_name}`, pero la API no respondió "
+            f"a tiempo en {self.llm_base_url}."
+        )
+
+    def build_commentary_generator(self):
+        if self.backend == "llama_cpp":
+            return LlamaCppCommentaryGenerator(
+                model=self.model,
+                temperature=self.temperature,
+                base_url=self.llm_base_url,
+            )
+        return OllamaCommentaryGenerator(
+            model=self.model,
+            temperature=self.temperature,
+            base_url=self.base_url,
+        )
+
     def start(self):
         with self._start_lock:
             if self._thread is not None or self._reused_external:
                 return
+            self._start_error = None
+            self._ready_event.clear()
             external = self._probe_health()
             if external is not None:
                 self._reused_external = True
+                self._ready_event.set()
+                return
+            try:
+                self._ensure_llm_ready()
+            except Exception as exc:
+                self._start_error = exc
                 self._ready_event.set()
                 return
             self._thread = threading.Thread(target=self._serve, daemon=True)
@@ -174,11 +543,7 @@ class CommentaryServerManager:
 
     def _serve(self):
         try:
-            generator = OllamaCommentaryGenerator(
-                model=self.model,
-                temperature=self.temperature,
-                base_url=self.base_url,
-            )
+            generator = self.build_commentary_generator()
             voice_synthesizer = build_voice_synthesizer()
             pipeline = CommentaryAudioPipeline(
                 commentary_generator=generator,
@@ -219,33 +584,73 @@ class CommentaryServerManager:
         return payload
 
     def health_payload(self):
+        llm_payload = self._probe_llm(timeout=1.0)
+        llm_status = "ready" if llm_payload is not None else "unavailable"
+        if llm_status != "ready" and self._ollama_process is not None:
+            if self._ollama_process.poll() is None:
+                llm_status = "starting"
+            elif self.ollama_managed_by_interface:
+                llm_status = "failed"
         if self._reused_external:
             payload = self._probe_health(timeout=1.0) or {"status": "unavailable"}
             payload["managed_by_interface"] = False
             payload["service_url"] = self.service_url
+            payload["llm_backend"] = self.backend
+            payload["llm_status"] = llm_status
+            payload["llm_base_url"] = self.llm_base_url
+            payload["llm_managed_by_interface"] = self.ollama_managed_by_interface
+            payload["llm_model"] = self.model
+            if self.backend == "llama_cpp":
+                payload["llama_cpp_config_path"] = str(
+                    self.llama_cpp_config.get("config_path") or LLAMA_CPP_CONFIG_PATH
+                )
             return payload
-        if self._thread is None:
-            return {
-                "status": "idle",
-                "service_url": self.service_url,
-                "managed_by_interface": True,
-            }
-        if not self._ready_event.is_set():
-            return {
-                "status": "starting",
-                "service_url": self.service_url,
-                "managed_by_interface": True,
-            }
         if self._start_error is not None:
             return {
                 "status": "failed",
                 "service_url": self.service_url,
                 "managed_by_interface": True,
                 "error": str(self._start_error),
+                "llm_backend": self.backend,
+                "llm_status": llm_status,
+                "llm_base_url": self.llm_base_url,
+                "llm_managed_by_interface": self.ollama_managed_by_interface,
+                "llm_model": self.model,
+            }
+        if self._thread is None:
+            return {
+                "status": "idle",
+                "service_url": self.service_url,
+                "managed_by_interface": True,
+                "llm_backend": self.backend,
+                "llm_status": llm_status,
+                "llm_base_url": self.llm_base_url,
+                "llm_managed_by_interface": self.ollama_managed_by_interface,
+                "llm_model": self.model,
+            }
+        if not self._ready_event.is_set():
+            return {
+                "status": "starting",
+                "service_url": self.service_url,
+                "managed_by_interface": True,
+                "llm_backend": self.backend,
+                "llm_status": llm_status,
+                "llm_base_url": self.llm_base_url,
+                "llm_managed_by_interface": self.ollama_managed_by_interface,
+                "llm_model": self.model,
             }
         payload = self._probe_health(timeout=1.0) or {"status": "unavailable"}
         payload["managed_by_interface"] = True
         payload["service_url"] = self.service_url
+        payload["llm_backend"] = self.backend
+        payload["llm_status"] = llm_status
+        payload["llm_base_url"] = self.llm_base_url
+        payload["llm_managed_by_interface"] = self.ollama_managed_by_interface
+        payload["llm_model"] = self.model
+        if self.backend == "llama_cpp":
+            payload["llama_cpp_config_path"] = str(
+                self.llama_cpp_config.get("config_path") or LLAMA_CPP_CONFIG_PATH
+            )
         return payload
 
     def process_payload(self, payload, timeout=240.0):
@@ -272,6 +677,17 @@ class CommentaryServerManager:
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
+        if self.ollama_managed_by_interface and self._ollama_process is not None:
+            try:
+                if self._ollama_process.poll() is None:
+                    self._ollama_process.terminate()
+                    self._ollama_process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                self._ollama_process.kill()
+                self._ollama_process.wait(timeout=5.0)
+            finally:
+                self._ollama_process = None
+        self._close_ollama_log_handle()
 
 
 def build_startup_intro_event():
@@ -324,11 +740,7 @@ def generate_startup_intro_commentary_locally():
         raise RuntimeError("El servidor de comentarios no esta configurado.")
 
     event = build_startup_intro_event()
-    generator = OllamaCommentaryGenerator(
-        model=COMMENTARY_SERVER_MANAGER.model,
-        temperature=COMMENTARY_SERVER_MANAGER.temperature,
-        base_url=COMMENTARY_SERVER_MANAGER.base_url,
-    )
+    generator = COMMENTARY_SERVER_MANAGER.build_commentary_generator()
     voice_synthesizer = build_voice_synthesizer()
     voice_synthesizer.prepare()
     pipeline = CommentaryAudioPipeline(
@@ -419,6 +831,48 @@ def read_startup_intro_commentary():
     return payload
 
 
+def start_startup_intro_preparation_background():
+    current_state = get_startup_intro_state()
+    if current_state.get("status") == "starting":
+        return False
+
+    def _worker():
+        thread_name = threading.current_thread().name
+        update_startup_intro_state(
+            status="starting",
+            started_at_utc=now_iso(),
+            finished_at_utc=None,
+            error=None,
+            thread_name=thread_name,
+        )
+        try:
+            prepare_startup_intro_commentary()
+        except Exception as exc:  # pragma: no cover - defensivo
+            update_startup_intro_state(
+                status="failed",
+                finished_at_utc=now_iso(),
+                error=str(exc),
+                thread_name=thread_name,
+            )
+            print(f"No se pudo precalentar el intro en segundo plano: {exc}")
+        else:
+            update_startup_intro_state(
+                status="ready",
+                finished_at_utc=now_iso(),
+                error=None,
+                thread_name=thread_name,
+            )
+            print(f"Intro precalentado en segundo plano en {STARTUP_INTRO_AUDIO_PATH}")
+
+    worker = threading.Thread(
+        target=_worker,
+        name="startup-intro-warmup",
+        daemon=True,
+    )
+    worker.start()
+    return True
+
+
 def build_run_paths(run_id):
     run_dir = RUNS_ROOT / str(run_id)
     return {
@@ -500,15 +954,50 @@ def initial_commentary_payload(run_id, run_paths, commentary_mode):
     }
 
 
+def resolve_result_video_path_from_status(status):
+    if not isinstance(status, dict):
+        return None
+    commentary = dict(status.get("commentary") or {})
+    commentary_mode = str(commentary.get("mode") or "").strip().lower()
+    deferred_status = str(commentary.get("deferred_mux_status") or "").strip().lower()
+
+    candidates = []
+    if commentary_mode == "deferred":
+        if deferred_status == "ready":
+            candidates.append(commentary.get("deferred_video_path"))
+        elif deferred_status == "failed":
+            candidates.append(status.get("output_video_path"))
+    elif str(status.get("status") or "").strip().lower() not in {"queued", "running"}:
+        candidates.append(status.get("output_video_path"))
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        resolved_path = Path(candidate).expanduser().resolve()
+        if resolved_path.exists() and resolved_path.is_file():
+            return resolved_path
+    return None
+
+
 def attach_cached_intro_to_run(run_id, commentary_mode):
     run_paths = build_run_paths(run_id)
     run_paths["commentary_audio_dir"].mkdir(parents=True, exist_ok=True)
     cached_intro = read_startup_intro_commentary()
     if cached_intro is None:
-        raise RuntimeError(
-            "El intro inicial no esta preparado todavia. "
-            "Espera a que termine de arrancar la interfaz."
-        )
+        intro_state = get_startup_intro_state()
+        intro_status = str(intro_state.get("status") or "pending").strip().lower()
+        if intro_status == "ready":
+            intro_status = "pending"
+        if intro_status == "idle":
+            start_startup_intro_preparation_background()
+            intro_status = "starting"
+        payload = {
+            **initial_commentary_payload(run_id, run_paths, commentary_mode),
+            "intro_status": "failed" if intro_status == "failed" else intro_status,
+        }
+        if intro_state.get("error"):
+            payload["intro_error"] = str(intro_state["error"])
+        return payload
 
     cached_audio_path = Path(cached_intro["audio_path"]).expanduser().resolve()
     shutil.copy2(cached_audio_path, run_paths["commentary_intro_audio_path"])
@@ -643,11 +1132,24 @@ def launch_tracking_process(run_id, lineup_spec, commentary_mode=DEFAULT_COMMENT
         "--lineup-spec",
         str(run_paths["spec_path"]),
     ]
+    process_env = dict(os.environ)
+    process_env.update(
+        {
+            APP_LIVE_COMMENTARY_ENV: "1",
+            APP_COMMENTARY_SERVICE_URL_ENV: commentary_service_url(),
+            APP_COMMENTARY_MANIFEST_PATH_ENV: str(run_paths["commentary_manifest_path"]),
+            APP_COMMENTARY_AUDIO_DIR_ENV: str(run_paths["commentary_audio_dir"]),
+            APP_COMMENTARY_MODE_ENV: str(commentary_mode),
+            APP_RUN_DIR_ENV: str(run_paths["run_dir"]),
+            APP_RUN_ID_ENV: str(run_id),
+        }
+    )
 
     log_file = open(run_paths["log_path"], "w", encoding="utf-8")
     process = subprocess.Popen(
         cmd,
         cwd=str(PROJECT_ROOT),
+        env=process_env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
@@ -758,13 +1260,47 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             return
         content_type, _ = mimetypes.guess_type(str(file_path))
         content_type = content_type or "application/octet-stream"
-        content = file_path.read_bytes()
-        self.send_response(HTTPStatus.OK)
+        total_size = int(file_path.stat().st_size)
+        start = 0
+        end = max(0, total_size - 1)
+        status = HTTPStatus.OK
+        range_header = self.headers.get("Range")
+        if range_header:
+            match = re.match(r"bytes=(\d*)-(\d*)$", str(range_header).strip())
+            if match:
+                start_text, end_text = match.groups()
+                if start_text:
+                    start = int(start_text)
+                if end_text:
+                    end = int(end_text)
+                elif total_size > 0:
+                    end = total_size - 1
+                if start >= total_size or start < 0 or end < start:
+                    self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                    self.send_header("Content-Range", f"bytes */{total_size}")
+                    self.end_headers()
+                    return
+                end = min(end, total_size - 1)
+                status = HTTPStatus.PARTIAL_CONTENT
+        content_length = max(0, end - start + 1)
+
+        self.send_response(int(status))
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(content)))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(content_length))
+        if status == HTTPStatus.PARTIAL_CONTENT:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{total_size}")
         self.end_headers()
         if include_body:
-            self.wfile.write(content)
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                while remaining > 0:
+                    chunk = f.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
 
     def _read_json_body(self):
         content_length = int(self.headers.get("Content-Length", "0") or 0)
@@ -782,6 +1318,13 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             )
             return
         status["log_tail"] = tail_log(run_paths["log_path"])
+        result_video_path = resolve_result_video_path_from_status(status)
+        status["result_video_path"] = str(result_video_path) if result_video_path is not None else None
+        status["result_video_url"] = (
+            f"/api/runs/{run_id}/result-video"
+            if result_video_path is not None
+            else None
+        )
         self._send_json(status, include_body=include_body)
 
     def _handle_get_commentary_service(self, include_body=True):
@@ -793,6 +1336,13 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             }
         else:
             payload = COMMENTARY_SERVER_MANAGER.health_payload()
+        payload["startup_intro"] = get_startup_intro_state()
+        cached_intro = read_startup_intro_commentary()
+        payload["startup_intro"]["cache_ready"] = cached_intro is not None
+        if cached_intro is not None:
+            payload["startup_intro"]["generated_at_utc"] = cached_intro.get(
+                "generated_at_utc"
+            )
         self._send_json(payload, include_body=include_body)
 
     def _handle_get_run_artifact(self, run_id, relative_path, include_body=True):
@@ -807,6 +1357,34 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             )
             return
         self._send_file(artifact_path, include_body=include_body)
+
+    def _handle_get_run_result_video(self, run_id, include_body=True):
+        run_paths = build_run_paths(run_id)
+        status = read_json(run_paths["status_path"], default=None)
+        if status is None:
+            self._send_json(
+                {"error": f"No existe la ejecución {run_id}."},
+                status=HTTPStatus.NOT_FOUND,
+                include_body=include_body,
+            )
+            return
+        result_video_path = resolve_result_video_path_from_status(status)
+        if result_video_path is None:
+            self._send_json(
+                {"error": "El vídeo final todavía no está disponible."},
+                status=HTTPStatus.NOT_FOUND,
+                include_body=include_body,
+            )
+            return
+        project_root = PROJECT_ROOT.resolve()
+        if project_root not in result_video_path.parents and result_video_path != project_root:
+            self._send_json(
+                {"error": "Ruta de vídeo no permitida."},
+                status=HTTPStatus.FORBIDDEN,
+                include_body=include_body,
+            )
+            return
+        self._send_file(result_video_path, include_body=include_body)
 
     def _handle_get_commentary_events(self, run_id, query, include_body=True):
         run_paths = build_run_paths(run_id)
@@ -867,6 +1445,18 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/runs/"):
+            if path.endswith("/result-video"):
+                run_id = path.split("/api/runs/", 1)[1].rsplit("/result-video", 1)[0].strip("/")
+                if not run_id:
+                    self._send_json(
+                        {"error": "Run id inválido."},
+                        status=HTTPStatus.BAD_REQUEST,
+                        include_body=include_body,
+                    )
+                    return
+                self._handle_get_run_result_video(run_id, include_body=include_body)
+                return
+
             if "/artifacts/" in path:
                 prefix, relative_path = path.split("/artifacts/", 1)
                 run_id = prefix.split("/api/runs/", 1)[1].strip("/")
@@ -987,6 +1577,16 @@ def parse_args():
     parser.add_argument("--host", default="127.0.0.1", help="Host a escuchar.")
     parser.add_argument("--port", type=int, default=8767, help="Puerto HTTP.")
     parser.add_argument(
+        "--commentary-backend",
+        choices=("auto", "ollama", "llama_cpp"),
+        default="auto",
+        help=(
+            "Backend LLM para el servidor de comentarios. "
+            "`auto` usa `llama.cpp` si existe `llama.cpp/config.yaml`; "
+            "si no, cae a `ollama`."
+        ),
+    )
+    parser.add_argument(
         "--commentary-host",
         default=DEFAULT_COMMENTARY_HOST,
         help="Host para el servidor de comentarios lanzado junto a la interfaz.",
@@ -999,8 +1599,8 @@ def parse_args():
     )
     parser.add_argument(
         "--commentary-model",
-        default="gemma4:e2b",
-        help="Modelo Ollama por defecto para comentarios.",
+        default=None,
+        help="Modelo o alias del backend de comentarios.",
     )
     parser.add_argument(
         "--commentary-temperature",
@@ -1011,7 +1611,12 @@ def parse_args():
     parser.add_argument(
         "--commentary-base-url",
         default=None,
-        help="URL base de Ollama para el servidor de comentarios.",
+        help="URL base del backend LLM para el servidor de comentarios.",
+    )
+    parser.add_argument(
+        "--llama-cpp-config",
+        default=str(LLAMA_CPP_CONFIG_PATH),
+        help="Ruta al config YAML usado para lanzar `llama-server`.",
     )
     return parser.parse_args()
 
@@ -1019,20 +1624,18 @@ def parse_args():
 def main():
     global COMMENTARY_SERVER_MANAGER
     args = parse_args()
+    commentary_runtime = resolve_commentary_runtime_settings(args)
     COMMENTARY_SERVER_MANAGER = CommentaryServerManager(
         host=args.commentary_host,
         port=args.commentary_port,
-        model=args.commentary_model,
+        backend=commentary_runtime["backend"],
+        model=commentary_runtime["model"],
         temperature=args.commentary_temperature,
-        base_url=args.commentary_base_url,
+        base_url=commentary_runtime["base_url"],
+        llama_cpp_config=commentary_runtime["llama_cpp_config"],
     )
-    COMMENTARY_SERVER_MANAGER.start()
-    startup_intro_error = None
-    try:
-        prepare_startup_intro_commentary()
-    except Exception as exc:  # pragma: no cover - defensivo
-        startup_intro_error = exc
     server = ThreadingHTTPServer((args.host, args.port), InterfaceRequestHandler)
+    warmup_started = start_startup_intro_preparation_background()
     print(
         f"Interfaz disponible en http://{args.host}:{args.port} "
         f"(Python: {sys.executable})"
@@ -1041,10 +1644,32 @@ def main():
         "Servidor de comentarios disponible en "
         f"{COMMENTARY_SERVER_MANAGER.service_url}"
     )
-    if startup_intro_error is None:
-        print(f"Intro precalentado en {STARTUP_INTRO_AUDIO_PATH}")
+    print(
+        "Backend LLM de comentarios: "
+        f"{COMMENTARY_SERVER_MANAGER.backend_display_name} "
+        f"({COMMENTARY_SERVER_MANAGER.model})"
+    )
+    print(
+        "API del backend LLM apuntando a "
+        f"{COMMENTARY_SERVER_MANAGER.llm_base_url}"
+    )
+    if COMMENTARY_SERVER_MANAGER.backend == "llama_cpp":
+        print(
+            "Config local de llama.cpp: "
+            f"{COMMENTARY_SERVER_MANAGER.llama_cpp_config.get('config_path') or LLAMA_CPP_CONFIG_PATH}"
+        )
+    if COMMENTARY_SERVER_MANAGER.ollama_managed_by_interface:
+        print(
+            f"La interfaz ha lanzado `{COMMENTARY_SERVER_MANAGER.backend_display_name}` "
+            f"automaticamente. Log: {COMMENTARY_SERVER_MANAGER.managed_backend_log_path}"
+        )
+    cached_intro = read_startup_intro_commentary()
+    if cached_intro is not None:
+        print(f"Intro cacheado disponible en {STARTUP_INTRO_AUDIO_PATH}")
+    if warmup_started:
+        print("Precalentando intro y servidor de comentarios en segundo plano...")
     else:
-        print(f"No se pudo precalentar el intro: {startup_intro_error}")
+        print("El precalentado del intro ya estaba en marcha.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

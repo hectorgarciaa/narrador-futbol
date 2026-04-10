@@ -50,12 +50,25 @@ Wrapper de inferencia para reutilizar el repo clonado de `PathCRF` desde este pr
 - lee el parquet ancho ya convertido o convierte primero un `tracks.json`;
 - ejecuta `PathCRF` sobre ese tracking y exporta:
   - secuencia de aristas activa por frame (`*_edge_sequence.parquet`);
-  - eventos detectados (`*_events.parquet`);
+  - eventos base detectados (`*_events.parquet`);
+  - eventos semánticos refinados (`*_events_semantic.parquet`) con:
+    - relabel de inicios de episodio a `corner`, `throw_in` y `goalkick`;
+    - heurística adaptada de `shot` sobre eventos `kick` en zona de remate;
+    - columnas de trazabilidad `event_type_raw`, `event_type_semantic`, `semantic_source` y puntuaciones de tiro;
+  - JSON enriquecido para comentarios (`*_commentary_events.json`) cuando también existe `tracks.json`;
   - salidas macro (`*_macro_prev.parquet`, `*_macro_next.parquet`) cuando existen;
   - resumen de ejecución (`*_summary.json`);
 - opcionalmente llama al drawer específico de PathCRF para generar un MP4:
   - sobre el broadcast real con `bbox` reales + mini-mapa 2D si dispone de vídeo y `tracks.json`;
   - o en modo 2D puro si solo hay parquet.
+
+### Postproceso semántico añadido en este repo
+
+- `pathcrf_setpieces.py`: reclasifica el primer evento de cada `episode_id` a `corner`, `throw_in` o `goalkick` con reglas geométricas sobre el campo;
+- `pathcrf_shot.py`: adapta la heurística upstream de tiro al flujo local basado en `kick/control/out`, manteniendo puntuaciones y flags auxiliares;
+- `pathcrf_commentary.py`: invierte `pathcrf_id -> track_id` con `person_slot_assignments`, recupera nombre/equipo/posición desde `tracks.json` y genera un JSON rico listo para pasar después a Gemma.
+
+El JSON de comentarios conserva tanto el evento semántico enriquecido como un subpayload `commentary_event` listo para la fase LLM. Si el actor de PathCRF cae en un slot sintético o no se puede revertir a un `track_id` real, el evento se marca como no listo para comentario y se documenta el `skip_reason`.
 
 ### Nota de compatibilidad
 
@@ -79,6 +92,8 @@ Salida típica:
 output/actions/pathcrf/<video>/<video>_tracking.parquet
 output/actions/pathcrf/<video>/<video>_edge_sequence.parquet
 output/actions/pathcrf/<video>/<video>_events.parquet
+output/actions/pathcrf/<video>/<video>_events_semantic.parquet
+output/actions/pathcrf/<video>/<video>_commentary_events.json
 output/actions/pathcrf/<video>/<video>_summary.json
 output/actions/pathcrf/<video>/<video>_pitch_pathcrf.mp4
 ```

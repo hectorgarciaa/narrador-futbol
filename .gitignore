@@ -72,3 +72,8 @@ football_ai.egg-info/
 .env
 
 repo/
+
+llama.cpp/
+# GGUF models
+models/gguf/
+*.gguf

@@ -15,7 +15,10 @@ from football_ai.core.serialization import convert_to_serializable
 from football_ai.tracking_cli.paths import sanitize_video_stem
 from football_ai.visualization.pathcrf_drawer import PathCRFDrawer
 
+from .pathcrf_commentary import build_commentary_events_json
 from .pathcrf_adapter import ConversionSummary, PathCRFAdapterConfig, convert_tracks_json_to_pathcrf
+from .pathcrf_setpieces import classify_episode_starts
+from .pathcrf_shot import apply_shot_heuristic
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,8 @@ class PathCRFPipelineResult:
     tracking_summary_path: Path | None
     edge_sequence_path: Path
     events_path: Path
+    semantic_events_path: Path | None
+    commentary_json_path: Path | None
     macro_prev_path: Path | None
     macro_next_path: Path | None
     render_path: Path | None
@@ -160,6 +165,14 @@ def _write_summary_json(summary_path: Path, payload: dict[str, Any]) -> None:
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(convert_to_serializable(payload), f, indent=2, ensure_ascii=False)
+
+
+def _read_json_if_exists(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return payload if isinstance(payload, dict) else None
 
 
 def _ensure_events_schema(events_df: pd.DataFrame) -> pd.DataFrame:
@@ -297,6 +310,8 @@ def run_pathcrf_inference(
         tracking_summary_path=None,
         edge_sequence_path=edge_sequence_path,
         events_path=events_path,
+        semantic_events_path=None,
+        commentary_json_path=None,
         macro_prev_path=macro_prev_path,
         macro_next_path=macro_next_path,
         render_path=None,
@@ -348,6 +363,9 @@ def run_pathcrf_pipeline(
     else:
         if not resolved_tracking_path.exists():
             raise FileNotFoundError(f"No existe el parquet indicado: {resolved_tracking_path}")
+        candidate_summary_path = resolved_tracking_path.with_suffix(".summary.json")
+        if candidate_summary_path.exists():
+            tracking_summary_path = candidate_summary_path
 
     inference_result = run_pathcrf_inference(
         tracking_path=resolved_tracking_path,
@@ -355,43 +373,73 @@ def run_pathcrf_pipeline(
         config=inference_config,
     )
 
+    output_stem = _infer_output_stem(resolved_tracking_path)
+    with inference_result.summary_path.open("r", encoding="utf-8") as f:
+        summary_payload: dict[str, Any] = json.load(f)
+    effective_fps = float(summary_payload.get("fps", 25.0))
+
+    semantic_events_path = output_dir / f"{output_stem}_events_semantic.parquet"
+    semantic_events_df = classify_episode_starts(pd.read_parquet(inference_result.events_path))
+    semantic_events_df = apply_shot_heuristic(semantic_events_df, fps=effective_fps)
+    semantic_events_df.to_parquet(semantic_events_path, index=False)
+
+    conversion_summary_payload = (
+        asdict(conversion_summary) if conversion_summary is not None else _read_json_if_exists(tracking_summary_path)
+    )
+    commentary_json_path = None
+    if resolved_tracks_path is not None and conversion_summary_payload is not None:
+        commentary_json_path = output_dir / f"{output_stem}_commentary_events.json"
+        commentary_json_path = build_commentary_events_json(
+            events=semantic_events_df,
+            tracks_path=resolved_tracks_path,
+            conversion_summary=conversion_summary_payload,
+            output_path=commentary_json_path,
+            source_paths={
+                "tracking_path": str(resolved_tracking_path),
+                "tracking_summary_path": str(tracking_summary_path) if tracking_summary_path is not None else None,
+                "events_path": str(inference_result.events_path),
+                "semantic_events_path": str(semantic_events_path),
+            },
+        )
+
     render_cfg = render_config or PathCRFRenderConfig()
     render_path = None
     if render_cfg.enabled:
-        output_stem = _infer_output_stem(resolved_tracking_path)
         render_path = (
             Path(render_output_path).expanduser().resolve()
             if render_output_path is not None
             else output_dir / f"{output_stem}_pitch_pathcrf.mp4"
         )
         drawer = PathCRFDrawer()
-        with inference_result.summary_path.open("r", encoding="utf-8") as f:
-            rendered_summary = json.load(f)
-        effective_render_fps = float(rendered_summary.get("fps", 25.0))
-
         drawer.render_tracking_and_edges(
             tracking=pd.read_parquet(resolved_tracking_path),
             edge_sequence=pd.read_parquet(inference_result.edge_sequence_path),
             output_path=render_path,
-            events=pd.read_parquet(inference_result.events_path),
-            fps=effective_render_fps,
+            events=semantic_events_df,
+            fps=effective_fps,
             frame_size=(int(render_cfg.width), int(render_cfg.height)),
             video_path=resolved_video_path,
             tracks_path=resolved_tracks_path,
-            conversion_summary=asdict(conversion_summary) if conversion_summary is not None else None,
+            conversion_summary=conversion_summary_payload,
             show=bool(render_cfg.show_window),
         )
 
-    summary_payload: dict[str, Any]
-    with inference_result.summary_path.open("r", encoding="utf-8") as f:
-        summary_payload = json.load(f)
     summary_payload["tracks_path"] = str(resolved_tracks_path) if resolved_tracks_path is not None else None
     summary_payload["video_path"] = str(resolved_video_path) if resolved_video_path is not None else None
     summary_payload["tracking_path"] = str(resolved_tracking_path)
     summary_payload["tracking_summary_path"] = str(tracking_summary_path) if tracking_summary_path is not None else None
+    summary_payload["semantic_events_path"] = str(semantic_events_path)
+    summary_payload["semantic_event_rows"] = int(len(semantic_events_df))
+    summary_payload["semantic_event_type_counts"] = {
+        str(key): int(value)
+        for key, value in semantic_events_df["event_type_semantic"].value_counts(dropna=False).items()
+    }
+    summary_payload["commentary_json_path"] = str(commentary_json_path) if commentary_json_path is not None else None
     summary_payload["render_path"] = str(render_path) if render_path is not None else None
     if conversion_summary is not None:
         summary_payload["conversion_summary"] = asdict(conversion_summary)
+    elif conversion_summary_payload is not None:
+        summary_payload["conversion_summary"] = conversion_summary_payload
     _write_summary_json(inference_result.summary_path, summary_payload)
 
     return PathCRFPipelineResult(
@@ -400,6 +448,8 @@ def run_pathcrf_pipeline(
         tracking_summary_path=tracking_summary_path,
         edge_sequence_path=inference_result.edge_sequence_path,
         events_path=inference_result.events_path,
+        semantic_events_path=semantic_events_path,
+        commentary_json_path=commentary_json_path,
         macro_prev_path=inference_result.macro_prev_path,
         macro_next_path=inference_result.macro_next_path,
         render_path=render_path,

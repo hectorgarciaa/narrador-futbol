@@ -235,6 +235,10 @@ def main() -> None:
         print(f"Tracking summary: {result.tracking_summary_path}")
     print(f"Edge sequence: {result.edge_sequence_path}")
     print(f"Events: {result.events_path}")
+    if result.semantic_events_path is not None:
+        print(f"Semantic events: {result.semantic_events_path}")
+    if result.commentary_json_path is not None:
+        print(f"Commentary JSON: {result.commentary_json_path}")
     if result.macro_prev_path is not None:
         print(f"Macro prev: {result.macro_prev_path}")
     if result.macro_next_path is not None:

@@ -18,6 +18,9 @@
           </p>
         </div>
         <div class="launch-card">
+          <p id="name-gate-banner" class="gate-banner">
+            Primero escribe el nombre de los dos equipos para desbloquear el resto del formulario.
+          </p>
           <label class="field">
             <span>Vídeo</span>
             <select id="video-source"></select>
@@ -63,6 +66,21 @@
             </div>
           </div>
           <pre id="run-log" class="run-log">Esperando ejecución...</pre>
+        </article>
+      </section>
+
+      <section class="result-grid">
+        <article class="status-card result-card">
+          <div class="status-head">
+            <div>
+              <p class="eyebrow">Resultado</p>
+              <h2>Vídeo final</h2>
+            </div>
+          </div>
+          <p id="result-video-empty" class="run-summary">
+            El vídeo final aparecerá aquí cuando termine la ejecución y la interfaz tenga el MP4 listo.
+          </p>
+          <video id="result-video" class="result-video" controls preload="metadata"></video>
         </article>
       </section>
     </main>

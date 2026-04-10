@@ -4,6 +4,7 @@ import argparse
 import json
 
 from .generator import CommentaryEvent, OllamaCommentaryGenerator
+from .llama_cpp_backend import LlamaCppCommentaryGenerator
 from .transformers_backend import (
     DEFAULT_HYMBA_MODEL,
     TransformersCommentaryGenerator,
@@ -16,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--backend",
-        choices=("ollama", "transformers"),
+        choices=("ollama", "llama_cpp", "transformers"),
         default="ollama",
         help="Backend a usar para generar el comentario.",
     )
@@ -35,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Modelo a usar. En `ollama`, por defecto `gemma4:e2b`. "
+            "En `llama_cpp`, por defecto `gemma4-q4ks-text`. "
             f"En `transformers`, por defecto `{DEFAULT_HYMBA_MODEL}`."
         ),
     )
@@ -53,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="URL base del servidor de Ollama.",
+        help="URL base del servidor del backend por red (`ollama` o `llama.cpp`).",
     )
     parser.add_argument(
         "--device",
@@ -69,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-new-tokens",
         type=int,
         default=80,
-        help="Maximo de tokens nuevos para el backend transformers.",
+        help="Maximo de tokens nuevos para los backends `transformers` y `llama_cpp`.",
     )
     parser.add_argument(
         "--hf-home",
@@ -151,6 +153,14 @@ def main() -> None:
             temperature=args.temperature,
             top_p=args.top_p,
             base_url=args.base_url,
+        )
+    elif args.backend == "llama_cpp":
+        generator = LlamaCppCommentaryGenerator(
+            model=args.model or "gemma4-q4ks-text",
+            temperature=args.temperature,
+            top_p=args.top_p,
+            base_url=args.base_url,
+            max_tokens=args.max_new_tokens,
         )
     else:
         generator = TransformersCommentaryGenerator(

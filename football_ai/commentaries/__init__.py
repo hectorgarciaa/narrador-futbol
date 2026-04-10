@@ -1,4 +1,4 @@
-"""Synthetic football commentary generation on top of Ollama or Transformers."""
+"""Synthetic football commentary generation on top of Ollama, llama.cpp or Transformers."""
 
 from .generator import (
     CommentaryEvent,
@@ -7,6 +7,7 @@ from .generator import (
     CommentaryPromptBuilder,
     OllamaCommentaryGenerator,
 )
+from .llama_cpp_backend import LlamaCppCommentaryGenerator
 from .transformers_backend import (
     DEFAULT_HYMBA_MODEL,
     TransformersCommentaryGenerator,
@@ -42,6 +43,7 @@ __all__ = [
     "CommentaryLLMRunResult",
     "CommentaryPromptBuilder",
     "OllamaCommentaryGenerator",
+    "LlamaCppCommentaryGenerator",
     "DEFAULT_HYMBA_MODEL",
     "TransformersCommentaryGenerator",
     "DEFAULT_SERVER_HOST",
