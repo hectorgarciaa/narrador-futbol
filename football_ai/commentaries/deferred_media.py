@@ -8,6 +8,12 @@ from typing import Any
 
 import cv2
 
+from .voice import probe_audio_duration_seconds
+
+MAX_BROWSER_VIDEO_WIDTH = 1920
+MAX_BROWSER_VIDEO_HEIGHT = 1080
+AUDIO_TIMELINE_EPSILON_S = 0.05
+
 
 @dataclass(slots=True)
 class DeferredCommentaryAssemblyResult:
@@ -50,6 +56,8 @@ def _read_jsonl(path: str | Path) -> list[dict[str, Any]]:
 def _event_audio_entries(manifest_path: str | Path) -> list[dict[str, Any]]:
     entries = []
     for item in _read_jsonl(manifest_path):
+        if bool(item.get("text_only")):
+            continue
         audio_path = item.get("audio_path")
         event = item.get("event") or {}
         if not audio_path:
@@ -61,14 +69,34 @@ def _event_audio_entries(manifest_path: str | Path) -> list[dict[str, Any]]:
             event_time_s = float(event.get("event_time_s") or 0.0)
         except (TypeError, ValueError):
             event_time_s = 0.0
+        try:
+            audio_duration_seconds = float(item.get("audio_duration_seconds") or 0.0)
+        except (TypeError, ValueError):
+            audio_duration_seconds = 0.0
+        if audio_duration_seconds <= 0.0:
+            audio_duration_seconds = float(
+                probe_audio_duration_seconds(resolved_audio_path) or 0.0
+            )
         entries.append(
             {
                 "event_time_s": max(0.0, event_time_s),
                 "audio_path": resolved_audio_path,
+                "audio_duration_seconds": max(0.0, audio_duration_seconds),
             }
         )
     entries.sort(key=lambda item: (item["event_time_s"], str(item["audio_path"])))
-    return entries
+    accepted_entries = []
+    next_available_time_s = 0.0
+    for item in entries:
+        event_time_s = float(item["event_time_s"])
+        if event_time_s + AUDIO_TIMELINE_EPSILON_S < next_available_time_s:
+            continue
+        item["scheduled_time_s"] = event_time_s
+        accepted_entries.append(item)
+        next_available_time_s = event_time_s + float(
+            item["audio_duration_seconds"] or 0.0
+        )
+    return accepted_entries
 
 
 def probe_video_duration_seconds(video_path: str | Path) -> float:
@@ -123,7 +151,7 @@ def build_commentary_track_from_manifest(
     filter_parts = []
     mix_inputs = ["[0:a]"]
     for input_index, item in enumerate(audio_entries, start=1):
-        delay_ms = max(0, int(round(float(item["event_time_s"]) * 1000.0)))
+        delay_ms = max(0, int(round(float(item["scheduled_time_s"]) * 1000.0)))
         label = f"a{input_index}"
         filter_parts.append(
             f"[{input_index}:a]aformat=sample_rates={int(sample_rate)}:"
@@ -193,8 +221,17 @@ def mux_commentary_track_into_video(
         "veryfast",
         "-crf",
         "22",
+        "-profile:v",
+        "main",
+        "-level:v",
+        "4.1",
         "-vf",
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+        (
+            f"scale={MAX_BROWSER_VIDEO_WIDTH}:{MAX_BROWSER_VIDEO_HEIGHT}:"
+            "force_original_aspect_ratio=decrease,"
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+            "format=yuv420p"
+        ),
         "-movflags",
         "+faststart",
         "-c:a",

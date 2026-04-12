@@ -6,7 +6,11 @@ import sys
 import time
 from typing import Any
 
-from .generator import CommentaryEvent, OllamaCommentaryGenerator
+from .generator import (
+    DEFAULT_COMMENTARY_TEMPERATURE,
+    CommentaryEvent,
+    OllamaCommentaryGenerator,
+)
 from .server import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, create_http_server
 from .voice import (
     DEFAULT_QWEN_CPP_THREADS,
@@ -43,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.4,
+        default=DEFAULT_COMMENTARY_TEMPERATURE,
         help="Temperatura de muestreo del modelo.",
     )
     parser.add_argument(

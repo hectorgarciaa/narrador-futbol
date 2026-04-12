@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .generator import CommentaryEvent, OllamaCommentaryGenerator
-from .voice import CommentaryAudioPipeline
+from .voice import CommentaryAudioPipeline, probe_audio_duration_seconds
 
 
 DEFAULT_SERVER_HOST = "127.0.0.1"
@@ -45,6 +45,7 @@ class CommentaryHTTPService:
     lock: threading.Lock = field(default_factory=threading.Lock)
     started_at: float = field(default_factory=time.time)
     last_event_identity: tuple[str, str, str] | None = None
+    recent_commentary_by_action: dict[str, str] = field(default_factory=dict)
 
     @property
     def model(self) -> str:
@@ -147,6 +148,7 @@ class CommentaryHTTPService:
                 "llm_seconds": response_payload.get("llm_seconds"),
                 "tts_seconds": response_payload.get("tts_seconds"),
                 "total_seconds": response_payload.get("total_seconds"),
+                "audio_duration_seconds": response_payload.get("audio_duration_seconds"),
             },
         )
         response_payload["manifest_path"] = str(Path(manifest_path).expanduser().resolve())
@@ -179,6 +181,15 @@ class CommentaryHTTPService:
     def _remember_event_identity(self, event: CommentaryEvent) -> None:
         self.last_event_identity = self._event_identity(event)
 
+    def _recent_commentary_for_event(self, event: CommentaryEvent) -> str | None:
+        return self.recent_commentary_by_action.get(str(event.action or "").casefold())
+
+    def _remember_commentary(self, event: CommentaryEvent, commentary: str | None) -> None:
+        text = str(commentary or "").strip()
+        if not text:
+            return
+        self.recent_commentary_by_action[str(event.action or "").casefold()] = text
+
     def process_payload(self, payload: dict[str, Any]) -> CommentaryServiceResult:
         resolved = self._resolve_request(payload)
         if isinstance(resolved, CommentaryServiceResult):
@@ -195,7 +206,10 @@ class CommentaryHTTPService:
                     )
                 if text_only:
                     started = time.perf_counter()
-                    result = self.commentary_generator.generate(event)
+                    result = self.commentary_generator.generate(
+                        event,
+                        avoid_commentary=self._recent_commentary_for_event(event),
+                    )
                     response_payload = {
                         "commentary": result.commentary,
                         "model": result.model,
@@ -209,6 +223,7 @@ class CommentaryHTTPService:
                     result = self.audio_pipeline.generate_to_file(
                         event,
                         audio_path=audio_out,
+                        avoid_commentary=self._recent_commentary_for_event(event),
                     )
                     response_payload = {
                         "commentary": result.commentary,
@@ -217,8 +232,14 @@ class CommentaryHTTPService:
                         "llm_seconds": round(result.llm_seconds or 0.0, 3),
                         "tts_seconds": round(result.tts_seconds or 0.0, 3),
                         "total_seconds": round(result.total_seconds or 0.0, 3),
+                        "audio_duration_seconds": (
+                            round(result.audio_duration_seconds, 3)
+                            if result.audio_duration_seconds is not None
+                            else None
+                        ),
                     }
                 self._remember_event_identity(event)
+                self._remember_commentary(event, response_payload.get("commentary"))
         except Exception as exc:
             return CommentaryServiceResult(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -260,7 +281,10 @@ class CommentaryHTTPService:
                         duplicate_payload = self._build_duplicate_response(event)
                     else:
                         llm_start = time.perf_counter()
-                        commentary_result = self.commentary_generator.generate(event)
+                        commentary_result = self.commentary_generator.generate(
+                            event,
+                            avoid_commentary=self._recent_commentary_for_event(event),
+                        )
                         llm_seconds = time.perf_counter() - llm_start
                         yield "commentary", {
                             "commentary": commentary_result.commentary,
@@ -294,6 +318,9 @@ class CommentaryHTTPService:
                                 commentary_result.commentary,
                                 output_path,
                             )
+                            audio_duration_seconds = probe_audio_duration_seconds(
+                                audio_path_value
+                            )
                             tts_seconds = time.perf_counter() - tts_start
                             response_payload = {
                                 "commentary": commentary_result.commentary,
@@ -305,8 +332,14 @@ class CommentaryHTTPService:
                                     time.perf_counter() - total_start,
                                     3,
                                 ),
+                                "audio_duration_seconds": (
+                                    round(audio_duration_seconds, 3)
+                                    if audio_duration_seconds is not None
+                                    else None
+                                ),
                             }
                         self._remember_event_identity(event)
+                        self._remember_commentary(event, response_payload.get("commentary"))
 
                 if duplicate_payload is not None:
                     yield "skipped", duplicate_payload

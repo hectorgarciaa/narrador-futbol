@@ -63,18 +63,21 @@ El propio `track.py` copia además el spec dentro del directorio de artefactos d
 
 ## Modo comentarios
 
-- `live`: la interfaz intenta reproducir el `intro` ya precalentado nada más guardar y luego hace polling del manifiesto para sonar nuevos audios a medida que aparezcan.
+- `live`: la interfaz intenta reproducir el `intro` ya precalentado nada más guardar y luego hace polling del manifiesto para sonar el audio más reciente disponible cuando el canal esté libre, sin cola FIFO de audios antiguos.
 - `deferred`: se siguen generando y guardando comentarios/audio, pero la interfaz no los reproduce al vuelo. Al terminar el tracking, la interfaz construye una pista continua desde el manifiesto y la incrusta en el MP4 final del tracking.
-- el servidor de comentarios omite duplicados consecutivos cuando llega otra vez la misma `action` para el mismo `player_name` y equipo, evitando audios solapados por reenvíos seguidos del mismo evento.
-- el MP4 final diferido se vuelve a codificar como `H.264/AAC`, así que el archivo que sirve la interfaz es reproducible por navegadores modernos y no se queda en negro por usar `mp4v`.
+- el bridge PathCRF evita reenvíos casi idénticos, guarda comentarios de texto aunque el turno de audio esté ocupado y solo solicita un nuevo WAV si el `event_time_s` cae después de la ventana ocupada por la generación más la duración del audio anterior.
+- al ensamblar el vídeo diferido, los WAV del manifiesto se colocan en su `event_time_s` real y los que se solaparían con un audio ya aceptado se omiten de la pista sonora, manteniendo el comentario escrito.
+- el servidor de comentarios omite duplicados consecutivos cuando llega otra vez la misma `action` para el mismo `player_name` y equipo.
+- el MP4 final diferido se vuelve a codificar como `H.264/AAC` con perfil compatible y límite `1080p`, así que el archivo que sirve la interfaz es reproducible por navegadores modernos y no se queda en negro por usar `mp4v` o por exportar un H.264 4K demasiado pesado.
 - si lanzas un run demasiado pronto y el `intro` todavía sigue en `starting`, el tracking arranca igualmente; simplemente ese run puede salir sin el `intro` precopiado.
 
 Cuando el run se lanza desde la interfaz, el propio subprocess de tracking recibe por entorno la información necesaria para:
 
 - ejecutar PathCRF de forma incremental sobre snapshots acumulados del `tracks` mientras avanza el partido;
 - transformar los eventos semánticos nuevos en payloads de comentario;
+- aplicar una coherencia básica de posesión antes de narrar: pases a rivales pasan a `robo` del receptor y acciones de jugadores que ya no deberían tener el balón se saltan;
 - enviarlos al mismo servidor HTTP de comentarios que ya usa la interfaz;
-- dejar esos audios en el manifiesto para `live` o para el ensamblado final en `deferred`.
+- dejar esos textos y los audios aceptados en el manifiesto para `live` o para el ensamblado final en `deferred`.
 
 Para depurar el servidor de comentarios lanzado junto a la interfaz:
 

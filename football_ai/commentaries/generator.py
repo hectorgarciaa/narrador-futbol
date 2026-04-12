@@ -58,6 +58,7 @@ ACTION_TONE_GUIDANCE = {
 }
 
 DEFAULT_OLLAMA_KEEP_ALIVE = "30m"
+DEFAULT_COMMENTARY_TEMPERATURE = 0.7
 
 
 def _clean_text(value: str | None) -> str | None:
@@ -256,7 +257,12 @@ class CommentaryPromptBuilder:
             "No expliques nada ni inventes contexto."
         )
 
-    def build_user_prompt(self, event: CommentaryEvent) -> str:
+    def build_user_prompt(
+        self,
+        event: CommentaryEvent,
+        *,
+        avoid_commentary: str | None = None,
+    ) -> str:
         if event.is_intro:
             rules = [
                 "Es el comentario de apertura del partido, antes de que ruede el balon.",
@@ -327,6 +333,14 @@ class CommentaryPromptBuilder:
             if event.play_context:
                 rules.append(f"Si ayuda, menciona {event.play_context}.")
 
+        avoid_text = _clean_text(avoid_commentary)
+        if avoid_text is not None and not event.is_intro:
+            rules.append(
+                "Comentario reciente para una accion parecida: "
+                f"{avoid_text!r}. No repitas esa frase, ni su mismo verbo principal, "
+                "ni la misma estructura; conserva solo los datos del evento."
+            )
+
         payload_json = json.dumps(
             event.to_prompt_payload(),
             ensure_ascii=False,
@@ -349,7 +363,7 @@ class OllamaCommentaryGenerator:
         self,
         model: str = "gemma4:e2b",
         base_url: str | None = None,
-        temperature: float = 0.4,
+        temperature: float = DEFAULT_COMMENTARY_TEMPERATURE,
         top_p: float = 0.95,
         timeout_s: float = 90.0,
         keep_alive: str | int | None = DEFAULT_OLLAMA_KEEP_ALIVE,
@@ -424,10 +438,15 @@ class OllamaCommentaryGenerator:
     def build_prompts(
         self,
         event: CommentaryEvent | dict[str, Any],
+        *,
+        avoid_commentary: str | None = None,
     ) -> tuple[CommentaryEvent, str, str]:
         commentary_event = self.normalize_event(event)
         system_prompt = self.prompt_builder.build_system_prompt(commentary_event)
-        user_prompt = self.prompt_builder.build_user_prompt(commentary_event)
+        user_prompt = self.prompt_builder.build_user_prompt(
+            commentary_event,
+            avoid_commentary=avoid_commentary,
+        )
         return commentary_event, system_prompt, user_prompt
 
     def build_chat_payload(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
@@ -638,8 +657,12 @@ class OllamaCommentaryGenerator:
         *,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
+        avoid_commentary: str | None = None,
     ) -> CommentaryLLMRunResult:
-        commentary_event, default_system_prompt, default_user_prompt = self.build_prompts(event)
+        commentary_event, default_system_prompt, default_user_prompt = self.build_prompts(
+            event,
+            avoid_commentary=avoid_commentary,
+        )
         system_prompt = str(system_prompt or default_system_prompt)
         user_prompt = str(user_prompt or default_user_prompt)
         request_payload, raw_response = self.chat(
@@ -668,8 +691,13 @@ class OllamaCommentaryGenerator:
             total_duration_seconds=raw_response.get("total_duration_seconds"),
         )
 
-    def generate(self, event: CommentaryEvent | dict[str, Any]) -> CommentaryGenerationResult:
-        llm_result = self.run_llm(event)
+    def generate(
+        self,
+        event: CommentaryEvent | dict[str, Any],
+        *,
+        avoid_commentary: str | None = None,
+    ) -> CommentaryGenerationResult:
+        llm_result = self.run_llm(event, avoid_commentary=avoid_commentary)
         return CommentaryGenerationResult(
             commentary=llm_result.final_commentary,
             model=llm_result.model,

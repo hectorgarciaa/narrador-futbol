@@ -8,6 +8,7 @@ from urllib import request
 
 from .generator import (
     CommentaryEvent,
+    DEFAULT_COMMENTARY_TEMPERATURE,
     CommentaryGenerationResult,
     CommentaryLLMRunResult,
     CommentaryPromptBuilder,
@@ -30,7 +31,7 @@ class LlamaCppCommentaryGenerator(OllamaCommentaryGenerator):
         self,
         model: str = "gemma4-q4ks-text",
         base_url: str | None = None,
-        temperature: float = 0.4,
+        temperature: float = DEFAULT_COMMENTARY_TEMPERATURE,
         top_p: float = 0.95,
         timeout_s: float = 90.0,
         max_tokens: int = 80,
@@ -110,8 +111,12 @@ class LlamaCppCommentaryGenerator(OllamaCommentaryGenerator):
         *,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
+        avoid_commentary: str | None = None,
     ) -> CommentaryLLMRunResult:
-        commentary_event, default_system_prompt, default_user_prompt = self.build_prompts(event)
+        commentary_event, default_system_prompt, default_user_prompt = self.build_prompts(
+            event,
+            avoid_commentary=avoid_commentary,
+        )
         system_prompt = str(system_prompt or default_system_prompt)
         user_prompt = str(user_prompt or default_user_prompt)
         request_payload, raw_response = self.chat(
@@ -143,8 +148,13 @@ class LlamaCppCommentaryGenerator(OllamaCommentaryGenerator):
             total_duration_seconds=raw_response.get("total_duration_seconds"),
         )
 
-    def generate(self, event: CommentaryEvent | dict[str, Any]) -> CommentaryGenerationResult:
-        llm_result = self.run_llm(event)
+    def generate(
+        self,
+        event: CommentaryEvent | dict[str, Any],
+        *,
+        avoid_commentary: str | None = None,
+    ) -> CommentaryGenerationResult:
+        llm_result = self.run_llm(event, avoid_commentary=avoid_commentary)
         return CommentaryGenerationResult(
             commentary=llm_result.final_commentary,
             model=llm_result.model,

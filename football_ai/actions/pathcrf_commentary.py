@@ -23,6 +23,7 @@ from .pathcrf_semantics import (
 COMMENTARY_ACTION_MAP = {
     "control": "control",
     "kick": "pase",
+    "robo": "robo",
     "shot": "tiro",
     "corner": "corner",
     "throw_in": "fuera de banda",
@@ -188,6 +189,10 @@ def _commentary_action_for_event(event_type: Any) -> str | None:
     return COMMENTARY_ACTION_MAP.get(normalized)
 
 
+def _same_team_name(left: str | None, right: str | None) -> bool:
+    return bool(left and right and left.casefold() == right.casefold())
+
+
 def build_commentary_events_json(
     *,
     events: pd.DataFrame,
@@ -205,6 +210,9 @@ def build_commentary_events_json(
     enriched_events: list[dict[str, Any]] = []
     ready_commentary_events: list[dict[str, Any]] = []
     skipped_reasons = Counter()
+    current_possession_slot: str | None = None
+    current_possession_track_id: str | None = None
+    current_possession_team_name: str | None = None
 
     for action_index, row in enumerate(events_df.itertuples(index=False), start=1):
         raw_event_type = _clean_text(getattr(row, "event_type_raw", None))
@@ -238,10 +246,86 @@ def build_commentary_events_json(
             _clean_text((receiver_payload or {}).get("player_name"))
             or (receiver_identity.player_name if receiver_identity else None)
         )
+        receiver_team_name = _clean_text((receiver_payload or {}).get("team")) or (
+            receiver_identity.team_name if receiver_identity else None
+        )
         team_in_favor = team_name if commentary_action in TEAM_IN_FAVOR_ACTIONS else None
+        semantic_source = _clean_text(getattr(row, "semantic_source", None))
+        semantic_confidence = getattr(row, "semantic_confidence", None)
+        possession_postprocess: str | None = None
+
+        original_pathcrf_player_id = pathcrf_player_id
+        original_pathcrf_receiver_id = pathcrf_receiver_id
+        original_track_id = track_id
+        original_receiver_track_id = receiver_track_id
+        original_player_name = player_name
+        original_receiver_name = action_target
 
         commentary_ready = True
         skip_reason = None
+        if (
+            semantic_event_type == "kick"
+            and pathcrf_receiver_id
+            and is_player_slot(pathcrf_receiver_id)
+            and team_name
+            and receiver_team_name
+            and not _same_team_name(team_name, receiver_team_name)
+        ):
+            pathcrf_player_id = original_pathcrf_receiver_id
+            pathcrf_receiver_id = original_pathcrf_player_id
+            track_id = original_receiver_track_id
+            receiver_track_id = original_track_id
+            identity = receiver_identity
+            track_payload = receiver_payload
+            team_name = receiver_team_name
+            opponent_team_name = _opponent_team(team_name, all_team_names)
+            player_name = original_receiver_name or _fallback_player_name(track_id)
+            player_position = _fallback_player_position(identity, track_payload)
+            action_target = original_player_name
+            semantic_event_type = "robo"
+            commentary_action = "robo"
+            team_in_favor = None
+            possession_postprocess = "cross_team_pass_to_robbery"
+            semantic_source = "possession_rule"
+        elif (
+            semantic_event_type == "kick"
+            and current_possession_slot is not None
+            and pathcrf_player_id != current_possession_slot
+        ):
+            commentary_ready = False
+            skip_reason = "possession_actor_mismatch"
+            possession_postprocess = "skip_kick_from_non_possessor"
+        elif (
+            semantic_event_type == "control"
+            and current_possession_slot is not None
+            and pathcrf_player_id != current_possession_slot
+        ):
+            if (
+                current_possession_team_name
+                and team_name
+                and not _same_team_name(current_possession_team_name, team_name)
+            ):
+                semantic_event_type = "robo"
+                commentary_action = "robo"
+                team_in_favor = None
+                previous_identity = (
+                    identities.get(str(current_possession_track_id))
+                    if current_possession_track_id is not None
+                    else None
+                )
+                action_target = (
+                    previous_identity.player_name
+                    if previous_identity is not None and previous_identity.player_name
+                    else _fallback_player_name(current_possession_track_id)
+                )
+                possession_postprocess = "control_after_opponent_possession_to_robbery"
+                semantic_source = "possession_rule"
+            else:
+                commentary_ready = False
+                skip_reason = "possession_actor_mismatch"
+                possession_postprocess = "skip_control_from_non_possessor"
+
+        is_synthetic_slot = pathcrf_player_id in synthetic_slots if pathcrf_player_id else False
         if semantic_event_type in SKIP_EVENT_TYPES:
             commentary_ready = False
             skip_reason = "unsupported_event_type"
@@ -288,10 +372,23 @@ def build_commentary_events_json(
                         ),
                         "event_type_raw": raw_event_type,
                         "event_type_semantic": semantic_event_type,
-                        "semantic_source": _clean_text(getattr(row, "semantic_source", None)),
+                        "semantic_source": semantic_source,
+                        "possession_postprocess": possession_postprocess,
                     },
                 }
             )
+            if (
+                commentary_action == "pase"
+                and pathcrf_receiver_id
+                and is_player_slot(pathcrf_receiver_id)
+            ):
+                current_possession_slot = pathcrf_receiver_id
+                current_possession_track_id = receiver_track_id
+                current_possession_team_name = receiver_team_name or team_name
+            else:
+                current_possession_slot = pathcrf_player_id
+                current_possession_track_id = track_id
+                current_possession_team_name = team_name
         else:
             skipped_reasons[str(skip_reason or "unknown")] += 1
 
@@ -313,12 +410,20 @@ def build_commentary_events_json(
                 ),
                 "event_type_raw": raw_event_type,
                 "event_type_semantic": semantic_event_type,
-                "semantic_source": _clean_text(getattr(row, "semantic_source", None)),
-                "semantic_confidence": getattr(row, "semantic_confidence", None),
+                "semantic_source": semantic_source,
+                "semantic_confidence": semantic_confidence,
+                "possession_postprocess": possession_postprocess,
                 "commentary_action": commentary_action,
                 "commentary_ready": commentary_ready,
                 "skip_reason": skip_reason,
                 "is_synthetic_slot": bool(is_synthetic_slot),
+                "possession_slot_after": current_possession_slot,
+                "possession_track_id_after": (
+                    int(current_possession_track_id)
+                    if current_possession_track_id is not None and str(current_possession_track_id).isdigit()
+                    else current_possession_track_id
+                ),
+                "possession_team_after": current_possession_team_name,
                 "team_name": team_name,
                 "opponent_team_name": opponent_team_name,
                 "player_name": player_name,

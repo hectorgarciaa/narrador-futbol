@@ -145,10 +145,15 @@ class TransformersCommentaryGenerator:
     def build_prompts(
         self,
         event: CommentaryEvent | dict[str, Any],
+        *,
+        avoid_commentary: str | None = None,
     ) -> tuple[CommentaryEvent, str, str]:
         commentary_event = self.normalize_event(event)
         system_prompt = self.prompt_builder.build_system_prompt(commentary_event)
-        user_prompt = self.prompt_builder.build_user_prompt(commentary_event)
+        user_prompt = self.prompt_builder.build_user_prompt(
+            commentary_event,
+            avoid_commentary=avoid_commentary,
+        )
         return commentary_event, system_prompt, user_prompt
 
     def _clean_commentary(self, raw_text: str) -> str:
@@ -166,8 +171,12 @@ class TransformersCommentaryGenerator:
         *,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
+        avoid_commentary: str | None = None,
     ) -> CommentaryLLMRunResult:
-        commentary_event, default_system_prompt, default_user_prompt = self.build_prompts(event)
+        commentary_event, default_system_prompt, default_user_prompt = self.build_prompts(
+            event,
+            avoid_commentary=avoid_commentary,
+        )
         system_prompt = str(system_prompt or default_system_prompt)
         user_prompt = str(user_prompt or default_user_prompt)
 
@@ -263,8 +272,13 @@ class TransformersCommentaryGenerator:
             total_duration_seconds=total_duration_seconds,
         )
 
-    def generate(self, event: CommentaryEvent | dict[str, Any]) -> CommentaryGenerationResult:
-        llm_result = self.run_llm(event)
+    def generate(
+        self,
+        event: CommentaryEvent | dict[str, Any],
+        *,
+        avoid_commentary: str | None = None,
+    ) -> CommentaryGenerationResult:
+        llm_result = self.run_llm(event, avoid_commentary=avoid_commentary)
         return CommentaryGenerationResult(
             commentary=llm_result.final_commentary,
             model=llm_result.model,

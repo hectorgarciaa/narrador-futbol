@@ -35,7 +35,10 @@ from football_ai.core import get_config
 from football_ai.commentaries.deferred_media import (
     assemble_deferred_commentary_video,
 )
-from football_ai.commentaries.generator import OllamaCommentaryGenerator
+from football_ai.commentaries.generator import (
+    DEFAULT_COMMENTARY_TEMPERATURE,
+    OllamaCommentaryGenerator,
+)
 from football_ai.commentaries.llama_cpp_backend import LlamaCppCommentaryGenerator
 from football_ai.commentaries.server import (
     DEFAULT_SERVER_HOST as DEFAULT_COMMENTARY_HOST,
@@ -267,7 +270,7 @@ class CommentaryServerManager:
         *,
         backend="ollama",
         model="gemma4:e2b",
-        temperature=0.4,
+        temperature=DEFAULT_COMMENTARY_TEMPERATURE,
         base_url=None,
         llama_cpp_config=None,
     ):
@@ -1605,7 +1608,7 @@ def parse_args():
     parser.add_argument(
         "--commentary-temperature",
         type=float,
-        default=0.4,
+        default=DEFAULT_COMMENTARY_TEMPERATURE,
         help="Temperatura para el LLM de comentarios.",
     )
     parser.add_argument(

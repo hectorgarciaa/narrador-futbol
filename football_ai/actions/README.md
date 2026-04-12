@@ -55,7 +55,7 @@ Wrapper de inferencia para reutilizar el repo clonado de `PathCRF` desde este pr
     - relabel de inicios de episodio a `corner`, `throw_in` y `goalkick`;
     - heurística adaptada de `shot` sobre eventos `kick` en zona de remate;
     - columnas de trazabilidad `event_type_raw`, `event_type_semantic`, `semantic_source` y puntuaciones de tiro;
-  - JSON enriquecido para comentarios (`*_commentary_events.json`) cuando también existe `tracks.json`;
+  - JSON enriquecido para comentarios (`*_commentary_events.json`) cuando también existe `tracks.json`, con coherencia básica de posesión;
   - salidas macro (`*_macro_prev.parquet`, `*_macro_next.parquet`) cuando existen;
   - resumen de ejecución (`*_summary.json`);
 - opcionalmente llama al drawer específico de PathCRF para generar un MP4:
@@ -66,9 +66,9 @@ Wrapper de inferencia para reutilizar el repo clonado de `PathCRF` desde este pr
 
 - `pathcrf_setpieces.py`: reclasifica el primer evento de cada `episode_id` a `corner`, `throw_in` o `goalkick` con reglas geométricas sobre el campo;
 - `pathcrf_shot.py`: adapta la heurística upstream de tiro al flujo local basado en `kick/control/out`, manteniendo puntuaciones y flags auxiliares;
-- `pathcrf_commentary.py`: invierte `pathcrf_id -> track_id` con `person_slot_assignments`, recupera nombre/equipo/posición desde `tracks.json` y genera un JSON rico listo para pasar después a Gemma.
+- `pathcrf_commentary.py`: invierte `pathcrf_id -> track_id` con `person_slot_assignments`, recupera nombre/equipo/posición desde `tracks.json` y genera un JSON rico listo para pasar después a Gemma. Antes de marcar un evento como narrable mantiene un poseedor lógico: un `pase` aceptado mueve la posesión al receptor, un `control` debe coincidir con el poseedor, los pases desde alguien que ya no tiene el balón se saltan con `skip_reason=possession_actor_mismatch` y los pases a un jugador del rival se convierten en `robo` del receptor.
 
-El JSON de comentarios conserva tanto el evento semántico enriquecido como un subpayload `commentary_event` listo para la fase LLM. Si el actor de PathCRF cae en un slot sintético o no se puede revertir a un `track_id` real, el evento se marca como no listo para comentario y se documenta el `skip_reason`.
+El JSON de comentarios conserva tanto el evento semántico enriquecido como un subpayload `commentary_event` listo para la fase LLM. Si el actor de PathCRF cae en un slot sintético, no se puede revertir a un `track_id` real o rompe la posesión esperada, el evento se marca como no listo para comentario y se documenta el `skip_reason`.
 
 ### Nota de compatibilidad
 

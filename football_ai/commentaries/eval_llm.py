@@ -3,7 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 
-from .generator import CommentaryEvent, OllamaCommentaryGenerator
+from .generator import (
+    DEFAULT_COMMENTARY_TEMPERATURE,
+    CommentaryEvent,
+    OllamaCommentaryGenerator,
+)
 from .llama_cpp_backend import LlamaCppCommentaryGenerator
 from .transformers_backend import (
     DEFAULT_HYMBA_MODEL,
@@ -43,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.4,
+        default=DEFAULT_COMMENTARY_TEMPERATURE,
         help="Temperatura de muestreo.",
     )
     parser.add_argument(

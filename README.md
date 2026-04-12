@@ -284,7 +284,7 @@ http://127.0.0.1:8767
 
 La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/lineup_spec.json` y llama a `scripts/track.py --lineup-spec ...`.
 También deja el manifiesto de comentarios en `output/interfaz/runs/<run_id>/commentaries/events_manifest.jsonl`; en `live` intenta reproducir el `intro` precalentado nada más guardar y, cuando el tracking termina, ensambla una pista diferida desde ese manifiesto para incrustarla en el MP4 final. Además, cuando la ejecución nace desde la interfaz, el subprocess de tracking activa un bridge incremental `tracking -> PathCRF -> servidor de comentarios` solo para ese run, de modo que los scripts sueltos del repo siguen sin ejecutar PathCRF ni comentar jugadas automáticamente.
-Ese servidor de comentarios omite duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo) para evitar audios solapados cuando PathCRF reenvía la misma jugada dos veces seguidas. El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores lo mostraban en negro.
+Ese bridge descarta reenvíos casi idénticos de PathCRF, guarda comentarios de texto aunque el audio esté ocupado y solo pide un nuevo WAV si la acción cae fuera de la ventana temporal ocupada por la generación + duración del audio anterior. Los eventos que ocurren mientras suena otro audio no quedan en cola sonora: permanecen en el manifiesto como texto. La pista diferida tampoco desplaza WAV antiguos hacia delante; omite los audios que se solaparían y mantiene sus comentarios escritos en el manifiesto. El servidor de comentarios sigue omitiendo duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo). El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC` y se limita a `1080p`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores mostraban en negro los exports demasiado grandes.
 Si `--commentary-backend auto` no se toca, la interfaz intenta usar `llama.cpp` cuando existe `llama.cpp/config.yaml`; si no, cae a `ollama`. Si `--commentary-base-url` apunta a una URL local, la interfaz intenta arrancar ese backend localmente; si apuntas a un backend remoto, ese autoarranque no se intenta.
 El fichero `llama.cpp/config.yaml` fija el binario `llama-server`, el alias expuesto por la API y el GGUF que se cargará al abrir la interfaz.
 Ese precalentado ya no bloquea el arranque visible de la UI: la interfaz HTTP sube primero y el warmup de Gemma/XTTS sigue en segundo plano.
@@ -308,7 +308,7 @@ python -m football_ai.commentaries \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}'
 ```
 
-El modelo por defecto es `gemma4:e2b` con temperatura `0.4`. En general el comentario sale corto, debe incluir literalmente la accion del evento y el minuto solo se menciona en `gol`. Para `gol`, el prompt deja ahora mas libertad para una narracion mas larga y emocionante. Tambien existe una accion especial `intro` para abrir la retransmision sin jugador asociado.
+El modelo por defecto es `gemma4:e2b` con temperatura `0.7`. En general el comentario sale corto, debe incluir literalmente la accion del evento y el minuto solo se menciona en `gol`. El servidor recuerda el último comentario generado por tipo de acción y lo pasa al prompt para evitar repetir la misma frase o verbo principal. Para `gol`, el prompt deja ahora mas libertad para una narracion mas larga y emocionante. Tambien existe una accion especial `intro` para abrir la retransmision sin jugador asociado.
 
 Ejemplo de apertura:
 
@@ -706,6 +706,7 @@ El script:
   - el mapeo invertido `pathcrf_id -> track_id`;
   - nombre del jugador, equipo, rival y posición cuando se pueden resolver desde el tracking enriquecido;
   - un subpayload `commentary_event` listo para la fase posterior de Gemma;
+  - un postproceso de posesión para saltar pases/controles cuyo actor ya no debería tener el balón y convertir pases a jugadores del rival en `robo` del receptor;
 - genera además `*_pitch_pathcrf.mp4` con un drawer que, si conoce el vídeo original y el `tracks.json`, renderiza sobre el broadcast real usando las `bbox` reales e incrusta un mini-mapa 2D semitransparente en la esquina superior derecha; si no, cae al modo 2D puro.
 
 Notas:

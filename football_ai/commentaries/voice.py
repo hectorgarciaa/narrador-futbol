@@ -10,6 +10,7 @@ import re
 import shutil
 import sys
 import time
+import wave
 from typing import Any, Sequence
 
 from .generator import (
@@ -199,6 +200,33 @@ def _patch_xtts_audio_loading() -> None:
     torchaudio.load = _soundfile_torchaudio_load
 
 
+def probe_audio_duration_seconds(audio_path: str | Path) -> float | None:
+    resolved_path = Path(audio_path).expanduser().resolve()
+    if not resolved_path.exists():
+        return None
+
+    try:
+        with wave.open(str(resolved_path), "rb") as wav_file:
+            frames = int(wav_file.getnframes())
+            frame_rate = int(wav_file.getframerate())
+            if frames > 0 and frame_rate > 0:
+                return float(frames) / float(frame_rate)
+    except Exception:
+        pass
+
+    try:
+        import soundfile as sf
+
+        info = sf.info(str(resolved_path))
+        frames = int(info.frames)
+        sample_rate = int(info.samplerate)
+        if frames > 0 and sample_rate > 0:
+            return float(frames) / float(sample_rate)
+    except Exception:
+        return None
+    return None
+
+
 def _patch_qwen_tts_sox() -> None:
     try:
         import numpy as np
@@ -303,6 +331,7 @@ class CommentaryAudioResult:
     llm_seconds: float | None = None
     tts_seconds: float | None = None
     total_seconds: float | None = None
+    audio_duration_seconds: float | None = None
 
     @property
     def commentary(self) -> str:
@@ -534,10 +563,15 @@ class CommentaryAudioPipeline:
         self,
         event: CommentaryEvent | dict[str, Any],
         audio_path: str | Path | None = None,
+        *,
+        avoid_commentary: str | None = None,
     ) -> CommentaryAudioResult:
         total_start = time.perf_counter()
         llm_start = time.perf_counter()
-        commentary_result = self.commentary_generator.generate(event)
+        commentary_result = self.commentary_generator.generate(
+            event,
+            avoid_commentary=avoid_commentary,
+        )
         llm_seconds = time.perf_counter() - llm_start
         output_path = (
             Path(audio_path).expanduser().resolve()
@@ -549,6 +583,7 @@ class CommentaryAudioPipeline:
             commentary_result.commentary,
             output_path,
         )
+        audio_duration_seconds = probe_audio_duration_seconds(audio_path)
         tts_seconds = time.perf_counter() - tts_start
         total_seconds = time.perf_counter() - total_start
         return CommentaryAudioResult(
@@ -560,4 +595,5 @@ class CommentaryAudioPipeline:
             llm_seconds=llm_seconds,
             tts_seconds=tts_seconds,
             total_seconds=total_seconds,
+            audio_duration_seconds=audio_duration_seconds,
         )

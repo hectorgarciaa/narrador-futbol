@@ -7,12 +7,14 @@ import logging
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable
 from urllib import error, request
 
+from football_ai.commentaries.voice import probe_audio_duration_seconds
 from football_ai.actions import (
     PathCRFInferenceConfig,
     PathCRFRenderConfig,
@@ -23,6 +25,8 @@ from football_ai.core import convert_to_serializable
 
 
 logger = logging.getLogger(__name__)
+
+AUDIO_TIMELINE_EPSILON_S = 0.05
 
 ENV_ENABLE = "NARRADOR_APP_ENABLE_LIVE_COMMENTARY"
 ENV_SERVICE_URL = "NARRADOR_APP_COMMENTARY_SERVICE_URL"
@@ -99,7 +103,31 @@ class AppLiveCommentaryBridge:
         self._last_submitted_frame = -1
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._dispatched_signatures: set[str] = set()
+        self._dispatched_semantic_event_times: dict[
+            tuple[str, str, str, str],
+            list[float],
+        ] = {}
+        self._intro_audio_duration_seconds = self._initial_intro_audio_duration()
+        self._audio_busy_until_wall_time = self._initial_audio_busy_until(
+            self._intro_audio_duration_seconds
+        )
+        self._audio_busy_until_event_time_s = max(
+            0.0,
+            self._intro_audio_duration_seconds,
+        )
         self._worker.start()
+
+    def _initial_intro_audio_duration(self) -> float:
+        intro_audio_path = self.audio_dir / "000_intro.wav"
+        intro_duration_seconds = probe_audio_duration_seconds(intro_audio_path)
+        if intro_duration_seconds is None or intro_duration_seconds <= 0.0:
+            return 0.0
+        return float(intro_duration_seconds)
+
+    def _initial_audio_busy_until(self, intro_duration_seconds: float) -> float:
+        if intro_duration_seconds <= 0.0:
+            return 0.0
+        return time.perf_counter() + float(intro_duration_seconds)
 
     def on_frame(self, tracks: dict[str, Any], n_frame: int) -> None:
         if (n_frame + 1) < int(self.config.min_frames):
@@ -238,25 +266,40 @@ class AppLiveCommentaryBridge:
             signature = self._event_signature(event_payload, metadata)
             if signature in self._dispatched_signatures:
                 continue
+            if self._is_near_duplicate_semantic_event(event_payload, metadata):
+                continue
 
+            request_started = time.perf_counter()
+            text_only, text_only_reason = self._audio_policy_for_event(
+                event_time_s=event_time_s,
+                request_started=request_started,
+            )
             audio_out = self.audio_dir / self._audio_filename_for_event(
                 event_payload=event_payload,
                 metadata=metadata,
                 signature=signature,
             )
+            request_metadata = {
+                **metadata,
+                "run_id": self.config.run_id,
+                "source": "pathcrf_live",
+                "event_signature": signature,
+                "final_pass": bool(final_pass),
+            }
+            if text_only_reason is not None:
+                request_metadata["text_only_reason"] = text_only_reason
+                request_metadata["audio_busy_until_event_time_s"] = round(
+                    self._audio_busy_until_event_time_s,
+                    3,
+                )
             response_status, response_payload = self._post_commentary_request(
                 {
                     "event": event_payload,
                     "audio_out": str(audio_out),
                     "manifest_path": str(self.config.manifest_path),
                     "mode": self.config.commentary_mode,
-                    "metadata": {
-                        **metadata,
-                        "run_id": self.config.run_id,
-                        "source": "pathcrf_live",
-                        "event_signature": signature,
-                        "final_pass": bool(final_pass),
-                    },
+                    "metadata": request_metadata,
+                    "text_only": bool(text_only),
                 }
             )
             if response_status != int(HTTPStatus.OK):
@@ -267,6 +310,7 @@ class AppLiveCommentaryBridge:
                 continue
 
             self._dispatched_signatures.add(signature)
+            self._remember_semantic_event(event_payload, metadata)
             if bool(response_payload.get("skipped")):
                 logger.info(
                     "Evento live omitido por duplicado consecutivo: %s (%s).",
@@ -274,11 +318,44 @@ class AppLiveCommentaryBridge:
                     event_payload.get("player_name"),
                 )
                 continue
+            if not text_only and response_payload.get("audio_path"):
+                try:
+                    total_seconds = float(response_payload.get("total_seconds") or 0.0)
+                    audio_duration_seconds = float(
+                        response_payload.get("audio_duration_seconds") or 0.0
+                    )
+                except (TypeError, ValueError):
+                    total_seconds = 0.0
+                    audio_duration_seconds = 0.0
+                self._audio_busy_until_wall_time = max(
+                    self._audio_busy_until_wall_time,
+                    request_started + total_seconds + audio_duration_seconds,
+                )
+                self._audio_busy_until_event_time_s = max(
+                    self._audio_busy_until_event_time_s,
+                    event_time_s + total_seconds + audio_duration_seconds,
+                )
             logger.info(
-                "Comentario live generado para %s en %.2fs.",
+                "Comentario live generado para %s en %.2fs%s.",
                 event_payload.get("action"),
                 event_time_s,
+                " (solo texto por audio ocupado)" if text_only else "",
             )
+
+    def _audio_policy_for_event(
+        self,
+        *,
+        event_time_s: float,
+        request_started: float,
+    ) -> tuple[bool, str | None]:
+        if request_started < self._audio_busy_until_wall_time:
+            return True, "audio_slot_busy"
+        if (
+            event_time_s + AUDIO_TIMELINE_EPSILON_S
+            < self._audio_busy_until_event_time_s
+        ):
+            return True, "audio_event_window_elapsed"
+        return False, None
 
     def _post_commentary_request(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -312,6 +389,47 @@ class AppLiveCommentaryBridge:
         }
         raw = json.dumps(signature_payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    def _semantic_event_key(
+        self,
+        event_payload: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> tuple[str, str, str, str]:
+        return (
+            str(event_payload.get("action") or "").strip().casefold(),
+            str(metadata.get("track_id") or "").strip(),
+            str(metadata.get("receiver_track_id") or "").strip(),
+            str(metadata.get("event_type_semantic") or "").strip().casefold(),
+        )
+
+    def _is_near_duplicate_semantic_event(
+        self,
+        event_payload: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        tolerance_s: float = 2.0,
+    ) -> bool:
+        key = self._semantic_event_key(event_payload, metadata)
+        try:
+            event_time_s = float(event_payload.get("event_time_s") or 0.0)
+        except (TypeError, ValueError):
+            event_time_s = 0.0
+        return any(
+            abs(float(previous_time_s) - event_time_s) <= float(tolerance_s)
+            for previous_time_s in self._dispatched_semantic_event_times.get(key, [])
+        )
+
+    def _remember_semantic_event(
+        self,
+        event_payload: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> None:
+        key = self._semantic_event_key(event_payload, metadata)
+        try:
+            event_time_s = float(event_payload.get("event_time_s") or 0.0)
+        except (TypeError, ValueError):
+            event_time_s = 0.0
+        self._dispatched_semantic_event_times.setdefault(key, []).append(event_time_s)
 
     def _audio_filename_for_event(
         self,

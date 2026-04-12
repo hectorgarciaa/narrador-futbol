@@ -387,11 +387,16 @@ function playNextCommentary() {
 }
 
 function enqueueCommentaryEvents(events) {
-  for (const eventItem of events) {
-    if (eventItem?.audio_url) {
-      state.commentaryQueue.push(eventItem);
-    }
+  if (state.commentaryAudio) {
+    return;
   }
+  const nextItem = [...events]
+    .reverse()
+    .find((eventItem) => eventItem?.audio_url && !eventItem?.text_only);
+  if (!nextItem) {
+    return;
+  }
+  state.commentaryQueue = [nextItem];
   playNextCommentary();
 }
 

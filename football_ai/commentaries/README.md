@@ -75,6 +75,8 @@ Generar comentario con demo integrada:
 python -m football_ai.commentaries
 ```
 
+La temperatura por defecto del backend de comentarios es `0.7`. Cuando se usa el servidor HTTP de comentarios, el servicio recuerda el último texto por tipo de acción y añade una instrucción al prompt para no repetir la misma frase, verbo principal ni estructura.
+
 Generar comentario pasando un evento inline:
 
 ```bash
@@ -345,7 +347,7 @@ Si quieres que el servidor vaya dejando un manifiesto listo para `live` o `defer
 ```
 
 Ese manifiesto se puede convertir después en una pista completa y muxear dentro del MP4 final del tracking. La interfaz usa ese flujo automáticamente al cerrar un run en modo `deferred`.
-Durante ese flujo, el servidor de comentarios ignora duplicados consecutivos del mismo `(action, player_name, team_name/team_in_favor)` para no sintetizar dos veces la misma jugada seguida, y el ensamblado final reexporta el vídeo como `H.264/AAC` para que el MP4 resultante se reproduzca bien en navegador.
+Durante ese flujo, el servidor de comentarios ignora duplicados consecutivos del mismo `(action, player_name, team_name/team_in_favor)` para no sintetizar dos veces la misma jugada seguida. El ensamblado final coloca cada WAV aceptado en su `event_time_s` real, omite de la pista sonora los audios que se solaparían con otro ya aceptado y reexporta el vídeo como `H.264/AAC` para que el MP4 resultante se reproduzca bien en navegador.
 
 ## Comportamiento del prompt
 
