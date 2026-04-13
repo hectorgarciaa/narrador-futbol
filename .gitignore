@@ -74,6 +74,7 @@ football_ai.egg-info/
 repo/
 
 llama.cpp/
+recursos_memoria/
 # GGUF models
 models/gguf/
 *.gguf

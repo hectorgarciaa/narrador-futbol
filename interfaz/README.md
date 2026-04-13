@@ -59,14 +59,19 @@ Cada ejecución crea:
 - `output/interfaz/runs/<run_id>/commentaries/audio/000_intro.wav`
 - `output/interfaz/runs/<run_id>/commentaries/commentary_track.wav` cuando el vídeo termina y se ensambla la pista diferida
 
+El `<run_id>` incluye fecha/hora local, equipos, vídeo y un sufijo corto para que se pueda reconocer la salida al mirar la carpeta. Ejemplo: `20260413-153012_madrid-vs-barcelona_video-prueba-ajustado_a1b2`.
+
 El propio `track.py` copia además el spec dentro del directorio de artefactos del vídeo para dejar trazabilidad completa.
 
 ## Modo comentarios
 
 - `live`: la interfaz intenta reproducir el `intro` ya precalentado nada más guardar y luego hace polling del manifiesto para sonar el audio más reciente disponible cuando el canal esté libre, sin cola FIFO de audios antiguos.
 - `deferred`: se siguen generando y guardando comentarios/audio, pero la interfaz no los reproduce al vuelo. Al terminar el tracking, la interfaz construye una pista continua desde el manifiesto y la incrusta en el MP4 final del tracking.
+- si existen referencias masculina y femenina de Qwen VoiceDesign en cache, la interfaz usa XTTS en modo dos comentaristas y elige voz con aleatoriedad controlada: una misma voz puede repetir, pero no mas de tres audios seguidos; si falta la femenina, sigue usando solo la masculina.
 - el bridge PathCRF evita reenvíos casi idénticos, guarda comentarios de texto aunque el turno de audio esté ocupado y solo solicita un nuevo WAV si el `event_time_s` cae después de la ventana ocupada por la generación más la duración del audio anterior.
-- al ensamblar el vídeo diferido, los WAV del manifiesto se colocan en su `event_time_s` real y los que se solaparían con un audio ya aceptado se omiten de la pista sonora, manteniendo el comentario escrito.
+- PathCRF etiqueta cada acción con zona de campo (`iniciacion`, `creacion`, `finalizacion`) según el tercio del largo y la dirección de ataque; las acciones en iniciación pueden generar de forma puntual un comentario de contexto con datos tácticos del `lineup_spec.json` y clasificación simulada.
+- si un comentario de contexto está sonando y aparece una acción urgente (`tiro` o `gol`), el nuevo audio se marca como interrupción y el navegador corta el contexto para reproducir la acción peligrosa.
+- al ensamblar el vídeo diferido, los WAV del manifiesto se colocan en su `event_time_s` real y los que se solaparían con un audio ya aceptado se omiten de la pista sonora, manteniendo el comentario escrito; un tiro/gol puede sustituir a un contexto interruptible si se pisan.
 - el servidor de comentarios omite duplicados consecutivos cuando llega otra vez la misma `action` para el mismo `player_name` y equipo.
 - el MP4 final diferido se vuelve a codificar como `H.264/AAC` con perfil compatible y límite `1080p`, así que el archivo que sirve la interfaz es reproducible por navegadores modernos y no se queda en negro por usar `mp4v` o por exportar un H.264 4K demasiado pesado.
 - si lanzas un run demasiado pronto y el `intro` todavía sigue en `starting`, el tracking arranca igualmente; simplemente ese run puede salir sin el `intro` precopiado.
@@ -76,6 +81,7 @@ Cuando el run se lanza desde la interfaz, el propio subprocess de tracking recib
 - ejecutar PathCRF de forma incremental sobre snapshots acumulados del `tracks` mientras avanza el partido;
 - transformar los eventos semánticos nuevos en payloads de comentario;
 - aplicar una coherencia básica de posesión antes de narrar: pases a rivales pasan a `robo` del receptor y acciones de jugadores que ya no deberían tener el balón se saltan;
+- usar la zona de campo para priorizar peligro y alternar narración de acción con contexto de partido en zonas de bajo riesgo;
 - enviarlos al mismo servidor HTTP de comentarios que ya usa la interfaz;
 - dejar esos textos y los audios aceptados en el manifiesto para `live` o para el ensamblado final en `deferred`.
 

@@ -149,6 +149,7 @@ class CommentaryHTTPService:
                 "tts_seconds": response_payload.get("tts_seconds"),
                 "total_seconds": response_payload.get("total_seconds"),
                 "audio_duration_seconds": response_payload.get("audio_duration_seconds"),
+                "voice_label": response_payload.get("voice_label"),
             },
         )
         response_payload["manifest_path"] = str(Path(manifest_path).expanduser().resolve())
@@ -237,6 +238,7 @@ class CommentaryHTTPService:
                             if result.audio_duration_seconds is not None
                             else None
                         ),
+                        "voice_label": result.voice_label,
                     }
                 self._remember_event_identity(event)
                 self._remember_commentary(event, response_payload.get("commentary"))
@@ -318,6 +320,11 @@ class CommentaryHTTPService:
                                 commentary_result.commentary,
                                 output_path,
                             )
+                            voice_label = getattr(
+                                self.audio_pipeline.voice_synthesizer,
+                                "last_voice_label",
+                                None,
+                            )
                             audio_duration_seconds = probe_audio_duration_seconds(
                                 audio_path_value
                             )
@@ -337,6 +344,7 @@ class CommentaryHTTPService:
                                     if audio_duration_seconds is not None
                                     else None
                                 ),
+                                "voice_label": voice_label,
                             }
                         self._remember_event_identity(event)
                         self._remember_commentary(event, response_payload.get("commentary"))

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -27,6 +28,9 @@ from football_ai.core import convert_to_serializable
 logger = logging.getLogger(__name__)
 
 AUDIO_TIMELINE_EPSILON_S = 0.05
+CONTEXT_COMMENT_PROBABILITY = 0.3
+CONTEXT_COMMENT_COOLDOWN_S = 35.0
+URGENT_COMMENTARY_ACTIONS = {"tiro", "gol"}
 
 ENV_ENABLE = "NARRADOR_APP_ENABLE_LIVE_COMMENTARY"
 ENV_SERVICE_URL = "NARRADOR_APP_COMMENTARY_SERVICE_URL"
@@ -115,6 +119,10 @@ class AppLiveCommentaryBridge:
             0.0,
             self._intro_audio_duration_seconds,
         )
+        self._current_audio_interruptible = False
+        self._last_context_event_time_s = -1_000_000.0
+        self._context_rng = random.Random(self._stable_seed(config.run_id))
+        self._lineup_context = self._load_lineup_context()
         self._worker.start()
 
     def _initial_intro_audio_duration(self) -> float:
@@ -206,6 +214,208 @@ class AppLiveCommentaryBridge:
                 sort_keys=True,
             )
 
+    @staticmethod
+    def _stable_seed(value: str) -> int:
+        digest = hashlib.sha1(str(value or "run").encode("utf-8")).hexdigest()
+        return int(digest[:8], 16)
+
+    def _load_lineup_context(self) -> dict[str, Any]:
+        lineup_path = self.run_dir / "lineup_spec.json"
+        if not lineup_path.exists():
+            return {"teams": []}
+        try:
+            with lineup_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            logger.exception("No se pudo leer lineup_spec.json para comentarios de contexto.")
+            return {"teams": []}
+        if not isinstance(payload, dict):
+            return {"teams": []}
+        teams = payload.get("teams")
+        if not isinstance(teams, list):
+            teams = []
+        return {"teams": [team for team in teams if isinstance(team, dict)]}
+
+    def _lineup_team(self, team_name: str | None) -> dict[str, Any] | None:
+        wanted = str(team_name or "").strip().casefold()
+        if not wanted:
+            return None
+        for team in self._lineup_context.get("teams") or []:
+            candidate = str(team.get("team_name") or "").strip().casefold()
+            if candidate == wanted:
+                return dict(team)
+        return None
+
+    def _players_for_slots(
+        self,
+        team: dict[str, Any] | None,
+        slot_prefixes: tuple[str, ...],
+        *,
+        limit: int = 3,
+    ) -> list[str]:
+        if not team:
+            return []
+        players_by_slot = team.get("players_by_slot") or {}
+        if not isinstance(players_by_slot, dict):
+            return []
+        selected: list[str] = []
+        for slot, player in players_by_slot.items():
+            slot_key = str(slot or "").strip().upper()
+            player_name = str(player or "").strip()
+            if not player_name:
+                continue
+            if any(slot_key.startswith(prefix) for prefix in slot_prefixes):
+                selected.append(player_name)
+        return selected[: int(limit)]
+
+    def _simulated_standings_context(
+        self,
+        team_name: str | None,
+        opponent_team_name: str | None,
+    ) -> str | None:
+        team = str(team_name or "").strip()
+        opponent = str(opponent_team_name or "").strip()
+        if not team or not opponent:
+            return None
+        digest = hashlib.sha1(
+            f"{self.config.run_id}:{team}:{opponent}".encode("utf-8")
+        ).hexdigest()
+        team_rank = (int(digest[:2], 16) % 8) + 1
+        opponent_rank = (int(digest[2:4], 16) % 8) + 1
+        if opponent_rank == team_rank:
+            opponent_rank = (opponent_rank % 8) + 1
+        team_points = max(22, 62 - (team_rank * 3) + (int(digest[4:6], 16) % 5))
+        opponent_points = max(
+            22,
+            62 - (opponent_rank * 3) + (int(digest[6:8], 16) % 5),
+        )
+        return (
+            f"{team} llega {team_rank} en la tabla con {team_points} puntos; "
+            f"{opponent} aparece {opponent_rank} con {opponent_points} puntos"
+        )
+
+    def _tactical_context(self, team_name: str | None) -> str | None:
+        team = self._lineup_team(team_name)
+        if not team:
+            return None
+        team_label = str(team.get("team_name") or team_name or "").strip()
+        center_backs = self._players_for_slots(team, ("DFC",), limit=3)
+        midfielders = self._players_for_slots(team, ("MC", "MCD", "MCO"), limit=3)
+        forwards = self._players_for_slots(team, ("DC", "EI", "ED"), limit=3)
+        if len(center_backs) >= 2:
+            return (
+                f"defensa de {team_label}: centrales "
+                f"{' y '.join(center_backs[:2])}"
+            )
+        if len(midfielders) >= 2:
+            return (
+                f"centro del campo de {team_label}: "
+                f"{', '.join(midfielders[:3])}"
+            )
+        if len(forwards) >= 2:
+            return f"ataque de {team_label}: {' y '.join(forwards[:2])}"
+        return None
+
+    def _build_context_event(
+        self,
+        event_payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        team_name = event_payload.get("team_name")
+        opponent_team_name = event_payload.get("opponent_team_name")
+        event_time_s = event_payload.get("event_time_s")
+        tactical_context = self._tactical_context(team_name)
+        standings_context = self._simulated_standings_context(
+            team_name,
+            opponent_team_name,
+        )
+        if not tactical_context and not standings_context:
+            return None
+        return {
+            "action": "contexto",
+            "event_time_s": event_time_s,
+            "team_name": team_name,
+            "opponent_team_name": opponent_team_name,
+            "field_zone": event_payload.get("field_zone"),
+            "play_context": tactical_context,
+            "match_score": standings_context,
+            "action_index": event_payload.get("action_index"),
+        }
+
+    def _should_emit_context_comment(
+        self,
+        event_payload: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        event_time_s: float,
+        final_pass: bool,
+    ) -> bool:
+        if final_pass:
+            return False
+        if str(metadata.get("field_zone_key") or "").strip() != "iniciacion":
+            return False
+        action = str(event_payload.get("action") or "").strip().casefold()
+        if action in URGENT_COMMENTARY_ACTIONS:
+            return False
+        if event_time_s - self._last_context_event_time_s < CONTEXT_COMMENT_COOLDOWN_S:
+            return False
+        return self._context_rng.random() <= CONTEXT_COMMENT_PROBABILITY
+
+    def _is_urgent_event(
+        self,
+        event_payload: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> bool:
+        del metadata
+        action = str(event_payload.get("action") or "").strip().casefold()
+        return action in URGENT_COMMENTARY_ACTIONS
+
+    def _should_interrupt_current_audio(
+        self,
+        event_payload: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        request_started: float,
+    ) -> bool:
+        return (
+            self._current_audio_interruptible
+            and request_started < self._audio_busy_until_wall_time
+            and self._is_urgent_event(event_payload, metadata)
+        )
+
+    def _update_audio_busy_after_response(
+        self,
+        *,
+        request_started: float,
+        event_time_s: float,
+        response_payload: dict[str, Any],
+        interrupting: bool,
+        interruptible_audio: bool,
+    ) -> None:
+        try:
+            total_seconds = float(response_payload.get("total_seconds") or 0.0)
+            audio_duration_seconds = float(
+                response_payload.get("audio_duration_seconds") or 0.0
+            )
+        except (TypeError, ValueError):
+            total_seconds = 0.0
+            audio_duration_seconds = 0.0
+
+        wall_end = request_started + total_seconds + audio_duration_seconds
+        event_end = event_time_s + total_seconds + audio_duration_seconds
+        if interrupting:
+            self._audio_busy_until_wall_time = wall_end
+            self._audio_busy_until_event_time_s = event_end
+        else:
+            self._audio_busy_until_wall_time = max(
+                self._audio_busy_until_wall_time,
+                wall_end,
+            )
+            self._audio_busy_until_event_time_s = max(
+                self._audio_busy_until_event_time_s,
+                event_end,
+            )
+        self._current_audio_interruptible = bool(interruptible_audio)
+
     def _process_tracks_file(
         self,
         *,
@@ -269,13 +479,42 @@ class AppLiveCommentaryBridge:
             if self._is_near_duplicate_semantic_event(event_payload, metadata):
                 continue
 
+            context_audio_generated = self._maybe_dispatch_context_comment(
+                event_payload=event_payload,
+                metadata=metadata,
+                signature=signature,
+                event_time_s=event_time_s,
+                final_pass=final_pass,
+            )
             request_started = time.perf_counter()
+            interrupt_current_audio = self._should_interrupt_current_audio(
+                event_payload,
+                metadata,
+                request_started=request_started,
+            )
+            event_for_request = dict(event_payload)
+            if interrupt_current_audio:
+                event_for_request["intensity"] = "interrupcion"
+                interrupt_hint = (
+                    "hay que cortar un comentario de contexto porque aparece una accion peligrosa"
+                )
+                existing_context = str(event_for_request.get("play_context") or "").strip()
+                event_for_request["play_context"] = (
+                    f"{existing_context}. {interrupt_hint}"
+                    if existing_context
+                    else interrupt_hint
+                )
+
             text_only, text_only_reason = self._audio_policy_for_event(
                 event_time_s=event_time_s,
                 request_started=request_started,
+                allow_interrupt=interrupt_current_audio,
             )
+            if context_audio_generated:
+                text_only = True
+                text_only_reason = "context_commentary_replaced_initiation_action"
             audio_out = self.audio_dir / self._audio_filename_for_event(
-                event_payload=event_payload,
+                event_payload=event_for_request,
                 metadata=metadata,
                 signature=signature,
             )
@@ -286,6 +525,11 @@ class AppLiveCommentaryBridge:
                 "event_signature": signature,
                 "final_pass": bool(final_pass),
             }
+            if interrupt_current_audio:
+                request_metadata["interrupt_audio"] = True
+                request_metadata["interrupt_reason"] = (
+                    "urgent_action_interrupts_context_commentary"
+                )
             if text_only_reason is not None:
                 request_metadata["text_only_reason"] = text_only_reason
                 request_metadata["audio_busy_until_event_time_s"] = round(
@@ -294,7 +538,7 @@ class AppLiveCommentaryBridge:
                 )
             response_status, response_payload = self._post_commentary_request(
                 {
-                    "event": event_payload,
+                    "event": event_for_request,
                     "audio_out": str(audio_out),
                     "manifest_path": str(self.config.manifest_path),
                     "mode": self.config.commentary_mode,
@@ -314,32 +558,23 @@ class AppLiveCommentaryBridge:
             if bool(response_payload.get("skipped")):
                 logger.info(
                     "Evento live omitido por duplicado consecutivo: %s (%s).",
-                    event_payload.get("action"),
-                    event_payload.get("player_name"),
+                    event_for_request.get("action"),
+                    event_for_request.get("player_name"),
                 )
                 continue
             if not text_only and response_payload.get("audio_path"):
-                try:
-                    total_seconds = float(response_payload.get("total_seconds") or 0.0)
-                    audio_duration_seconds = float(
-                        response_payload.get("audio_duration_seconds") or 0.0
-                    )
-                except (TypeError, ValueError):
-                    total_seconds = 0.0
-                    audio_duration_seconds = 0.0
-                self._audio_busy_until_wall_time = max(
-                    self._audio_busy_until_wall_time,
-                    request_started + total_seconds + audio_duration_seconds,
-                )
-                self._audio_busy_until_event_time_s = max(
-                    self._audio_busy_until_event_time_s,
-                    event_time_s + total_seconds + audio_duration_seconds,
+                self._update_audio_busy_after_response(
+                    request_started=request_started,
+                    event_time_s=event_time_s,
+                    response_payload=response_payload,
+                    interrupting=interrupt_current_audio,
+                    interruptible_audio=False,
                 )
             logger.info(
                 "Comentario live generado para %s en %.2fs%s.",
-                event_payload.get("action"),
+                event_for_request.get("action"),
                 event_time_s,
-                " (solo texto por audio ocupado)" if text_only else "",
+                f" (solo texto: {text_only_reason})" if text_only else "",
             )
 
     def _audio_policy_for_event(
@@ -347,7 +582,10 @@ class AppLiveCommentaryBridge:
         *,
         event_time_s: float,
         request_started: float,
+        allow_interrupt: bool = False,
     ) -> tuple[bool, str | None]:
+        if allow_interrupt:
+            return False, None
         if request_started < self._audio_busy_until_wall_time:
             return True, "audio_slot_busy"
         if (
@@ -356,6 +594,94 @@ class AppLiveCommentaryBridge:
         ):
             return True, "audio_event_window_elapsed"
         return False, None
+
+    def _maybe_dispatch_context_comment(
+        self,
+        *,
+        event_payload: dict[str, Any],
+        metadata: dict[str, Any],
+        signature: str,
+        event_time_s: float,
+        final_pass: bool,
+    ) -> bool:
+        if not self._should_emit_context_comment(
+            event_payload,
+            metadata,
+            event_time_s=event_time_s,
+            final_pass=final_pass,
+        ):
+            return False
+
+        context_event = self._build_context_event(event_payload)
+        if context_event is None:
+            return False
+
+        request_started = time.perf_counter()
+        text_only, _ = self._audio_policy_for_event(
+            event_time_s=event_time_s,
+            request_started=request_started,
+        )
+        if text_only:
+            return False
+
+        context_signature = hashlib.sha1(
+            f"context:{signature}".encode("utf-8")
+        ).hexdigest()
+        if context_signature in self._dispatched_signatures:
+            return False
+
+        audio_out = self.audio_dir / self._audio_filename_for_event(
+            event_payload=context_event,
+            metadata=metadata,
+            signature=context_signature,
+        )
+        request_metadata = {
+            **metadata,
+            "run_id": self.config.run_id,
+            "source": "pathcrf_live",
+            "event_signature": context_signature,
+            "base_event_signature": signature,
+            "final_pass": bool(final_pass),
+            "event_kind": "context",
+            "commentary_priority": "context",
+            "context_trigger_action": event_payload.get("action"),
+            "interruptible_audio": True,
+        }
+        response_status, response_payload = self._post_commentary_request(
+            {
+                "event": context_event,
+                "audio_out": str(audio_out),
+                "manifest_path": str(self.config.manifest_path),
+                "mode": self.config.commentary_mode,
+                "metadata": request_metadata,
+                "text_only": False,
+            }
+        )
+        if response_status != int(HTTPStatus.OK):
+            logger.warning(
+                "El servidor rechazo un comentario de contexto live: %s",
+                response_payload.get("error") or response_payload,
+            )
+            return False
+
+        self._dispatched_signatures.add(context_signature)
+        if bool(response_payload.get("skipped")):
+            return False
+        if response_payload.get("audio_path"):
+            self._update_audio_busy_after_response(
+                request_started=request_started,
+                event_time_s=event_time_s,
+                response_payload=response_payload,
+                interrupting=False,
+                interruptible_audio=True,
+            )
+            self._last_context_event_time_s = float(event_time_s)
+            logger.info(
+                "Comentario de contexto live generado en %.2fs.",
+                event_time_s,
+            )
+            return True
+        return False
 
     def _post_commentary_request(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

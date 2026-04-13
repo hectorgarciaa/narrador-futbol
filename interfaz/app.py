@@ -547,7 +547,7 @@ class CommentaryServerManager:
     def _serve(self):
         try:
             generator = self.build_commentary_generator()
-            voice_synthesizer = build_voice_synthesizer()
+            voice_synthesizer = build_voice_synthesizer(alternate_voices=True)
             pipeline = CommentaryAudioPipeline(
                 commentary_generator=generator,
                 voice_synthesizer=voice_synthesizer,
@@ -744,7 +744,7 @@ def generate_startup_intro_commentary_locally():
 
     event = build_startup_intro_event()
     generator = COMMENTARY_SERVER_MANAGER.build_commentary_generator()
-    voice_synthesizer = build_voice_synthesizer()
+    voice_synthesizer = build_voice_synthesizer(alternate_voices=True)
     voice_synthesizer.prepare()
     pipeline = CommentaryAudioPipeline(
         commentary_generator=generator,
@@ -764,6 +764,8 @@ def generate_startup_intro_commentary_locally():
             "commentary": result.commentary,
             "audio_path": str(result.audio_path),
             "model": result.commentary_result.model,
+            "tts_model": result.tts_model,
+            "voice_label": result.voice_label,
             "llm_seconds": round(result.llm_seconds or 0.0, 3),
             "tts_seconds": round(result.tts_seconds or 0.0, 3),
             "total_seconds": round(result.total_seconds or 0.0, 3),
@@ -780,6 +782,8 @@ def generate_startup_intro_commentary_locally():
             "commentary": fallback_text,
             "audio_path": str(audio_path),
             "model": f"{COMMENTARY_SERVER_MANAGER.model}:intro-fallback",
+            "tts_model": getattr(voice_synthesizer, "model_name", None),
+            "voice_label": getattr(voice_synthesizer, "last_voice_label", None),
             "llm_seconds": 0.0,
             "tts_seconds": round(tts_seconds, 3),
             "total_seconds": round(tts_seconds, 3),
@@ -890,6 +894,45 @@ def build_run_paths(run_id):
         "commentary_intro_meta_path": run_dir / "commentaries" / "intro.json",
         "commentary_track_audio_path": run_dir / "commentaries" / "commentary_track.wav",
     }
+
+
+def slugify_run_part(value, *, fallback="run", max_length=40):
+    slug = sanitize_video_stem(str(value or "").strip()).replace("_", "-").lower()
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    if not slug:
+        slug = fallback
+    return slug[:max_length].strip("-") or fallback
+
+
+def build_interface_run_id(lineup_spec):
+    timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    teams = list(lineup_spec.get("teams") or [])
+    team_names = [
+        slugify_run_part(
+            team.get("team_name"),
+            fallback=f"equipo{idx + 1}",
+            max_length=24,
+        )
+        for idx, team in enumerate(teams[:2])
+    ]
+    if len(team_names) >= 2:
+        matchup = f"{team_names[0]}-vs-{team_names[1]}"
+    elif team_names:
+        matchup = team_names[0]
+    else:
+        matchup = "sin-equipos"
+    video = slugify_run_part(
+        lineup_spec.get("video_source"),
+        fallback="video",
+        max_length=36,
+    )
+
+    for _ in range(20):
+        suffix = uuid.uuid4().hex[:4]
+        run_id = f"{timestamp}_{matchup}_{video}_{suffix}"
+        if not build_run_paths(run_id)["run_dir"].exists():
+            return run_id
+    return f"{timestamp}_{matchup}_{video}_{uuid.uuid4().hex[:8]}"
 
 
 def resolve_tracking_output_video_path(video_source):
@@ -1027,6 +1070,7 @@ def attach_cached_intro_to_run(run_id, commentary_mode):
             "audio_path": str(run_paths["commentary_intro_audio_path"]),
             "model": intro_payload.get("model"),
             "tts_model": intro_payload.get("tts_model"),
+            "voice_label": intro_payload.get("voice_label"),
             "text_only": False,
             "llm_seconds": intro_payload.get("llm_seconds"),
             "tts_seconds": intro_payload.get("tts_seconds"),
@@ -1530,7 +1574,7 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
                 raise LineupSpecError(
                     "Debes seleccionar un vídeo (`video_source`) antes de ejecutar."
                 )
-            run_id = uuid.uuid4().hex[:12]
+            run_id = build_interface_run_id(lineup_spec)
             status = launch_tracking_process(
                 run_id,
                 lineup_spec,

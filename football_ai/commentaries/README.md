@@ -75,7 +75,7 @@ Generar comentario con demo integrada:
 python -m football_ai.commentaries
 ```
 
-La temperatura por defecto del backend de comentarios es `0.7`. Cuando se usa el servidor HTTP de comentarios, el servicio recuerda el último texto por tipo de acción y añade una instrucción al prompt para no repetir la misma frase, verbo principal ni estructura.
+La temperatura por defecto del backend de comentarios es `0.7`. Cuando se usa el servidor HTTP de comentarios, el servicio recuerda el último texto por tipo de acción y añade una instrucción al prompt para no repetir la misma frase, verbo principal ni estructura. Además de acciones de partido e `intro`, el generador acepta `contexto` para comentarios de apoyo sin jugador obligatorio.
 
 Generar comentario pasando un evento inline:
 
@@ -181,6 +181,18 @@ python -m football_ai.commentaries \
   --qwen-reference-text "Buenas tardes, bienvenidos a una gran noche de futbol." \
   --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo"}'
 ```
+
+Para preparar una segunda voz femenina con el mismo diseno de locutor deportivo y alternarla con la voz masculina:
+
+```bash
+python -m football_ai.commentaries \
+  --tts-backend xtts \
+  --alternate-voices \
+  --generate-female-qwen-reference \
+  --prepare-voice-only
+```
+
+Ese comando genera/cachea la referencia femenina de Qwen VoiceDesign y la deja en `output/commentaries/qwen_voices/<voice_id>/voice_design_reference.wav`. A partir de ahi, la interfaz la detecta automaticamente y XTTS elige entre `male` y `female` con aleatoriedad controlada: una misma voz puede repetir, pero nunca mas de tres audios seguidos. Por defecto la voz masculina usa la referencia masculina cacheada de Qwen VoiceDesign y la femenina usa la referencia femenina cacheada. Tambien puedes pasar una muestra propia con `--speaker-wav` o `--female-speaker-wav`.
 
 Si quieres volver al backend estable:
 
@@ -347,7 +359,7 @@ Si quieres que el servidor vaya dejando un manifiesto listo para `live` o `defer
 ```
 
 Ese manifiesto se puede convertir después en una pista completa y muxear dentro del MP4 final del tracking. La interfaz usa ese flujo automáticamente al cerrar un run en modo `deferred`.
-Durante ese flujo, el servidor de comentarios ignora duplicados consecutivos del mismo `(action, player_name, team_name/team_in_favor)` para no sintetizar dos veces la misma jugada seguida. El ensamblado final coloca cada WAV aceptado en su `event_time_s` real, omite de la pista sonora los audios que se solaparían con otro ya aceptado y reexporta el vídeo como `H.264/AAC` para que el MP4 resultante se reproduzca bien en navegador.
+Durante ese flujo, el servidor de comentarios ignora duplicados consecutivos del mismo `(action, player_name, team_name/team_in_favor)` para no sintetizar dos veces la misma jugada seguida. El ensamblado final coloca cada WAV aceptado en su `event_time_s` real, omite de la pista sonora los audios que se solaparían con otro ya aceptado y reexporta el vídeo como `H.264/AAC` para que el MP4 resultante se reproduzca bien en navegador. Si un audio de contexto marcado como interruptible se solapa con un tiro o gol posterior, el ensamblado conserva la acción peligrosa y descarta ese contexto de la pista sonora.
 
 ## Comportamiento del prompt
 
@@ -359,6 +371,8 @@ El prompt esta pensado para:
 - mantener los comentarios cortos y en una sola frase;
 - mencionar el minuto solo en `gol`;
 - permitir una apertura breve y libre cuando la accion es `intro`;
+- permitir `contexto` como comentario de apoyo, sin narrar una accion tecnica concreta, usando datos tacticos de la alineacion y clasificacion simulada recibidos en el evento;
+- arrancar un tiro o gol con una interrupcion natural cuando el evento llega con `intensity=interrupcion`;
 - tratar las acciones de pase como acciones del jugador que da el pase, no del que lo recibe;
 - reservar la mencion del equipo contrario para `gol`;
 - dejar clarisimo que en `gol` el jugador marca para un equipo y se lo hace al otro;
@@ -376,7 +390,8 @@ El prompt esta pensado para:
 - El backend `transformers` esta pensado para pruebas locales de Hymba en una venv separada como `.venv-hymba`, para no romper el entorno principal del proyecto.
 - La sintesis de voz usa por defecto `tts_models/multilingual/multi-dataset/xtts_v2`.
 - Tambien puedes probar `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` junto con `Qwen/Qwen3-TTS-12Hz-0.6B-Base` usando `--tts-backend qwen`.
-- Si existen varios `.wav` en `football_ai/commentaries/`, el modulo los usa todos por defecto como referencias de voz y prioriza `mi_Voz.wav` si está presente.
+- Si existe una referencia masculina de Qwen VoiceDesign en `output/commentaries/qwen_voices/`, el modulo la usa como voz masculina por defecto. `mi_Voz.wav` queda solo como fallback si no hay voz Qwen cacheada. Si quieres forzar otra referencia, pasala explicitamente con `--speaker-wav`.
+- `--alternate-voices` permite usar una voz masculina y una femenina con seleccion aleatoria controlada; cada entrada de manifiesto guarda `voice_label` cuando se ha usado el selector de voces.
 - Los artefactos de voz de Qwen se cachean en `output/commentaries/qwen_voices/` para no rediseñar ni reconstruir el prompt de clonacion en cada ejecucion.
 - Las voces clonadas de XTTS se siguen cacheando en `output/commentaries/voices/`.
 - La salida de audio se guarda por defecto en `output/commentaries/audio/`.

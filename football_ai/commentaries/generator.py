@@ -16,6 +16,7 @@ SPECIAL_TEAM_FAVOR_ACTIONS = {
 }
 
 INTRO_ACTION = "intro"
+CONTEXT_ACTION = "contexto"
 PASS_ACTION_PREFIX = "pase"
 
 TEAM_NAME_REQUIRED_ACTIONS = {
@@ -122,9 +123,9 @@ class CommentaryEvent:
         if self.action_index is not None:
             self.action_index = int(self.action_index)
 
-        if not self.is_intro and not self.player_name:
+        if not self.is_intro and not self.is_context and not self.player_name:
             raise ValueError("`player_name` no puede ir vacio.")
-        if not self.is_intro and not self.player_position:
+        if not self.is_intro and not self.is_context and not self.player_position:
             raise ValueError("`player_position` no puede ir vacio.")
         if self.event_time_s < 0:
             raise ValueError("`event_time_s` debe ser >= 0.")
@@ -160,6 +161,10 @@ class CommentaryEvent:
         return self.action == INTRO_ACTION
 
     @property
+    def is_context(self) -> bool:
+        return self.action == CONTEXT_ACTION
+
+    @property
     def is_goal(self) -> bool:
         return self.action == "gol"
 
@@ -177,7 +182,7 @@ class CommentaryEvent:
             for key, value in asdict(self).items()
             if value is not None and value != ""
         }
-        if self.action not in {"gol", INTRO_ACTION}:
+        if self.action not in {"gol", INTRO_ACTION, CONTEXT_ACTION}:
             payload.pop("opponent_team_name", None)
         payload["should_mention_minute"] = self.should_mention_minute
         if self.should_mention_minute:
@@ -242,6 +247,13 @@ class CommentaryPromptBuilder:
                 "Hazlo breve y sin inventar sucesos que aun no han pasado. "
                 "No uses emojis."
             )
+        if event is not None and event.is_context:
+            return (
+                "Eres el comentarista de apoyo de una retransmision de futbol en espanol de Espana. "
+                "Tu trabajo es aportar contexto cuando la jugada esta en una zona de poco peligro. "
+                "Redacta un comentario natural de antena usando solo los datos recibidos. "
+                "No narres una accion tecnica concreta ni inventes sucesos del partido."
+            )
         if event is not None and event.is_goal:
             return (
                 "Eres un narrador de futbol de television en espanol de Espana. "
@@ -285,6 +297,26 @@ class CommentaryPromptBuilder:
                 rules.append(f"Si ayuda, menciona {event.play_context}.")
             if event.match_score:
                 rules.append("No inventes marcador si el partido todavia no ha empezado.")
+        elif event.is_context:
+            rules = [
+                "Es un comentario de contexto durante una fase tranquila de salida de balon.",
+                "No narres la accion tecnica actual; aporta lectura de partido, clasificacion simulada o apunte tactico.",
+                "Escribe una sola frase natural, entre 18 y 35 palabras.",
+                "Usa solo los datos simulados y tacticos incluidos en el evento.",
+                "No menciones que los datos son simulados.",
+                "No menciones minuto ni resultado real.",
+                "No uses emojis.",
+            ]
+            if event.team_name and event.opponent_team_name:
+                rules.append(
+                    f"El partido es {event.team_name} contra {event.opponent_team_name}."
+                )
+            if event.field_zone:
+                rules.append(f"La jugada esta en {event.field_zone}, zona de bajo riesgo.")
+            if event.play_context:
+                rules.append(f"Datos disponibles: {event.play_context}.")
+            if event.match_score:
+                rules.append(f"Contexto de tabla o partido: {event.match_score}.")
         elif event.is_goal:
             rules = [
                 f"El autor del gol es {event.player_name}.",
@@ -307,6 +339,11 @@ class CommentaryPromptBuilder:
                 rules.append(f"Si ayuda, menciona {event.play_context}.")
             if event.action_target:
                 rules.append(f"Si ayuda, menciona {event.action_target}.")
+            if event.intensity and event.intensity.casefold() == "interrupcion":
+                rules.append(
+                    "Empieza con una interrupcion natural muy breve, tipo 'perdon, te corto', "
+                    "y pasa inmediatamente a la accion peligrosa."
+                )
         else:
             rules = [
                 f"Usa literalmente esta accion: {event.action}.",
@@ -332,6 +369,11 @@ class CommentaryPromptBuilder:
                 rules.append(f"Si ayuda, menciona {event.action_target}.")
             if event.play_context:
                 rules.append(f"Si ayuda, menciona {event.play_context}.")
+            if event.intensity and event.intensity.casefold() == "interrupcion":
+                rules.append(
+                    "Empieza con una interrupcion natural muy breve, tipo 'perdon, te corto', "
+                    "y pasa inmediatamente a la accion peligrosa."
+                )
 
         avoid_text = _clean_text(avoid_commentary)
         if avoid_text is not None and not event.is_intro:

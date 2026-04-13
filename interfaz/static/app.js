@@ -364,6 +364,19 @@ function resetCommentaryPlayback() {
   }
 }
 
+function isInterruptingCommentary(eventItem) {
+  const metadata = eventItem?.metadata || {};
+  return Boolean(eventItem?.interrupt_audio || metadata.interrupt_audio);
+}
+
+function stopCurrentCommentary() {
+  if (!state.commentaryAudio) {
+    return;
+  }
+  state.commentaryAudio.pause();
+  state.commentaryAudio = null;
+}
+
 function playNextCommentary() {
   if (state.commentaryAudio || state.commentaryQueue.length === 0) {
     return;
@@ -376,7 +389,9 @@ function playNextCommentary() {
   const audio = new Audio(nextItem.audio_url);
   state.commentaryAudio = audio;
   const releaseAudio = () => {
-    state.commentaryAudio = null;
+    if (state.commentaryAudio === audio) {
+      state.commentaryAudio = null;
+    }
     playNextCommentary();
   };
   audio.addEventListener("ended", releaseAudio, { once: true });
@@ -387,12 +402,26 @@ function playNextCommentary() {
 }
 
 function enqueueCommentaryEvents(events) {
-  if (state.commentaryAudio) {
+  const playableEvents = [...events].filter(
+    (eventItem) => eventItem?.audio_url && !eventItem?.text_only,
+  );
+  if (playableEvents.length === 0) {
     return;
   }
-  const nextItem = [...events]
-    .reverse()
-    .find((eventItem) => eventItem?.audio_url && !eventItem?.text_only);
+
+  if (state.commentaryAudio) {
+    const interruptItem = [...playableEvents]
+      .reverse()
+      .find((eventItem) => isInterruptingCommentary(eventItem));
+    if (interruptItem) {
+      stopCurrentCommentary();
+      state.commentaryQueue = [interruptItem];
+      playNextCommentary();
+    }
+    return;
+  }
+
+  const nextItem = [...playableEvents].reverse()[0];
   if (!nextItem) {
     return;
   }

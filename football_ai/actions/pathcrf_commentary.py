@@ -12,11 +12,15 @@ import pandas as pd
 from football_ai.core.serialization import convert_to_serializable
 
 from .pathcrf_semantics import (
+    PITCH_LENGTH_M,
     ensure_semantic_event_columns,
+    infer_team_attack_directions,
     is_player_slot,
     parse_timestamp_seconds,
     safe_float,
     sort_events,
+    team_attacks_right,
+    team_id_from_player_id,
 )
 
 
@@ -31,6 +35,11 @@ COMMENTARY_ACTION_MAP = {
 }
 TEAM_IN_FAVOR_ACTIONS = {"corner", "fuera de banda", "saque de puerta"}
 SKIP_EVENT_TYPES = {"out"}
+FIELD_ZONE_LABELS = {
+    "iniciacion": "zona de iniciacion",
+    "creacion": "zona de creacion",
+    "finalizacion": "zona de finalizacion",
+}
 
 
 @dataclass
@@ -162,6 +171,62 @@ def _resolve_track_payload(
     return dict(frame_index.get(int(frame_id), {}).get(str(track_id), {})) or None
 
 
+def _field_position_from_payload(payload: dict[str, Any] | None) -> tuple[float, float] | None:
+    if not payload:
+        return None
+    raw_position = payload.get("field_position_m") or payload.get("field_position")
+    if raw_position is None:
+        return None
+    try:
+        values = list(raw_position)
+        x_m = float(values[0])
+        y_m = float(values[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if safe_float(x_m) is None or safe_float(y_m) is None:
+        return None
+    return x_m, y_m
+
+
+def _field_position_from_event_row(row: Any) -> tuple[float, float] | None:
+    x_m = safe_float(getattr(row, "start_x", None))
+    y_m = safe_float(getattr(row, "start_y", None))
+    if x_m is None or y_m is None:
+        return None
+    return x_m, y_m
+
+
+def _field_zone_key(
+    field_position_m: tuple[float, float] | None,
+    *,
+    attacks_right: bool,
+) -> str | None:
+    if field_position_m is None:
+        return None
+    x_m = max(0.0, min(PITCH_LENGTH_M, float(field_position_m[0])))
+    first_third = PITCH_LENGTH_M / 3.0
+    second_third = (2.0 * PITCH_LENGTH_M) / 3.0
+    if attacks_right:
+        if x_m < first_third:
+            return "iniciacion"
+        if x_m < second_third:
+            return "creacion"
+        return "finalizacion"
+    if x_m < first_third:
+        return "finalizacion"
+    if x_m < second_third:
+        return "creacion"
+    return "iniciacion"
+
+
+def _commentary_priority_for_zone(action: str | None, field_zone_key: str | None) -> str:
+    if action in {"tiro", "gol"} or field_zone_key == "finalizacion":
+        return "high"
+    if field_zone_key == "iniciacion":
+        return "low"
+    return "normal"
+
+
 def _infer_team_names(identities: dict[str, TrackIdentity]) -> list[str]:
     teams = sorted(
         {
@@ -202,6 +267,7 @@ def build_commentary_events_json(
     source_paths: dict[str, Any] | None = None,
 ) -> Path:
     events_df = ensure_semantic_event_columns(sort_events(events))
+    attack_directions = infer_team_attack_directions(events_df)
     tracks = _load_tracks(tracks_path)
     identities, frame_index = _build_track_identity_maps(tracks)
     slot_to_track_id, synthetic_slots = _slot_mapping_from_summary(conversion_summary)
@@ -344,6 +410,26 @@ def build_commentary_events_json(
 
         commentary_event = None
         if commentary_ready:
+            pathcrf_team_id = team_id_from_player_id(pathcrf_player_id)
+            period_id = getattr(row, "period_id", None)
+            attacks_right = team_attacks_right(
+                period_id,
+                pathcrf_team_id,
+                attack_directions,
+            )
+            field_position_m = (
+                _field_position_from_payload(track_payload)
+                or _field_position_from_event_row(row)
+            )
+            field_zone_key = _field_zone_key(
+                field_position_m,
+                attacks_right=attacks_right,
+            )
+            field_zone = FIELD_ZONE_LABELS.get(field_zone_key)
+            commentary_priority = _commentary_priority_for_zone(
+                commentary_action,
+                field_zone_key,
+            )
             commentary_event = {
                 "action": commentary_action,
                 "event_time_s": float(event_time_s),
@@ -352,6 +438,7 @@ def build_commentary_events_json(
                 "team_name": team_name,
                 "opponent_team_name": opponent_team_name,
                 "team_in_favor": team_in_favor,
+                "field_zone": field_zone,
                 "action_target": action_target,
                 "action_index": int(action_index),
             }
@@ -374,6 +461,16 @@ def build_commentary_events_json(
                         "event_type_semantic": semantic_event_type,
                         "semantic_source": semantic_source,
                         "possession_postprocess": possession_postprocess,
+                        "field_position_m": (
+                            [float(field_position_m[0]), float(field_position_m[1])]
+                            if field_position_m is not None
+                            else None
+                        ),
+                        "field_zone_key": field_zone_key,
+                        "field_zone": field_zone,
+                        "attack_direction_right": bool(attacks_right),
+                        "pathcrf_team_id": pathcrf_team_id,
+                        "commentary_priority": commentary_priority,
                     },
                 }
             )
@@ -390,6 +487,15 @@ def build_commentary_events_json(
                 current_possession_track_id = track_id
                 current_possession_team_name = team_name
         else:
+            field_position_m = (
+                _field_position_from_payload(track_payload)
+                or _field_position_from_event_row(row)
+            )
+            field_zone_key = None
+            field_zone = None
+            commentary_priority = None
+            attacks_right = None
+            pathcrf_team_id = team_id_from_player_id(pathcrf_player_id)
             skipped_reasons[str(skip_reason or "unknown")] += 1
 
         enriched_events.append(
@@ -433,6 +539,16 @@ def build_commentary_events_json(
                 "start_y": getattr(row, "start_y", None),
                 "end_x": getattr(row, "end_x", None),
                 "end_y": getattr(row, "end_y", None),
+                "field_position_m": (
+                    [float(field_position_m[0]), float(field_position_m[1])]
+                    if field_position_m is not None
+                    else None
+                ),
+                "field_zone_key": field_zone_key,
+                "field_zone": field_zone,
+                "attack_direction_right": attacks_right,
+                "pathcrf_team_id": pathcrf_team_id,
+                "commentary_priority": commentary_priority,
                 "commentary_event": commentary_event,
             }
         )

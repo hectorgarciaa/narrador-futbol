@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import random
 import re
 import shutil
 import sys
@@ -29,6 +30,7 @@ DEFAULT_QWEN_CPP_RUNTIME_DIR = PROJECT_ROOT / "output" / "commentaries" / "qwen_
 DEFAULT_QWEN_CPP_MODEL_DIR = DEFAULT_QWEN_CPP_RUNTIME_DIR / "models"
 DEFAULT_QWEN_CPP_THREADS = 6
 DEFAULT_TTS_BACKEND = "xtts"
+DEFAULT_MAX_CONSECUTIVE_VOICE_COMMENTS = 3
 DEFAULT_QWEN_VOICE_DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 DEFAULT_QWEN_VOICE_CLONE_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
 DEFAULT_QWEN_USE_FLASH_ATTENTION = False
@@ -38,6 +40,15 @@ DEFAULT_QWEN_VOICE_DESIGN_PROMPT = (
     "The voice should sound like a live match narrator: energetic, passionate, and intense, "
     "with natural excitement, quick rhythm, short pauses, and rising emotion during dangerous plays. "
     "He should sound confident, vivid, and engaging, like a real TV sports broadcaster, "
+    "but never cartoonish or overacted. Prioritize emotional delivery, expressive prosody, "
+    "dynamic pacing, and natural realism."
+)
+DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT = (
+    "Design a voice for a professional football commentator speaking in Spanish from Spain. "
+    "Female adult voice, warm, clear, charismatic, and emotionally expressive. "
+    "The voice should sound like a live match narrator: energetic, passionate, and intense, "
+    "with natural excitement, quick rhythm, short pauses, and rising emotion during dangerous plays. "
+    "She should sound confident, vivid, and engaging, like a real TV sports broadcaster, "
     "but never cartoonish or overacted. Prioritize emotional delivery, expressive prosody, "
     "dynamic pacing, and natural realism."
 )
@@ -284,26 +295,30 @@ def discover_default_speaker_wavs(
     if not candidates:
         return []
 
-    preferred = []
-    remaining = []
-    for path in candidates:
-        if path.name.lower() in {"mi_voz.wav", "mi-voz.wav", "mi voz.wav"}:
-            preferred.append(path)
-        else:
-            remaining.append(path)
-    return preferred + remaining
+    preferred = [
+        path
+        for path in candidates
+        if path.name.lower() in {"mi_voz.wav", "mi-voz.wav", "mi voz.wav"}
+    ]
+    if preferred:
+        return preferred[:1]
+    return candidates[:1]
 
 
 def resolve_speaker_wavs(
     speaker_wavs: Sequence[str | Path] | str | Path | None = None,
 ) -> tuple[Path, ...]:
     if speaker_wavs is None:
+        qwen_reference = qwen_voice_reference_path()
+        if qwen_reference.exists():
+            return (qwen_reference,)
+
         candidates = discover_default_speaker_wavs()
         if not candidates:
             raise ValueError(
                 "No se pudo resolver automaticamente `speaker_wav`. "
-                "Deja uno o varios `.wav` en football_ai/commentaries/ "
-                "o pasalo con `--speaker-wav`."
+                "Genera una voz con Qwen VoiceDesign, deja un `.wav` en "
+                "football_ai/commentaries/ o pasalo con `--speaker-wav`."
             )
         return tuple(candidates)
 
@@ -321,6 +336,37 @@ def resolve_speaker_wavs(
     return resolved
 
 
+def _resolve_optional_speaker_wavs(
+    speaker_wavs: Sequence[str | Path] | str | Path | None = None,
+) -> tuple[Path, ...] | None:
+    if speaker_wavs is None:
+        return None
+    return resolve_speaker_wavs(speaker_wavs)
+
+
+def qwen_voice_reference_path(
+    *,
+    design_model_name: str = DEFAULT_QWEN_VOICE_DESIGN_MODEL,
+    clone_model_name: str = DEFAULT_QWEN_VOICE_CLONE_MODEL,
+    voice_design_prompt: str = DEFAULT_QWEN_VOICE_DESIGN_PROMPT,
+    reference_text: str = DEFAULT_QWEN_REFERENCE_TEXT,
+    language: str = "es",
+    voice_cache_dir: str | Path = DEFAULT_QWEN_VOICE_CACHE_DIR,
+) -> Path:
+    digest = hashlib.sha1()
+    digest.update(str(design_model_name).strip().encode("utf-8"))
+    digest.update(str(clone_model_name).strip().encode("utf-8"))
+    digest.update(normalize_qwen_language(language).encode("utf-8"))
+    digest.update(str(voice_design_prompt).strip().encode("utf-8"))
+    digest.update(str(reference_text).strip().encode("utf-8"))
+    voice_id = f"qwen-voice-{digest.hexdigest()[:16]}"
+    return (
+        Path(voice_cache_dir).expanduser().resolve()
+        / voice_id
+        / "voice_design_reference.wav"
+    )
+
+
 @dataclass(slots=True)
 class CommentaryAudioResult:
     commentary_result: CommentaryGenerationResult
@@ -332,6 +378,7 @@ class CommentaryAudioResult:
     tts_seconds: float | None = None
     total_seconds: float | None = None
     audio_duration_seconds: float | None = None
+    voice_label: str | None = None
 
     @property
     def commentary(self) -> str:
@@ -452,10 +499,109 @@ class XTTSVoiceSynthesizer:
         return output_path
 
 
+class AlternatingVoiceSynthesizer:
+    def __init__(
+        self,
+        voices: Sequence[Any],
+        labels: Sequence[str] | None = None,
+        max_consecutive_same_voice: int = DEFAULT_MAX_CONSECUTIVE_VOICE_COMMENTS,
+    ) -> None:
+        self.voices = tuple(voices)
+        if len(self.voices) < 2:
+            raise ValueError("AlternatingVoiceSynthesizer necesita al menos dos voces.")
+        self.max_consecutive_same_voice = max(
+            1,
+            int(max_consecutive_same_voice),
+        )
+        raw_labels = list(labels or [])
+        self.labels = tuple(
+            (
+                str(raw_labels[index]).strip()
+                if index < len(raw_labels)
+                else f"voice_{index + 1}"
+            )
+            for index in range(len(self.voices))
+        )
+        self._last_index: int | None = None
+        self._same_voice_streak = 0
+        self.last_voice_label: str | None = None
+        self.last_voice_synthesizer: Any | None = None
+
+    @property
+    def model_name(self) -> str:
+        names = [
+            str(getattr(voice, "model_name", type(voice).__name__))
+            for voice in self.voices
+        ]
+        return "alternate(" + ",".join(names) + ")"
+
+    @property
+    def language(self) -> str:
+        return str(getattr(self.voices[0], "language", "es"))
+
+    @property
+    def speaker_wavs(self) -> tuple[Path, ...]:
+        resolved: list[Path] = []
+        for voice in self.voices:
+            for item in getattr(voice, "speaker_wavs", ()) or ():
+                path = Path(item).expanduser().resolve()
+                if path not in resolved:
+                    resolved.append(path)
+        return tuple(resolved)
+
+    def prepare(self, warmup_text: str | None = None) -> "AlternatingVoiceSynthesizer":
+        for voice in self.voices:
+            if hasattr(voice, "prepare"):
+                voice.prepare(warmup_text=warmup_text)
+        return self
+
+    def _next_voice_index(self) -> int:
+        if (
+            self._last_index is not None
+            and self._same_voice_streak >= self.max_consecutive_same_voice
+        ):
+            candidates = [
+                index
+                for index in range(len(self.voices))
+                if index != self._last_index
+            ]
+        else:
+            candidates = list(range(len(self.voices)))
+        index = random.choice(candidates)
+        if index == self._last_index:
+            self._same_voice_streak += 1
+        else:
+            self._last_index = index
+            self._same_voice_streak = 1
+        return index
+
+    def synthesize_to_file(
+        self,
+        text: str,
+        file_path: str | Path,
+        speaker_wavs: Sequence[str | Path] | str | Path | None = None,
+        language: str | None = None,
+        split_sentences: bool | None = None,
+    ) -> Path:
+        index = self._next_voice_index()
+        voice = self.voices[index]
+        self.last_voice_label = self.labels[index]
+        self.last_voice_synthesizer = voice
+        return voice.synthesize_to_file(
+            text,
+            file_path,
+            speaker_wavs=speaker_wavs,
+            language=language,
+            split_sentences=split_sentences,
+        )
+
+
 def build_voice_synthesizer(
     *,
     tts_backend: str = DEFAULT_TTS_BACKEND,
     speaker_wavs: Sequence[str | Path] | str | Path | None = None,
+    female_speaker_wavs: Sequence[str | Path] | str | Path | None = None,
+    alternate_voices: bool = False,
     tts_model: str = "tts_models/multilingual/multi-dataset/xtts_v2",
     tts_language: str = "es",
     use_gpu: bool | None = None,
@@ -463,7 +609,9 @@ def build_voice_synthesizer(
     qwen_design_model_name: str = DEFAULT_QWEN_VOICE_DESIGN_MODEL,
     qwen_clone_model_name: str = DEFAULT_QWEN_VOICE_CLONE_MODEL,
     qwen_voice_design_prompt: str = DEFAULT_QWEN_VOICE_DESIGN_PROMPT,
+    qwen_female_voice_design_prompt: str = DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT,
     qwen_reference_text: str = DEFAULT_QWEN_REFERENCE_TEXT,
+    generate_female_qwen_reference: bool = False,
     qwen_use_flash_attention: bool = DEFAULT_QWEN_USE_FLASH_ATTENTION,
     qwen_cpp_threads: int = DEFAULT_QWEN_CPP_THREADS,
     qwen_cpp_repo_dir: str | Path | None = None,
@@ -471,17 +619,60 @@ def build_voice_synthesizer(
 ):
     backend = str(tts_backend or DEFAULT_TTS_BACKEND).strip().lower()
     if backend == "xtts":
-        return XTTSVoiceSynthesizer(
+        primary = XTTSVoiceSynthesizer(
             model_name=tts_model,
             speaker_wavs=speaker_wavs,
             language=tts_language,
             use_gpu=use_gpu,
             split_sentences=split_sentences,
         )
+        if not alternate_voices:
+            return primary
+
+        secondary_speaker_wavs = _resolve_optional_speaker_wavs(female_speaker_wavs)
+        if secondary_speaker_wavs is None:
+            secondary_reference_path = qwen_voice_reference_path(
+                design_model_name=qwen_design_model_name,
+                clone_model_name=qwen_clone_model_name,
+                voice_design_prompt=qwen_female_voice_design_prompt,
+                reference_text=qwen_reference_text,
+                language=tts_language,
+            )
+            if secondary_reference_path.exists():
+                secondary_speaker_wavs = (secondary_reference_path,)
+            elif generate_female_qwen_reference:
+                from .experimental.qwen_voice import QwenVoiceDesignSynthesizer
+
+                qwen_voice = QwenVoiceDesignSynthesizer(
+                    design_model_name=qwen_design_model_name,
+                    clone_model_name=qwen_clone_model_name,
+                    voice_design_prompt=qwen_female_voice_design_prompt,
+                    reference_text=qwen_reference_text,
+                    language=tts_language,
+                    use_gpu=use_gpu,
+                    use_flash_attention=qwen_use_flash_attention,
+                )
+                qwen_voice.prepare()
+                secondary_speaker_wavs = (qwen_voice.reference_audio_path,)
+
+        if not secondary_speaker_wavs:
+            return primary
+
+        secondary = XTTSVoiceSynthesizer(
+            model_name=tts_model,
+            speaker_wavs=secondary_speaker_wavs,
+            language=tts_language,
+            use_gpu=use_gpu,
+            split_sentences=split_sentences,
+        )
+        return AlternatingVoiceSynthesizer(
+            (primary, secondary),
+            labels=("male", "female"),
+        )
     if backend == "qwen":
         from .experimental.qwen_voice import QwenVoiceDesignSynthesizer
 
-        return QwenVoiceDesignSynthesizer(
+        primary = QwenVoiceDesignSynthesizer(
             design_model_name=qwen_design_model_name,
             clone_model_name=qwen_clone_model_name,
             voice_design_prompt=qwen_voice_design_prompt,
@@ -490,10 +681,25 @@ def build_voice_synthesizer(
             use_gpu=use_gpu,
             use_flash_attention=qwen_use_flash_attention,
         )
+        if not alternate_voices:
+            return primary
+        secondary = QwenVoiceDesignSynthesizer(
+            design_model_name=qwen_design_model_name,
+            clone_model_name=qwen_clone_model_name,
+            voice_design_prompt=qwen_female_voice_design_prompt,
+            reference_text=qwen_reference_text,
+            language=tts_language,
+            use_gpu=use_gpu,
+            use_flash_attention=qwen_use_flash_attention,
+        )
+        return AlternatingVoiceSynthesizer(
+            (primary, secondary),
+            labels=("male", "female"),
+        )
     if backend == "qwen_cpp":
         from .experimental.qwen_voice import QwenCppSynthesizer
 
-        return QwenCppSynthesizer(
+        primary = QwenCppSynthesizer(
             language=tts_language,
             n_threads=qwen_cpp_threads,
             speaker_wavs=speaker_wavs,
@@ -504,6 +710,25 @@ def build_voice_synthesizer(
             model_dir=qwen_cpp_model_dir,
             repo_dir=qwen_cpp_repo_dir,
             use_gpu=use_gpu,
+        )
+        if not alternate_voices:
+            return primary
+        secondary_speaker_wavs = _resolve_optional_speaker_wavs(female_speaker_wavs)
+        secondary = QwenCppSynthesizer(
+            language=tts_language,
+            n_threads=qwen_cpp_threads,
+            speaker_wavs=secondary_speaker_wavs,
+            design_model_name=qwen_design_model_name,
+            clone_model_name=qwen_clone_model_name,
+            voice_design_prompt=qwen_female_voice_design_prompt,
+            reference_text=qwen_reference_text,
+            model_dir=qwen_cpp_model_dir,
+            repo_dir=qwen_cpp_repo_dir,
+            use_gpu=use_gpu,
+        )
+        return AlternatingVoiceSynthesizer(
+            (primary, secondary),
+            labels=("male", "female"),
         )
     raise ValueError(
         f"`tts_backend` no soportado: {backend}. Usa `xtts`, `qwen` o `qwen_cpp`."
@@ -583,6 +808,7 @@ class CommentaryAudioPipeline:
             commentary_result.commentary,
             output_path,
         )
+        voice_label = getattr(self.voice_synthesizer, "last_voice_label", None)
         audio_duration_seconds = probe_audio_duration_seconds(audio_path)
         tts_seconds = time.perf_counter() - tts_start
         total_seconds = time.perf_counter() - total_start
@@ -596,4 +822,5 @@ class CommentaryAudioPipeline:
             tts_seconds=tts_seconds,
             total_seconds=total_seconds,
             audio_duration_seconds=audio_duration_seconds,
+            voice_label=voice_label,
         )

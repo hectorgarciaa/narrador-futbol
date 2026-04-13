@@ -14,6 +14,7 @@ from .generator import (
 from .server import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, create_http_server
 from .voice import (
     DEFAULT_QWEN_CPP_THREADS,
+    DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT,
     DEFAULT_QWEN_REFERENCE_TEXT,
     DEFAULT_QWEN_VOICE_CLONE_MODEL,
     DEFAULT_QWEN_VOICE_DESIGN_MODEL,
@@ -68,6 +69,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ruta a un WAV de referencia para clonar la voz con XTTS. Se puede repetir.",
     )
     parser.add_argument(
+        "--female-speaker-wav",
+        action="append",
+        default=None,
+        help=(
+            "Ruta a un WAV femenino para alternar voces con XTTS. "
+            "Se puede repetir."
+        ),
+    )
+    parser.add_argument(
+        "--alternate-voices",
+        action="store_true",
+        help=(
+            "Usa una voz masculina y una femenina con aleatoriedad controlada "
+            "y maximo tres comentarios seguidos de la misma voz. Con Qwen disena "
+            "ambas; con XTTS usa --female-speaker-wav o una referencia femenina "
+            "de Qwen cacheada."
+        ),
+    )
+    parser.add_argument(
         "--audio-out",
         default=None,
         help="Ruta del WAV de salida. Si no se indica, se genera en output/commentaries/audio/.",
@@ -103,9 +123,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Prompt de diseno de voz para Qwen3-TTS VoiceDesign.",
     )
     parser.add_argument(
+        "--qwen-female-voice-design-prompt",
+        default=DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT,
+        help="Prompt de diseno de voz femenina para alternar comentaristas.",
+    )
+    parser.add_argument(
         "--qwen-reference-text",
         default=DEFAULT_QWEN_REFERENCE_TEXT,
         help="Texto que se usa para crear el clip de referencia con VoiceDesign.",
+    )
+    parser.add_argument(
+        "--generate-female-qwen-reference",
+        action="store_true",
+        help=(
+            "Si usas XTTS con --alternate-voices y no pasas --female-speaker-wav, "
+            "genera/cachea primero la referencia femenina con Qwen VoiceDesign."
+        ),
     )
     parser.add_argument(
         "--qwen-flash-attn",
@@ -138,6 +171,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--text-only",
         action="store_true",
         help="Genera solo el comentario, sin convertirlo a audio.",
+    )
+    parser.add_argument(
+        "--prepare-voice-only",
+        action="store_true",
+        help=(
+            "Prepara/cachea las voces configuradas y termina sin generar un comentario."
+        ),
     )
     parser.add_argument(
         "--no-split-sentences",
@@ -212,6 +252,8 @@ def build_runtime(
     voice_synthesizer = build_voice_synthesizer(
         tts_backend=args.tts_backend,
         speaker_wavs=args.speaker_wav,
+        female_speaker_wavs=args.female_speaker_wav,
+        alternate_voices=args.alternate_voices,
         tts_model=args.tts_model,
         tts_language=args.tts_language,
         use_gpu=False if args.cpu else None,
@@ -219,7 +261,9 @@ def build_runtime(
         qwen_design_model_name=args.qwen_design_model,
         qwen_clone_model_name=args.qwen_clone_model,
         qwen_voice_design_prompt=args.qwen_voice_design_prompt,
+        qwen_female_voice_design_prompt=args.qwen_female_voice_design_prompt,
         qwen_reference_text=args.qwen_reference_text,
+        generate_female_qwen_reference=args.generate_female_qwen_reference,
         qwen_use_flash_attention=(
             bool(args.qwen_flash_attn) and not bool(args.qwen_no_flash_attn)
         ),
@@ -238,6 +282,16 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     generator, voice_synthesizer, pipeline = build_runtime(args)
+
+    if args.prepare_voice_only:
+        if voice_synthesizer is None:
+            raise RuntimeError("--prepare-voice-only requiere un backend de voz.")
+        voice_synthesizer.prepare(warmup_text=args.qwen_reference_text)
+        print(f"TTS_MODEL={getattr(voice_synthesizer, 'model_name', 'unknown')}")
+        speaker_wavs = getattr(voice_synthesizer, "speaker_wavs", ()) or ()
+        for index, speaker_wav in enumerate(speaker_wavs, start=1):
+            print(f"SPEAKER_WAV_{index}={speaker_wav}")
+        return
 
     if args.http_server:
         if pipeline is not None:
@@ -284,6 +338,7 @@ def main() -> None:
                         "commentary": result.commentary,
                         "audio_path": str(result.audio_path),
                         "model": result.commentary_result.model,
+                        "voice_label": result.voice_label,
                         "llm_seconds": round(result.llm_seconds or 0.0, 3),
                         "tts_seconds": round(result.tts_seconds or 0.0, 3),
                         "total_seconds": round(result.total_seconds or 0.0, 3),
@@ -307,6 +362,8 @@ def main() -> None:
     result = pipeline.generate_to_file(event, audio_path=args.audio_out)
     print(result.commentary)
     print(f"AUDIO_FILE={result.audio_path}")
+    if result.voice_label:
+        print(f"VOICE_LABEL={result.voice_label}")
     if args.print_timings:
         print(f"LLM_SEC={result.llm_seconds or 0.0:.3f}")
         print(f"TTS_SEC={result.tts_seconds or 0.0:.3f}")

@@ -29,11 +29,15 @@ from .deferred_media import (
 )
 from .experimental import QwenCppSynthesizer, QwenVoiceDesignSynthesizer
 from .voice import (
+    AlternatingVoiceSynthesizer,
     CommentaryAudioPipeline,
     CommentaryAudioResult,
+    DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT,
+    DEFAULT_QWEN_VOICE_DESIGN_PROMPT,
     XTTSVoiceSynthesizer,
     build_voice_synthesizer,
     discover_default_speaker_wavs,
+    qwen_voice_reference_path,
     resolve_speaker_wavs,
 )
 
@@ -57,12 +61,16 @@ __all__ = [
     "build_commentary_track_from_manifest",
     "mux_commentary_track_into_video",
     "probe_video_duration_seconds",
+    "AlternatingVoiceSynthesizer",
     "CommentaryAudioPipeline",
     "CommentaryAudioResult",
+    "DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT",
+    "DEFAULT_QWEN_VOICE_DESIGN_PROMPT",
     "QwenCppSynthesizer",
     "QwenVoiceDesignSynthesizer",
     "XTTSVoiceSynthesizer",
     "build_voice_synthesizer",
     "discover_default_speaker_wavs",
+    "qwen_voice_reference_path",
     "resolve_speaker_wavs",
 ]

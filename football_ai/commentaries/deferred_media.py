@@ -60,6 +60,7 @@ def _event_audio_entries(manifest_path: str | Path) -> list[dict[str, Any]]:
             continue
         audio_path = item.get("audio_path")
         event = item.get("event") or {}
+        metadata = item.get("metadata") or {}
         if not audio_path:
             continue
         resolved_audio_path = Path(audio_path).expanduser().resolve()
@@ -82,21 +83,58 @@ def _event_audio_entries(manifest_path: str | Path) -> list[dict[str, Any]]:
                 "event_time_s": max(0.0, event_time_s),
                 "audio_path": resolved_audio_path,
                 "audio_duration_seconds": max(0.0, audio_duration_seconds),
+                "priority": _audio_priority_value(event, metadata),
+                "interruptible_audio": _is_interruptible_audio(event, metadata),
+                "interrupts_audio": _interrupts_audio(event, metadata),
             }
         )
     entries.sort(key=lambda item: (item["event_time_s"], str(item["audio_path"])))
     accepted_entries = []
-    next_available_time_s = 0.0
     for item in entries:
         event_time_s = float(item["event_time_s"])
-        if event_time_s + AUDIO_TIMELINE_EPSILON_S < next_available_time_s:
-            continue
+        if accepted_entries:
+            previous = accepted_entries[-1]
+            previous_end_time_s = float(previous["scheduled_time_s"]) + float(
+                previous["audio_duration_seconds"] or 0.0
+            )
+            overlaps_previous = (
+                event_time_s + AUDIO_TIMELINE_EPSILON_S < previous_end_time_s
+            )
+            can_interrupt_previous = (
+                overlaps_previous
+                and bool(previous.get("interruptible_audio"))
+                and bool(item.get("interrupts_audio"))
+                and int(item.get("priority") or 0) > int(previous.get("priority") or 0)
+            )
+            if overlaps_previous and not can_interrupt_previous:
+                continue
+            if can_interrupt_previous:
+                accepted_entries.pop()
         item["scheduled_time_s"] = event_time_s
         accepted_entries.append(item)
-        next_available_time_s = event_time_s + float(
-            item["audio_duration_seconds"] or 0.0
-        )
     return accepted_entries
+
+
+def _audio_priority_value(event: dict[str, Any], metadata: dict[str, Any]) -> int:
+    action = str((event or {}).get("action") or "").strip().casefold()
+    priority = str((metadata or {}).get("commentary_priority") or "").strip().casefold()
+    if bool((metadata or {}).get("interrupt_audio")):
+        return 3
+    if action in {"tiro", "gol"} or priority == "high":
+        return 2
+    if priority == "context" or action == "contexto":
+        return 0
+    return 1
+
+
+def _is_interruptible_audio(event: dict[str, Any], metadata: dict[str, Any]) -> bool:
+    action = str((event or {}).get("action") or "").strip().casefold()
+    return bool((metadata or {}).get("interruptible_audio")) or action == "contexto"
+
+
+def _interrupts_audio(event: dict[str, Any], metadata: dict[str, Any]) -> bool:
+    action = str((event or {}).get("action") or "").strip().casefold()
+    return bool((metadata or {}).get("interrupt_audio")) or action in {"tiro", "gol"}
 
 
 def probe_video_duration_seconds(video_path: str | Path) -> float:
