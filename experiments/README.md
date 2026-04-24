@@ -28,6 +28,8 @@ experiments/
 └── visualization/
     ├── clusters_colores.ipynb         # Calibración de colores de equipo
     ├── experiments_comparator.ipynb   # Comparador de experimentos de tracking
+    ├── team_detector_relabel_flow.ipynb # Flujo YOLO -> homografía -> TeamDetector con relabel debug
+    ├── team_detector_relabel_flow_utils.py # Helper para exportar y graficar artefactos del relabel
     └── track_evolution.ipynb          # Análisis de tracks individuales
 ```
 
@@ -227,6 +229,36 @@ Usa `ExperimentVisualizer` para:
 - Generar gráficas de barras comparando métricas (coverage, fragmentación, flip rate...) por experimento.
 - Boxplots de la distribución de métricas por track dentro de cada experimento.
 - Seleccionar la mejor combinación de hiperparámetros para `config.yaml`.
+
+---
+
+## `visualization/team_detector_relabel_flow.ipynb`
+
+**Objetivo:** entender visualmente por qué `TeamDetector` relabela ciertas detecciones (`player -> referee` o `player -> goalkeeper`) siguiendo el flujo real de producción:
+
+1. YOLO sobre `video_prueba_medio`.
+2. Homografía con `PnLCalibFieldProjector`.
+3. `TeamDetector` con el mismo estado incremental que usa el tracker.
+
+El notebook guarda artefactos en `output/analysis/team_detector_<video>/`:
+- `detections.csv`: una fila por detección con bbox, confianza, color LAB, `new_possible_class`, clase final, distancias a cada referencia y `upper_bound` por equipo.
+- `frames.jsonl`: estado por frame del bootstrap de colores, diagnóstico de homografía, referencias activas y stats dinámicas de color.
+- `summary.json`: resumen agregado.
+- `bootstrap_samples.json` y `bootstrap_samples/`: primeras muestras realmente aceptadas por la lógica actual para cerrar el bootstrap inicial de `player` y `referee` (ya filtradas por `confidence`), con crops guardados para inspección visual.
+
+Visualizaciones incluidas:
+- scatter 3D en espacio LAB de todas las camisetas detectadas, coloreando cada punto/cruz con el color real detectado de esa camiseta;
+- dos figuras de bootstrap (`player` y `referee`) con 8 muestras por fila; en cada muestra se ve el crop real y, al lado, el crop recoloreado con los means predichos por KMeans;
+- trayectoria temporal de las referencias LAB de cada clase y snapshots muestreados de las esferas `upper_bound` de los equipos de campo;
+- mapa del campo con posiciones métricas y detecciones relabeleadas;
+- timeline de relabels por frame;
+- histograma del margen `distancia - upper_bound` para ver qué detecciones quedan fuera del cluster;
+- visor frame a frame con bbox y etiqueta `yolo -> final`.
+
+Es especialmente útil para responder preguntas del tipo:
+- “¿Estas detecciones salen de `player` porque realmente están fuera del cluster de color?”
+- “¿Se van a `referee` por color o por gate posicional?”
+- “¿En qué frames el bootstrap aprende referencias demasiado estrechas?”
 
 ---
 
