@@ -1,6 +1,15 @@
 """
 Comparativa extensiva de modelos YOLO para detección de fútbol.
 
+La comparación se hace en un espacio canónico común de 3 clases:
+ - ball
+ - player
+ - ref
+
+Si un modelo separa `goalkeeper`, esa clase se pliega a `player` para poder
+compararlo contra datasets y modelos que no distinguen portero.
+Las clases no reconocidas en ese espacio común se ignoran de forma explícita.
+
 Métricas calculadas:
  - Detección: mAP50, mAP50-95, Precisión, Recall (IoU estricto, para referencia)
  - Detección suave (center-based): hits cuando el centro del GT cae dentro del bbox predicho
@@ -26,13 +35,15 @@ import cv2
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 MODELS = {
-    "best_actual": PROJECT_ROOT / "models/finetuning/best.pt",
+    "best_actual": PROJECT_ROOT / "models/finetuning/yolov11m/weights/best.pt",
     "dfl_bundesliga": PROJECT_ROOT / "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt",
 }
 
 # Dataset de evaluación original con 3 clases (ball=0, player=1, ref=2)
 DATASET_3CL = PROJECT_ROOT / "data/detection/DFL-Bundesliga,-soccer,-football-1"
 DATASET_2CL = PROJECT_ROOT / "data/detection/DFL-Bundesliga-2clases"
+
+CANONICAL_GT_CLASSES = {0: "ball", 1: "player", 2: "ref"}
 
 CONF_THRESHOLD = 0.10     # conf mínima para contar una predicción
 IOU_THRESHOLD = 0.50      # IoU para mAP estricto
@@ -79,6 +90,60 @@ def center(box):
 def box_area(box):
     x1, y1, x2, y2 = box
     return max(0, x2-x1) * max(0, y2-y1)
+
+def normalize_class_name(name):
+    """Normaliza aliases de clase al espacio canónico de evaluación."""
+    clean_name = str(name).lower().strip()
+
+    aliases = {
+        "ball": "ball",
+        "sports ball": "ball",
+        "player": "player",
+        "person": "player",
+        "goalkeeper": "player",
+        "keeper": "player",
+        "goalie": "player",
+        "ref": "ref",
+        "referee": "ref",
+        "arbitro": "ref",
+        "árbitro": "ref",
+        "arb": "ref",
+    }
+    return aliases.get(clean_name)
+
+def build_class_map(model_class_names, gt_class_names):
+    """
+    Construye un re-mapeo explícito al espacio GT.
+
+    Solo incluye clases que tengan equivalencia semántica clara; el resto
+    queda fuera de la evaluación para evitar colisiones por ID.
+    """
+    gt_name_to_id = {v: k for k, v in gt_class_names.items()}
+    class_map = {}
+    ignored = {}
+
+    for pred_id, pred_name in model_class_names.items():
+        canonical_name = normalize_class_name(pred_name)
+        if canonical_name is None or canonical_name not in gt_name_to_id:
+            ignored[pred_id] = pred_name
+            continue
+        class_map[pred_id] = gt_name_to_id[canonical_name]
+
+    return class_map, ignored
+
+def remap_predictions(pred_boxes, class_map):
+    """
+    Proyecta las predicciones al espacio canónico GT y descarta las no mapeadas.
+    """
+    remapped = []
+    ignored_count = 0
+    for pred in pred_boxes:
+        mapped_cls = class_map.get(pred["class_id"])
+        if mapped_cls is None:
+            ignored_count += 1
+            continue
+        remapped.append({**pred, "class_id": mapped_cls})
+    return remapped, ignored_count
 
 # ─── Carga de GTs desde dataset YOLO ─────────────────────────────────────────
 
@@ -145,11 +210,7 @@ def match_boxes(gt_boxes, pred_boxes, iou_thresh, class_map=None):
     Retorna: tp, fp, fn por clase_gt, y lista de ious matched.
     """
     if class_map:
-        # Re-mapeamos las predicciones al espacio de clases GT
-        pred_boxes = [
-            {**p, "class_id": class_map.get(p["class_id"], p["class_id"])}
-            for p in pred_boxes
-        ]
+        pred_boxes, _ = remap_predictions(pred_boxes, class_map)
     
     # Agrupamos por clase
     all_classes = set(g["class_id"] for g in gt_boxes) | set(p["class_id"] for p in pred_boxes)
@@ -200,10 +261,7 @@ def center_based_recall(gt_boxes, pred_boxes, class_map=None):
     Más laxo que IoU: premia al modelo que "sabe que hay algo ahí" aunque la caja no encaje.
     """
     if class_map:
-        pred_boxes = [
-            {**p, "class_id": class_map.get(p["class_id"], p["class_id"])}
-            for p in pred_boxes
-        ]
+        pred_boxes, _ = remap_predictions(pred_boxes, class_map)
     hits = {}   # gt_class_id -> {found, total}
     for gt in gt_boxes:
         cls = gt["class_id"]
@@ -325,6 +383,7 @@ def evaluate_model(model_name, model_path, dataset_dir, gt_class_names, model_cl
     all_center_hits = {}     # cls -> {found, total}
     all_preds_by_cls = {}    # cls -> [conf, ...]
     all_gts_by_cls = {}      # cls -> total count
+    ignored_predictions_total = 0
     
     preds = get_predictions(model_obj, gts)
     
@@ -337,14 +396,19 @@ def evaluate_model(model_name, model_path, dataset_dir, gt_class_names, model_cl
             all_gts_by_cls[g["class_id"]] = all_gts_by_cls.get(g["class_id"], 0) + 1
         
         # Acumular preds por clase (con re-mapeo)
-        for p in pred_boxes:
-            pred_cls = class_map.get(p["class_id"], p["class_id"]) if class_map else p["class_id"]
+        remapped_pred_boxes, ignored_count = (
+            remap_predictions(pred_boxes, class_map) if class_map else (pred_boxes, 0)
+        )
+        ignored_predictions_total += ignored_count
+
+        for p in remapped_pred_boxes:
+            pred_cls = p["class_id"]
             if pred_cls not in all_preds_by_cls:
                 all_preds_by_cls[pred_cls] = []
             all_preds_by_cls[pred_cls].append(p["confidence"])
-        
+
         # Métricas estrictas (IoU 0.5)
-        res_strict = match_boxes(gt_boxes, pred_boxes, IOU_THRESHOLD, class_map)
+        res_strict = match_boxes(gt_boxes, remapped_pred_boxes, IOU_THRESHOLD)
         for cls, vals in res_strict.items():
             if cls not in all_results_strict:
                 all_results_strict[cls] = {"tp": 0, "fp": 0, "fn": 0, "matched_ious": []}
@@ -354,7 +418,7 @@ def evaluate_model(model_name, model_path, dataset_dir, gt_class_names, model_cl
             all_results_strict[cls]["matched_ious"].extend(vals["matched_ious"])
         
         # Métricas suaves (IoU 0.1)
-        res_soft = match_boxes(gt_boxes, pred_boxes, IOU_SOFT, class_map)
+        res_soft = match_boxes(gt_boxes, remapped_pred_boxes, IOU_SOFT)
         for cls, vals in res_soft.items():
             if cls not in all_results_soft:
                 all_results_soft[cls] = {"tp": 0, "fp": 0, "fn": 0, "matched_ious": []}
@@ -363,7 +427,7 @@ def evaluate_model(model_name, model_path, dataset_dir, gt_class_names, model_cl
             all_results_soft[cls]["fn"] += vals["fn"]
         
         # Center-based
-        ch = center_based_recall(gt_boxes, pred_boxes, class_map)
+        ch = center_based_recall(gt_boxes, remapped_pred_boxes)
         for cls, vals in ch.items():
             if cls not in all_center_hits:
                 all_center_hits[cls] = {"found": 0, "total": 0}
@@ -375,6 +439,9 @@ def evaluate_model(model_name, model_path, dataset_dir, gt_class_names, model_cl
         all_results_strict, all_results_soft, all_center_hits,
         all_preds_by_cls, all_gts_by_cls, gt_class_names
     )
+    summary["_meta"] = {
+        "ignored_predictions_unmapped": ignored_predictions_total,
+    }
     
     return summary
 
@@ -405,6 +472,10 @@ def print_comparison(results_a, name_a, results_b, name_b):
     print("="*90)
     print(f"  {'Modelo A':>15}: {name_a}")
     print(f"  {'Modelo B':>15}: {name_b}")
+    meta_a = results_a.get("_meta", {})
+    meta_b = results_b.get("_meta", {})
+    print(f"  {'Preds ignoradas':>15}: {meta_a.get('ignored_predictions_unmapped', 0)}")
+    print(f"  {'Preds ignoradas':>15}: {meta_b.get('ignored_predictions_unmapped', 0)}")
     
     for cls_name in all_classes:
         print(f"\n  ── Clase: {cls_name.upper()} ──")
@@ -451,7 +522,7 @@ def print_comparison(results_a, name_a, results_b, name_b):
 
 if __name__ == "__main__":
     # Clases del dataset GT con 3 clases: 0=ball, 1=player, 2=ref
-    gt_classes = {0: "ball", 1: "player", 2: "ref"}
+    gt_classes = CANONICAL_GT_CLASSES
     
     print("\n>>> Inspeccionando clases de los modelos...")
     results_all = {}
@@ -473,21 +544,10 @@ if __name__ == "__main__":
     m_path = MODELS[m_name]
     if m_path.exists():
         m_cls = model_classes_dict[m_name]
-        # Primero construimos el mapeo: si el modelo tiene "ball", "player", "ref"
-        # coincide 1:1 con el GT. Si tiene solo 2 clases necesitamos ver.
-        # Haremos el mapeo por nombre de clase.
-        gt_name_to_id = {v: k for k, v in gt_classes.items()}
-        
-        class_map_a = {}
-        for pred_id, pred_name in m_cls.items():
-            clean_name = pred_name.lower().strip()
-            # Intentamos mapear: referee/ref/arbitro -> 2 en GT
-            if clean_name in ("ref", "referee", "arbitro", "árbitro"):
-                clean_name = "ref"
-            if clean_name in gt_name_to_id:
-                class_map_a[pred_id] = gt_name_to_id[clean_name]
-        
+        class_map_a, ignored_a = build_class_map(m_cls, gt_classes)
         print(f"Mapeo de clases para {m_name}: {class_map_a}")
+        if ignored_a:
+            print(f"Clases ignoradas para {m_name}: {ignored_a}")
         results_all[m_name] = evaluate_model(
             m_name, m_path, DATASET_3CL, gt_classes, m_cls, class_map=class_map_a
         )
@@ -497,17 +557,10 @@ if __name__ == "__main__":
     m_path = MODELS[m_name]
     if m_path.exists():
         m_cls = model_classes_dict[m_name]
-        gt_name_to_id = {v: k for k, v in gt_classes.items()}
-        
-        class_map_b = {}
-        for pred_id, pred_name in m_cls.items():
-            clean_name = pred_name.lower().strip()
-            if clean_name in ("ref", "referee", "arbitro", "árbitro"):
-                clean_name = "ref"
-            if clean_name in gt_name_to_id:
-                class_map_b[pred_id] = gt_name_to_id[clean_name]
-        
+        class_map_b, ignored_b = build_class_map(m_cls, gt_classes)
         print(f"Mapeo de clases para {m_name}: {class_map_b}")
+        if ignored_b:
+            print(f"Clases ignoradas para {m_name}: {ignored_b}")
         results_all[m_name] = evaluate_model(
             m_name, m_path, DATASET_3CL, gt_classes, m_cls, class_map=class_map_b
         )

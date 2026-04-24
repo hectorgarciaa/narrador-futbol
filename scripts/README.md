@@ -390,3 +390,25 @@ Los pesos resultantes se deben copiar manualmente como `models/finetuning/yolov1
 # Windows
 copy models\finetuning\finetuning\weights\best.pt models\finetuning\yolov11m.pt
 ```
+
+---
+
+### `comparar_modelos.py` — Comparativa justa entre checkpoints YOLO
+
+**Objetivo:** Evaluar dos checkpoints sobre el mismo dataset y con un espacio de clases común para evitar comparaciones engañosas cuando los modelos no usan exactamente la misma taxonomía.
+
+**Criterio de comparación actual:**
+- El espacio canónico de evaluación es de 3 clases: `ball`, `player`, `ref`.
+- Si un modelo predice `goalkeeper`, esa clase se remapea a `player` antes de calcular métricas.
+- Alias comunes como `referee`, `arbitro` o `sports ball` se normalizan al mismo espacio.
+- Cualquier clase que no pueda mapearse de forma inequívoca se ignora explícitamente y se reporta como predicción descartada.
+
+**Por qué es importante:**
+- Evita colisiones por `class_id` entre modelos distintos.
+- Hace comparable un modelo de 4 clases (`ball`, `goalkeeper`, `player`, `referee`) con otro de 3 clases (`ball`, `player`, `ref`).
+- Impide que una clase extra del modelo se contabilice por accidente como otra clase del ground truth.
+
+Ejecución:
+```bash
+python scripts/comparar_modelos.py
+```
