@@ -70,6 +70,7 @@ narrador-futbol/
 │   ├── detect.py           # Detección base con YOLO sin fine-tuning
 │   ├── detect_finetuned.py # Detección con modelo fine-tuned de jugadores
 │   ├── detect_ball.py      # Detección de balón con DetectR8
+│   ├── comparar_modelos.py # Comparativa de checkpoints YOLO en espacio canónico común
 │   ├── track.py            # Pipeline completo: tracking + evaluación + vídeo
 │   ├── track_experiments.py# Grid search de hiperparámetros del tracker
 │   ├── data/
