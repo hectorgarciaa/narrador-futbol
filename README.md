@@ -25,7 +25,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - Fine-tuning de YOLOv11 para las clases `player`, `goalkeeper`, `referee`, `ball`.
 - En el tracking, la entrada de YOLO se filtra al arrancar: solo se aceptan `player`, `goalkeeper`, `referee`, `ball` y alias comunes; si el modelo base devuelve `person`, esa clase se remapea automáticamente a `player`, y si devuelve `sports ball`, se remapea a `ball`.
 - Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo, doble señal de clase (YOLO + reetiquetado por color) y remapeo controlado por consenso.
-- Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker.
+- Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker solo cuando la homografía del frame supera una validación explícita basada en `geometry_fit`, `support_quality` y `coverage_quality`. El proyector puede relajar thresholds para rescatar el frame, compara todos los intentos por score y solo conserva la homografía si queda clasificada como `good`; si no, el pipeline cae a bbox y no usa `field_position_m` para decisiones de tracking/canonización.
 - Tras proyectar con `PnLCalib`, el tracking descarta cualquier detección cuya posición métrica válida quede fuera del terreno, pero mantiene una tolerancia extra de 1 metro solo sobre las bandas laterales para no perder a los linieres. Además, si una detección proyectada fuera del campo solapa con un track activo de ByteTrack, tampoco se filtra en ese frame.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
 - Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
@@ -119,11 +119,37 @@ Incluye, por frame:
 - detecciones devueltas por ByteTrack pero descartadas en el mapeo a IDs canónicos (incluye `bt#<id>` y opcionalmente un `discard_reason`).
 
 En la salida 2x2, los paneles compacto/continuidad muestran además `tr:<cls>`, `y:<cls>` y `td:<cls>` para distinguir la clase actual del track, la clase YOLO y la clase relabelada por `TeamDetector`. El panel inferior izquierdo usa ese mismo trío de etiquetas en las detecciones descartadas junto a la confianza; cuando una detección no llegó a salir de ByteTrack, aparece como `tr:-`. Si activas `visualization.discarded_panel_show_reasons`, el vídeo muestra una versión compacta del `discard_reason` para que quepa en overlay, mientras que el JSON `*_debug_frames.json` conserva el motivo completo.
+Ese JSON también puede incluir `frame_num`, `bytetrack_reason`, `bytetrack_stage` y `bytetrack_unconfirmed_association` para auditar por qué un track tentativo no llegó a confirmarse: mejor candidato, IoU, penalizaciones de clase/tamaño/campo y conflicto de asignación. En `quality_diagnostics` del proyector también quedan guardados el `homography_quality_status` (`good` o `rejected`), el `homography_quality_score`, el `rejection_type` (`no_solution`, `bad_geometry`, `low_support`, `low_score`) y el desglose de `geometry_fit`, `support_quality` y `coverage_quality`. Si `PnLCalib` no consigue construir una homografía (`no_homography`), el frame se marca siempre como `rejected` y su `quality_score` se fuerza a `0.0`.
 
 Para un resumen offline rápido puedes usar:
 
 ```bash
 python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video>_debug_frames.json
+```
+
+Para auditorías específicas de homografía frame a frame sobre vídeos concretos, existe además:
+
+```bash
+.venv/bin/python football_ai/pruebas/analyze_homography_videos.py \
+  football_ai/.data/partidoPrueba/ucl_final_2-7.mp4 \
+  football_ai/.data/partidoPrueba/clasico_5-10.mp4 \
+  --sample-fps 5
+```
+
+Ese análisis guarda, por vídeo y por rango, un `frames.jsonl` con diagnóstico completo por frame, un `frames.csv` plano y un `summary.json` agregado en `football_ai/.data/partidoPrueba/pruebas/homography_analysis/`.
+
+Para auditar visualmente casos representativos (`recovered_good`, `borderline_good`, `rejected_no_homography`, etc.) a partir de esos artefactos:
+
+```bash
+.venv/bin/python football_ai/pruebas/audit_homography_visual.py
+```
+
+Genera paneles con frame original, overlay de keypoints/líneas detectados, detecciones+ground points y bird-eye en `football_ai/.data/partidoPrueba/pruebas/homography_visual_audit/`.
+
+Para renderizar un vídeo a pantalla partida con `el_clasico`: frame original + detecciones a la izquierda y campo 2D con círculos en `field_position_m` a la derecha:
+
+```bash
+.venv/bin/python football_ai/pruebas/render_split_homography_video.py
 ```
 
 ---
@@ -180,6 +206,20 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 # Si prefieres solo CPU (sin preparación para GPU futura):
 # pip install torch torchvision
 ```
+
+### Paso 3.1: (Opcional) Aceleración GPU de TeamDetector con RAPIDS
+Si quieres acelerar el clustering LAB de camisetas (`TeamDetector`), puedes activar RAPIDS (`cuml-cu12`).
+
+```bash
+# Recomendado: evita usar /tmp si tiene poco espacio
+mkdir -p ~/tmp_pip
+TMPDIR=~/tmp_pip pip install --no-cache-dir --extra-index-url=https://pypi.nvidia.com cuml-cu12
+```
+
+Notas importantes:
+- `cuml-cu12` descarga dependencias grandes (varios GB temporales).
+- Si usas PyTorch con CUDA 12.4 (`cu124`), RAPIDS puede actualizar librerías CUDA a 12.9 y generar avisos de conflicto en pip.
+- El código mantiene fallback automático a CPU si RAPIDS no está disponible o falla su importación.
 
 ### Paso 4: Instalar dependencias del proyecto
 ```bash
@@ -407,6 +447,10 @@ python scripts/track.py
 También puedes indicar un shortcut de vídeo definido en `paths.data`:
 ```bash
 python scripts/track.py video_prueba_ajustado
+```
+Para iteraciones rápidas de tracking también puedes usar el clip corto de 200 frames de YouTube:
+```bash
+python scripts/track.py video_yt_30s_200f
 ```
 También puedes sobreescribir por terminal los colores de equipo y convertirlos a `LAB` de OpenCV automáticamente:
 ```bash
@@ -744,8 +788,10 @@ detection:
 
 team_detector:
   shirt_detector_conf:
+    init: "k-means++"
     n_init: 3
-    downsample: 0.6
+    batch_max_iter: 12
+    batch_tol: 0.001
 
 tracking:
   print_runtime_devices: true  # print de dispositivo para PnLCalib y frame_hook (cuda/cpu)

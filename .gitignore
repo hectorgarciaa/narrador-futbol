@@ -32,6 +32,7 @@ data/detection/*
 
 data/partidoPrueba/AD Ferroviaria-Canillejas CF.mp4
 data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_2-10.mp4
+data/partidoPrueba/*.mp4
 
 !data/detection/*/
 !data/detection/.gitkeep

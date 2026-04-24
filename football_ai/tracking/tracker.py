@@ -386,25 +386,6 @@ class Tracker(TrackerLogicMixin):
         subphase_rows.append(("TeamDetector.detect_teams", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
-        """
-        self.team_detector.apply_referee_relabel_gate(
-            teams_of_detected_objects,
-            yolo_class_labels,
-            field_positions,
-            self.referee_field_width_m,
-            self.referee_sideline_band_distance_m,
-        )
-        current_class_labels_after_referee_gate = np.array(
-            [dicc["class"] for dicc in teams_of_detected_objects],
-            dtype=object,
-        )
-        self.team_detector.apply_goalkeeper_relabel_gate(
-            teams_of_detected_objects,
-            current_class_labels_after_referee_gate,
-            field_positions,
-            self.referee_field_width_m,
-        )
-        """
         teams_labels = np.array(
             [dicc["team"] for dicc in teams_of_detected_objects],
             dtype=object,
@@ -464,13 +445,19 @@ class Tracker(TrackerLogicMixin):
         teams_labels,
         class_labels,
         yolo_class_labels,
+        collect_visual_debug,
     ):
-        return self.tracker.update_with_detections(
+        setattr(self.tracker, "collect_internal_matching_debug", bool(collect_visual_debug))
+        tracked = self.tracker.update_with_detections(
             detections_sv,
             teams_labels,
             class_labels,
             yolo_class_labels=yolo_class_labels,
         )
+        not_tracked_reason_by_raw_idx = dict(
+            getattr(self.tracker, "last_detection_debug_by_raw_idx", {}) or {}
+        )
+        return tracked, not_tracked_reason_by_raw_idx
 
     @staticmethod
     def _phase_initialize_empty_frame_tracks(tracks):
@@ -990,11 +977,14 @@ class Tracker(TrackerLogicMixin):
     @staticmethod
     def _phase_build_visual_debug_frame(
         collect_visual_debug,
+        frame_num,
         raw_detections,
         accepted_raw_detection_indexes,
         bytetrack_raw_detection_indexes,
         bytetrack_id_by_raw_idx,
         bytetrack_discard_reason_by_raw_idx,
+        bytetrack_not_tracked_reason_by_raw_idx,
+        bytetrack_unconfirmed_association_debug,
         visual_debug_frames,
     ):
         if not collect_visual_debug:
@@ -1023,13 +1013,23 @@ class Tracker(TrackerLogicMixin):
                     payload["discard_reason"] = str(reason_pre)
                 discarded_tracked_no_canonical.append(payload)
             else:
-                discarded_not_tracked.append(det)
+                payload = dict(det)
+                reason_info = bytetrack_not_tracked_reason_by_raw_idx.get(raw_idx, {})
+                payload["bytetrack_reason"] = reason_info.get("reason")
+                payload["bytetrack_stage"] = reason_info.get("stage")
+                payload["class_tracker"] = reason_info.get("class_name")
+                payload["bytetrack_id"] = reason_info.get("tracker_id")
+                discarded_not_tracked.append(payload)
         visual_debug_frames.append(
             {
+                "frame_num": int(frame_num),
                 "raw_detections": raw_detections,
                 "discarded_detections": discarded,
                 "discarded_yolo_not_tracked": discarded_not_tracked,
                 "discarded_bytetrack_not_canonical": discarded_tracked_no_canonical,
+                "bytetrack_unconfirmed_association": (
+                    bytetrack_unconfirmed_association_debug or []
+                ),
             }
         )
 
@@ -1167,13 +1167,18 @@ class Tracker(TrackerLogicMixin):
                 assign_phase_result.get("subphase_rows"),
             ))
 
-            tracks_detection, elapsed_ms = self._measure_phase_execution(
+            bytetrack_phase_result, elapsed_ms = self._measure_phase_execution(
                 self._phase_update_bytetrack,
                 detections_sv,
                 teams_labels,
                 class_labels,
                 yolo_class_labels,
+                collect_visual_debug,
             )
+            (
+                tracks_detection,
+                bytetrack_not_tracked_reason_by_raw_idx,
+            ) = bytetrack_phase_result
             frame_phase_rows.append(("Asociación ByteTrack", elapsed_ms))
 
             _, elapsed_ms = self._measure_phase_execution(
@@ -1270,11 +1275,14 @@ class Tracker(TrackerLogicMixin):
             _, elapsed_ms = self._measure_phase_execution(
                 self._phase_build_visual_debug_frame,
                 collect_visual_debug,
+                n_frame,
                 raw_detections,
                 accepted_raw_detection_indexes,
                 bytetrack_raw_detection_indexes,
                 bytetrack_id_by_raw_idx,
                 bytetrack_discard_reason_by_raw_idx,
+                bytetrack_not_tracked_reason_by_raw_idx,
+                getattr(self.tracker, "last_unconfirmed_association_debug", []),
                 visual_debug_frames,
             )
             frame_phase_rows.append(("Construir debug visual del frame", elapsed_ms))
@@ -1421,7 +1429,8 @@ class Tracker(TrackerLogicMixin):
         )
     
     def _get_raw_detections(self, detections, collect_visual_debug):
-        raw_detections = []        
+        raw_detections = []
+        detection_class_labels = []
         if detections.boxes is not None and len(detections.boxes) > 0:
             raw_cls = detections.boxes.cls.cpu().numpy().astype(int)
             detection_class_labels = [detections.names[class_id] for class_id in raw_cls]
@@ -1451,7 +1460,11 @@ class Tracker(TrackerLogicMixin):
                 )
                 field_positions = field_projection.field_positions_m
                 ground_points_projected = field_projection.ground_points_image_projected
-    
+                if not bool(
+                    getattr(field_projection, "field_positions_usable_for_tracking", True)
+                ):
+                    field_positions = np.full_like(field_positions, np.nan, dtype=np.float32)
+
         return field_projection, field_positions, ground_points_projected
     
     def _enrich_metadata(
@@ -1567,17 +1580,30 @@ class Tracker(TrackerLogicMixin):
         raw_to_canonical_id[raw_tracker_id] = canonical_id
         canonical_to_raw_id[canonical_id] = raw_tracker_id
         previous_state = canonical_state.get(canonical_id, {})
-        prev_samples = int(previous_state.get("movement_samples", 0))
-        prev_mean = float(previous_state.get("mean_step_distance", 0.0))
+        motion_distance_space = self._motion_distance_space(
+            output_class_name,
+            previous_field_position=previous_state.get("field_position"),
+            new_field_position=field_position,
+        )
+        previous_motion_distance_space = str(
+            previous_state.get("motion_distance_space") or ""
+        )
+        reset_motion_stats = (
+            previous_motion_distance_space not in {"", motion_distance_space}
+        )
+        prev_samples = 0 if reset_motion_stats else int(previous_state.get("movement_samples", 0))
+        prev_mean = 0.0 if reset_motion_stats else float(previous_state.get("mean_step_distance", 0.0))
         prev_last_frame = int(previous_state.get("last_frame", n_frame))
         frame_gap = max(1, n_frame - prev_last_frame)
-        prev_step_pf_count = int(
-            previous_state.get("step_per_frame_count", 0)
+        prev_step_pf_count = (
+            0 if reset_motion_stats else int(previous_state.get("step_per_frame_count", 0))
         )
-        prev_step_pf_mean = float(
-            previous_state.get("step_per_frame_mean", 0.0)
+        prev_step_pf_mean = (
+            0.0 if reset_motion_stats else float(previous_state.get("step_per_frame_mean", 0.0))
         )
-        prev_step_pf_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
+        prev_step_pf_m2 = (
+            0.0 if reset_motion_stats else float(previous_state.get("step_per_frame_m2", 0.0))
+        )
         step_distance = self._step_distance(
             previous_state.get("bbox"),
             bbox,
@@ -1617,11 +1643,19 @@ class Tracker(TrackerLogicMixin):
                 class_stats["count"],
                 class_stats["mean"],
                 class_stats["m2"],
-            ) = self._update_running_stats(
-                class_stats["count"],
-                class_stats["mean"],
-                class_stats["m2"],
-                step_per_frame,
+            ) = (
+                self._update_running_stats(
+                    class_stats["count"],
+                    class_stats["mean"],
+                    class_stats["m2"],
+                    step_per_frame,
+                )
+                if motion_distance_space == "image"
+                else (
+                    class_stats["count"],
+                    class_stats["mean"],
+                    class_stats["m2"],
+                )
             )
         else:
             step_per_frame_count = prev_step_pf_count
@@ -1662,6 +1696,7 @@ class Tracker(TrackerLogicMixin):
             "reserved_seed": False,
             "special_penalty_seed": special_penalty_seed,
             "class_candidates": list(detection_class_candidates or []),
+            "motion_distance_space": motion_distance_space,
             "referee_role_zone": referee_role_zone,
             "last_raw_tracker_id": int(raw_tracker_id),
             "canonical_assignment_mode": str(canonical_assignment_mode),

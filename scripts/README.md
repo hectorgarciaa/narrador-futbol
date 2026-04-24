@@ -2,6 +2,48 @@
 
 Scripts ejecutables de línea de comandos que activan las distintas fases del pipeline. Cada script es un punto de entrada independiente que usa `football_ai` como librería. La mayoría leen toda su configuración de `config.yaml` a través de `get_config()`.
 
+## `analyze_shirt_kmeans_convergence.py`
+
+**Objetivo:** comparar si `max_iter=12` basta para el clustering LAB de camisetas frente a valores más altos usando crops reales extraídos de detecciones YOLO.
+
+Qué hace:
+1. Carga el modelo `paths.models.<model-key>` y un vídeo `paths.data.<video-key>`.
+2. Muestrea frames, ejecuta detección y recorta la mitad superior del bbox para `player`, `goalkeeper` y `referee`.
+3. Repite el clustering con varios `max_iter` sobre los mismos píxeles.
+4. Guarda un resumen JSON y un CSV por crop con métricas de convergencia y diferencias de color respecto al baseline.
+
+Ejemplo:
+
+```bash
+.venv/bin/python scripts/analyze_shirt_kmeans_convergence.py \
+  --model-key modelo_base \
+  --video-key video_prueba_corto \
+  --frame-stride 25 \
+  --max-frames 80 \
+  --max-samples 200
+```
+
+## `analyze_shirt_kmeans_isolated_memory.py`
+
+**Objetivo:** medir la huella aislada de RAM/VRAM del batch KMeans en un subprocess limpio, sin mezclarla con la memoria ya reservada por YOLO u otros módulos del proceso principal.
+
+Ejemplos:
+
+```bash
+.venv/bin/python scripts/analyze_shirt_kmeans_isolated_memory.py \
+  --model-key modelo_base \
+  --video-key video_prueba_corto \
+  --max-iter 12
+```
+
+```bash
+.venv/bin/python scripts/analyze_shirt_kmeans_isolated_memory.py \
+  --model-key modelo_base \
+  --video-key video_prueba_corto \
+  --max-iter 12 \
+  --gpu
+```
+
 Todos los scripts se ejecutan desde la raíz del proyecto:
 
 ```bash
@@ -42,6 +84,38 @@ python scripts/<nombre>.py
 1. Carga el modelo fine-tuned de balón desde `paths.models.finetuned_ball`.
 2. Sustituye la última capa del modelo por una instancia de `DetectR8` (esto es necesario porque el modelo fue entrenado con `reg_max=8` en lugar del estándar 16).
 3. Ejecuta la detección sobre el vídeo de prueba.
+
+---
+
+### `analyze_pnlcalib_on_detections.py` — Detección + homografía frame a frame
+
+**Objetivo:** ejecutar YOLO y PnLCalib sobre un vídeo y guardar un JSON detallado con:
+- detecciones por frame,
+- `field_position_m` reproyectada,
+- homografía usada,
+- keypoints y líneas visibles,
+- top de confidencias crudas de keypoints/líneas,
+- frames donde la proyección colapsa en una vertical del campo.
+
+**CLI básica:**
+```bash
+python scripts/analyze_pnlcalib_on_detections.py
+```
+
+**Opciones útiles:**
+- `--video-key video_prueba_medio`
+- `--model-key modelo_base`
+- `--conf 0.01`
+- `--max-frames 50`
+- `--output-dir pnlcalib_analysis`
+
+**Salidas:**
+- `output/pnlcalib_analysis/<video>_pnlcalib_detections.json`
+- `output/pnlcalib_analysis/<video>_pnlcalib_detections_summary.json`
+
+**Notas:**
+- Usa los thresholds y parámetros del proyector definidos en `tracking.projector.constructor` dentro de `config.yaml`.
+- Es útil para depurar clips donde PnLCalib encuentra pocos keypoints/líneas o genera homografías degeneradas. Si el pipeline activo del tracker usa rescate adaptativo de thresholds, conviene contrastar este análisis con la salida real de `field_projection.quality_diagnostics` para ver en qué intento se aceptó o rechazó cada frame.
 
 ---
 
@@ -92,6 +166,37 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto el mismo comportamiento que
 ```bash
 python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video_sanitizado>_debug_frames.json
 ```
+
+Cuando la instrumentación de depuración está activa, `discarded_yolo_not_tracked` también puede incluir `bytetrack_reason` y `bytetrack_stage`, útiles para saber si la detección cayó por umbral de activación, supresión de nuevos candidatos por solape o falta de matching. Además, cada frame puede guardar `frame_num` y `bytetrack_unconfirmed_association`, con el diagnóstico detallado del matching de tracks tentativos (`unconfirmed`): mejor candidato, IoU, penalizaciones de clase/tamaño/campo, conflicto de asignación y outcome final. En `field_projection.quality_diagnostics` también quedan `homography_quality_status` (`good` o `rejected`), `homography_quality_score` y el desglose de `geometry_fit`, `support_quality` y `coverage_quality`; si el estado es `rejected`, el pipeline ya no usa `field_position_m` y cae a bbox.
+
+**Auditoría conjunta de homografía + ByteTrack + canónico:**
+```bash
+.venv/bin/python scripts/audit_tracking_run.py video_yt_30s --device cpu
+```
+
+Genera:
+- `output/tracks_json/tracker/audits/<video>_audit_frames.json`
+- `output/tracks_json/tracker/audits/<video>_audit_frames.csv`
+- `output/tracks_json/tracker/audits/<video>_audit_summary.json`
+
+**Cuello de botella de ByteTrack (`raw_detections` descartadas):**
+```bash
+.venv/bin/python scripts/analyze_bytetrack_bottleneck.py video_yt_30s
+```
+
+Genera:
+- `output/tracks_json/tracker/audits/<video>_bytetrack_bottleneck_summary.json`
+- `output/tracks_json/tracker/audits/<video>_bytetrack_bottleneck_frames.json`
+- `output/tracks_json/tracker/audits/<video>_bytetrack_bottleneck_high_conf_examples.json`
+
+**Matching de `unconfirmed` (por qué no llegan a confirmarse):**
+```bash
+.venv/bin/python scripts/analyze_unconfirmed_matching.py video_yt_30s_200f
+```
+
+Genera:
+- `output/tracks_json/tracker/audits/<video>_unconfirmed_matching_summary.json`
+- `output/tracks_json/tracker/audits/<video>_unconfirmed_matching_examples.json`
 
 **Nota Linux/headless:** si `visualization.show_output=true` pero no hay entorno gráfico (`DISPLAY`/`WAYLAND_DISPLAY`), la ventana en tiempo real se desactiva automáticamente y el script sigue generando el MP4 de salida.
 **Nota anti-ID-switch:** `track.py` aplica gate estadístico (`motion_std_*`) y reglas estrictas de reasignación desde `config.yaml`; con `require_field_position_for_reassign=true` no hay fallback a píxeles en reasignación y con `use_field_position_as_primary_cost=true` el matching base de `player/goalkeeper` se hace por campo.

@@ -17,6 +17,7 @@ Extraer el color representativo de la camiseta de un jugador a partir del crop d
 1. Convierte `image` (BGR) a LAB con `cv2.cvtColor`.
 2. Aplana la imagen a una lista de píxeles `(N, 3)`.
 3. Aplica **KMeans con k=2**: dos clusters, uno para la camiseta y otro para el fondo (césped, zona de piel, publicidad...).
+   Tanto en CPU como en batch/GPU se puede elegir `init` (`k-means++` o `random`) y `n_init` para repetir la inicialización y quedarse con la mejor inercia.
 4. Selecciona 7 puntos de referencia en los **bordes y esquinas** del crop (donde estadisticamente aparece más césped y menos camiseta).
 5. Predice a qué cluster pertenecen esos puntos de referencia. El cluster más votado es el **fondo**; el otro es la **camiseta**.
 6. Devuelve el centroide del cluster de camiseta en espacio LAB.
@@ -30,7 +31,7 @@ sd = ShirtDetector(n_clusters=2, init='k-means++', n_init=10, random_state=0)
 color_lab = sd.get_color_kmeans(crop_bgr)  # → np.array([L, A, B])
 ```
 
-Los parámetros `n_clusters`, `init`, `n_init` y `random_state` son configurables desde `config.yaml` bajo `color_clustering`.
+Los parámetros `n_clusters`, `init`, `n_init`, `random_state`, `batch_max_iter` y `batch_tol` son configurables desde `shirt_detector_conf`.
 
 ---
 

@@ -33,6 +33,7 @@ from .paths import (
 from .live_commentary import compose_frame_hooks, create_app_live_commentary_bridge_from_env
 from .persistence import save_debug_frames, save_result, save_summary, upsert_tracking_metrics_dataset
 
+
 COLOR_NAME_TO_RGB = {
     "white": (255, 255, 255),
     "blanco": (255, 255, 255),
@@ -197,6 +198,20 @@ def _resolve_frame_hook_device(frame_hook):
     runtime_device = getattr(role_session, "device", "cpu")
     return _resolve_runtime_device_label(runtime_device)
 
+def resolve_lineup_spec(args, config):
+    lineup_spec = getattr(args, "lineup_spec", None)
+    lineup_matcher = None
+    lineup_expected_roles_by_team = None
+    lineup_team_colors_raw = {}
+
+    if lineup_spec:
+        lineup_spec = load_lineup_spec(lineup_spec, project_root=config.project_root)
+        lineup_matcher = LineupSlotMatcher(lineup_spec)
+        lineup_expected_roles_by_team = build_expected_roles_by_team(lineup_spec)
+        lineup_team_colors_raw = build_team_colors_by_team(lineup_spec)
+    
+    return lineup_spec, lineup_matcher, lineup_expected_roles_by_team, lineup_team_colors_raw
+
 
 def run_tracking_pipeline(args):
     # Load configuration
@@ -209,21 +224,15 @@ def run_tracking_pipeline(args):
     logger.info("Starting football tracking system")
 
     try:
-        lineup_spec = None
-        lineup_matcher = None
-        lineup_expected_roles_by_team = None
-        lineup_team_colors_raw = {}
-        if getattr(args, "lineup_spec", None):
-            lineup_spec = load_lineup_spec(
-                args.lineup_spec,
-                project_root=config.project_root,
-            )
-            lineup_matcher = LineupSlotMatcher(lineup_spec)
-            lineup_expected_roles_by_team = build_expected_roles_by_team(lineup_spec)
-            lineup_team_colors_raw = build_team_colors_by_team(lineup_spec)
+        (
+            lineup_spec,
+            lineup_matcher,
+            lineup_expected_roles_by_team,
+            lineup_team_colors_raw
+        ) = resolve_lineup_spec(args, config)
 
         # Get paths and parameters from config
-        model_path = str(config.get_path("paths", "models", "modelo_base"))
+        model_path = config.get_path("paths", "models", "modelo_base")
         effective_video_shortcut = args.video_shortcut or (
             str(lineup_spec.get("video_source") or "").strip()
             if lineup_spec is not None

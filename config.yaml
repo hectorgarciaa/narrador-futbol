@@ -14,8 +14,10 @@ paths:
     yolo_v11_l: "models/yolo/v11/yolo11l.pt"
     yolo_v11_x: "models/yolo/v11/yolo11x.pt"
 
+
     # El tracking principal consume `modelo_base`.
     # Por defecto usamos el detector fine-tuned de jugadores.
+    # modelo_base: "models/yolo/v11/yolo11m.pt"
     modelo_base: "models/finetuning/yolov11m/weights/best.pt"
     # modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
@@ -29,7 +31,12 @@ paths:
     video_prueba_medio: "data/partidoPrueba/partido_medio.mp4"
 
     video_yt_30s: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_30s.mp4"
+    video_yt_30s_200f: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_30s_200f.mp4"
     video_yt_8m: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_2-10.mp4"
+
+    clasico: "data/partidoPrueba/el_clasico.mp4"
+    clasico_30s: "data/partidoPrueba/el_clasico_4-45_5-15_30s.mp4"
+    clasico_200f: "data/partidoPrueba/el_clasico_4-45_200f.mp4"
 
     video_08fd33: "data/partidoPrueba/08fd33_4.mp4"
     video_08fd33_medio: "data/partidoPrueba/08fd33_4_medio.mp4"
@@ -85,14 +92,16 @@ detection:
 team_detector:
   min_samples: {"player": 60, "referee": 15}                 # Muestras mínimas para considerar calcular cluster
   min_size_cluster: 15             # Tamaño mínimo de cluster para considerarlo válido (evita clusters muy pequeños por outliers)
-  team_colors: 
-    Real Madrid: [255, 127, 127]    # Color de referencia en lab_opencv
-    Wolfsburgo: [224, 77, 196]      # Color de referencia en lab_opencv
+  team_colors: null
+    # Real Madrid: [255, 127, 127]    # Color de referencia en lab_opencv
+    # Wolfsburgo: [224, 77, 196]      # Color de referencia en lab_opencv
   shirt_detector_conf:
     n_clusters: 2
     init: "k-means++"
-    n_init: 3
-    downsample: 0.6
+    n_init: 1
+    # downsample: 0.5
+    pixels_resize: 1536
+    use_gpu: true
     random_state: 0
 
 
@@ -121,6 +130,29 @@ tracking:
       temporal_blend: 0.20
       pixels_per_meter: 8
       device: null
+      tracking_field_positions_require_attempt0: false  # Legacy: la decisión real de uso la toma validation good/rejected.
+      adaptive_thresholds_enabled: true
+      adaptive_max_attempts: 4
+      adaptive_keypoint_threshold_step: 0.02
+      adaptive_line_threshold_step: 0.05
+      adaptive_keypoint_threshold_min: 0.28
+      adaptive_line_threshold_min: 0.55
+      adaptive_min_visible_keypoints: 7
+      adaptive_min_visible_lines: 1
+      validation_score_threshold: 0.56
+      validation_geometry_fit_min: 0.38
+      validation_support_quality_min: 0.31
+      validation_coverage_quality_min: 0.18
+      validation_reprojection_error_threshold_px: 8.0
+      validation_homography_condition_number_threshold: 100000000.0
+      validation_keypoint_world_error_threshold_m: 3.0
+      validation_line_world_error_threshold_m: 4.0
+      validation_target_visible_keypoints: 9
+      validation_target_visible_lines: 4
+      validation_target_image_point_hull_area_ratio: 0.18
+      validation_target_image_x_span_ratio: 0.55
+      validation_target_image_y_span_ratio: 0.40
+      validation_target_field_coverage_ratio: 0.20
 
   bytetracker:
     track_activation_threshold: 0.01
@@ -134,8 +166,9 @@ tracking:
     new_track_candidate_overlap_iou: 0.0
     team_mismatch_penalty: 1000.0
     second_match_threshold: 0.9
-    unconfirmed_match_threshold: 0.8
+    unconfirmed_match_threshold: 0.9
     use_field_positions: true
+    use_field_positions_for_unconfirmed: true
     field_position_classes: ["player", "goalkeeper"]
     
     field_distance_gate_m: 8.0
@@ -228,7 +261,7 @@ tracking:
   # Legacy: ByteTrack ya no limita internamente la creación por clase (se ignora este flag).
   # El límite por clase se aplica en la capa canónica/salida final.
   enforce_internal_class_limits: false
-  require_field_position_for_reassign: true  # Si true, para clases con homografía (player/goalkeeper) NO hace fallback a píxeles. Si falta field_position, la reasignación se rechaza.
+  require_field_position_for_reassign: true  # Legacy: para player/goalkeeper prioriza field_position cuando existe, pero si la homografía falta o se rechaza el canónico hace fallback a píxeles para no bloquear la continuidad.
   max_reassign_lost_frames: null  # Tope opcional de frames perdidos para reasignar un ID. null/0/desactivado => un track puede reaparecer tras muchos frames.
   max_reassign_lost_frames_by_class: {}  # Sin corte por clase (legacy). Evita capar reenganches tardíos.
   forced_absorption_enabled: true  # Habilita una reabsorción forzada conservadora para huérfanos largos de ByteTrack.

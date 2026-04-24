@@ -45,34 +45,6 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--team-mode",
-        choices=("reference", "auto-bootstrap"),
-        default=None,
-        help=(
-            "Modo de asignación por color. "
-            "'reference' usa colores configurados; "
-            "'auto-bootstrap' aprende centroides al inicio."
-        ),
-    )
-    parser.add_argument(
-        "--team-bootstrap-frames",
-        type=int,
-        default=None,
-        help="Frames iniciales usados para bootstrap en modo auto-bootstrap.",
-    )
-    parser.add_argument(
-        "--team-bootstrap-min-samples",
-        type=int,
-        default=None,
-        help="Muestras mínimas de color para cerrar bootstrap.",
-    )
-    parser.add_argument(
-        "--team-bootstrap-min-cluster-samples",
-        type=int,
-        default=None,
-        help="Muestras mínimas por cluster al cerrar bootstrap.",
-    )
-    parser.add_argument(
         "--profile-phases",
         action="store_true",
         help=(

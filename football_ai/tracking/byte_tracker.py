@@ -53,6 +53,7 @@ class ByteTrack:
         second_match_threshold: float = 0.7,
         unconfirmed_match_threshold: float = 0.8,
         use_field_positions: bool = False,
+        use_field_positions_for_unconfirmed: bool = True,
         field_position_classes: Optional[list[str]] = None,
         field_distance_gate_m: float = 8.0,
         field_distance_weight: float = 0.25,
@@ -93,6 +94,9 @@ class ByteTrack:
         self.second_match_threshold = second_match_threshold
         self.unconfirmed_match_threshold = unconfirmed_match_threshold
         self.use_field_positions = bool(use_field_positions)
+        self.use_field_positions_for_unconfirmed = bool(
+            use_field_positions_for_unconfirmed
+        )
         self.field_position_classes = frozenset(
             field_position_classes or ["player", "goalkeeper"]
         )
@@ -185,6 +189,8 @@ class ByteTrack:
         # all traces will be connected across objects.
         self.internal_id_counter = IdCounter()
         self.external_id_counter = IdCounter(start_id=1)
+        self.collect_internal_matching_debug = False
+        self.last_unconfirmed_association_debug = []
 
     def _can_activate_track(self, class_name: Optional[str]) -> bool:
         # Internal class limits are disabled: track creation is never blocked by class count.
@@ -234,7 +240,8 @@ class ByteTrack:
         candidate_indices: list[int],
         active_tracked_pool: list[STrack],
         reference_unconfirmed_pool: Optional[list[STrack]] = None,
-    ) -> list[int]:
+        return_reasons: bool = False,
+    ):
         # Rule 1: if candidate overlaps an already-active track above the configured
         # threshold, reject it.
         min_overlap_iou = 1e-6
@@ -248,6 +255,7 @@ class ByteTrack:
             float(self.new_track_candidate_overlap_iou),
         )
         valid_indices = []
+        reason_by_index = {}
         for idx in candidate_indices:
             candidate_box = self._track_tlbr(detections[idx])
             overlaps_active = False
@@ -257,6 +265,8 @@ class ByteTrack:
                     break
             if not overlaps_active:
                 valid_indices.append(idx)
+            else:
+                reason_by_index[idx] = "suppressed_by_active_overlap"
 
         # Rule 2: if candidate overlaps any previous unconfirmed track even minimally,
         # reject it.
@@ -270,6 +280,7 @@ class ByteTrack:
                 for unconfirmed_track in unconfirmed_pool
             )
             if overlaps_unconfirmed:
+                reason_by_index[idx] = "suppressed_by_unconfirmed_overlap"
                 continue
             valid_after_unconfirmed.append(idx)
 
@@ -289,9 +300,13 @@ class ByteTrack:
                 for selected_box in selected_boxes
             )
             if overlaps_selected:
+                reason_by_index[idx] = "suppressed_by_candidate_overlap"
                 continue
             selected_indices.append(idx)
             selected_boxes.append(candidate_box)
+            reason_by_index[idx] = "passed_new_track_filter"
+        if return_reasons:
+            return selected_indices, reason_by_index
         return selected_indices
 
     @staticmethod
@@ -740,6 +755,11 @@ class ByteTrack:
             field_positions = detections.data.get("field_position")
         if shirt_colors is None and detections.data is not None:
             shirt_colors = detections.data.get("shirt_color")
+        raw_det_indices = (
+            detections.data.get("raw_det_idx")
+            if detections.data is not None
+            else None
+        )
 
         class_labels = self._normalize_class_labels(class_labels)
         yolo_class_labels = self._normalize_class_labels(yolo_class_labels)
@@ -751,6 +771,7 @@ class ByteTrack:
             field_positions=field_positions,
             yolo_class_labels=yolo_class_labels,
             shirt_colors=shirt_colors,
+            raw_det_indices=raw_det_indices,
         )
 
         if len(tracks) > 0:
@@ -860,6 +881,251 @@ class ByteTrack:
         self.assigned_track_ids_by_class = {
             class_name: set() for class_name in self.max_tracks_per_class
         }
+        self.last_detection_debug_by_raw_idx = {}
+        self.last_unconfirmed_association_debug = []
+
+    def _set_detection_debug_reason(
+        self,
+        raw_det_idx,
+        reason,
+        *,
+        class_name=None,
+        confidence=None,
+        stage=None,
+        tracker_id=None,
+    ) -> None:
+        if raw_det_idx is None:
+            return
+        try:
+            raw_det_idx = int(raw_det_idx)
+        except (TypeError, ValueError):
+            return
+        payload = self.last_detection_debug_by_raw_idx.setdefault(raw_det_idx, {})
+        payload["reason"] = str(reason)
+        if class_name is not None:
+            payload["class_name"] = class_name
+        if confidence is not None:
+            try:
+                payload["confidence"] = float(confidence)
+            except (TypeError, ValueError):
+                pass
+        if stage is not None:
+            payload["stage"] = str(stage)
+        if tracker_id is not None:
+            try:
+                payload["tracker_id"] = int(tracker_id)
+            except (TypeError, ValueError):
+                pass
+
+    @staticmethod
+    def _pair_bbox_center_distance_px(
+        track: STrack,
+        det: STrack,
+    ) -> Optional[float]:
+        track_center = ByteTrack._bbox_center_from_tlbr(getattr(track, "tlbr", None))
+        det_center = ByteTrack._bbox_center_from_tlbr(getattr(det, "tlbr", None))
+        if not np.all(np.isfinite(track_center)) or not np.all(np.isfinite(det_center)):
+            return None
+        return float(np.linalg.norm(track_center - det_center))
+
+    def _pair_field_distance_metrics(
+        self,
+        track: STrack,
+        det: STrack,
+    ) -> dict:
+        track_class = getattr(track, "class_name", None)
+        det_class = getattr(det, "class_name", None)
+        uses_field = self._uses_field_positions_for_class(track_class)
+        track_position = self._field_position_to_array(getattr(track, "field_position", None))
+        det_position = self._field_position_to_array(getattr(det, "field_position", None))
+        metrics = {
+            "uses_field": bool(uses_field),
+            "track_has_field_position": track_position is not None,
+            "det_has_field_position": det_position is not None,
+            "same_class": track_class == det_class,
+            "field_distance_m": None,
+            "field_gate_m": None,
+        }
+        if not uses_field or track_class != det_class:
+            return metrics
+        metrics["field_gate_m"] = float(self._track_distance_gate(track))
+        if track_position is None or det_position is None:
+            return metrics
+        metrics["field_distance_m"] = float(np.linalg.norm(track_position - det_position))
+        return metrics
+
+    def _summarize_unconfirmed_candidate(
+        self,
+        track: STrack,
+        det: STrack,
+        *,
+        i_track: int,
+        i_det: int,
+        iou_costs: np.ndarray,
+        class_penalties: np.ndarray,
+        bbox_size_penalties: np.ndarray,
+        after_bbox_costs: np.ndarray,
+        after_field_costs: np.ndarray,
+        after_fuse_costs: np.ndarray,
+        final_costs: np.ndarray,
+    ) -> dict:
+        bbox_center_distance_px = self._pair_bbox_center_distance_px(track, det)
+        field_metrics = self._pair_field_distance_metrics(track, det)
+        base_iou_cost = float(iou_costs[i_track, i_det])
+        after_bbox_cost = float(after_bbox_costs[i_track, i_det])
+        after_field_cost = float(after_field_costs[i_track, i_det])
+        after_fuse_cost = float(after_fuse_costs[i_track, i_det])
+        final_cost = float(final_costs[i_track, i_det])
+        candidate = {
+            "raw_det_idx": getattr(det, "raw_det_idx", None),
+            "tracker_id": getattr(track, "external_track_id", None),
+            "det_score": float(getattr(det, "score", 0.0) or 0.0),
+            "det_class": getattr(det, "class_name", None),
+            "det_class_team": getattr(det, "class_name_team", None),
+            "det_class_yolo": getattr(det, "class_name_yolo", None),
+            "det_team": getattr(det, "equipo", None),
+            "track_class": getattr(track, "class_name", None),
+            "track_team": getattr(track, "equipo", None),
+            "iou": float(max(0.0, 1.0 - base_iou_cost)),
+            "iou_cost": base_iou_cost,
+            "bbox_center_distance_px": bbox_center_distance_px,
+            "bbox_center_gate_px": float(self._track_image_distance_gate(track)),
+            "bbox_center_cost_delta": float(after_bbox_cost - base_iou_cost),
+            "class_penalty": float(class_penalties[i_track, i_det]),
+            "bbox_size_penalty": float(bbox_size_penalties[i_track, i_det]),
+            "field_cost_delta": float(after_field_cost - after_bbox_cost - class_penalties[i_track, i_det] - bbox_size_penalties[i_track, i_det]),
+            "fuse_score_delta": float(after_fuse_cost - after_field_cost),
+            "lost_time_penalty": float(final_cost - after_fuse_cost),
+            "final_cost": final_cost,
+            "uses_field_positions": field_metrics["uses_field"],
+            "track_has_field_position": field_metrics["track_has_field_position"],
+            "det_has_field_position": field_metrics["det_has_field_position"],
+            "field_distance_m": field_metrics["field_distance_m"],
+            "field_gate_m": field_metrics["field_gate_m"],
+        }
+        if candidate["field_cost_delta"] >= 999.0:
+            candidate["hard_blocker"] = "field_gate"
+        elif candidate["class_penalty"] >= self.class_mismatch_relaxed_penalty:
+            candidate["hard_blocker"] = "class_penalty"
+        elif candidate["bbox_size_penalty"] >= self.bbox_size_mismatch_penalty:
+            candidate["hard_blocker"] = "bbox_size_penalty"
+        else:
+            candidate["hard_blocker"] = None
+        return candidate
+
+    def _collect_unconfirmed_association_debug(
+        self,
+        *,
+        unconfirmed: list[STrack],
+        detections: list[STrack],
+        iou_costs: np.ndarray,
+        class_penalties: np.ndarray,
+        bbox_size_penalties: np.ndarray,
+        after_bbox_costs: np.ndarray,
+        after_field_costs: np.ndarray,
+        after_fuse_costs: np.ndarray,
+        final_costs: np.ndarray,
+        matches,
+        threshold: float,
+    ) -> None:
+        if not self.collect_internal_matching_debug:
+            self.last_unconfirmed_association_debug = []
+            return
+
+        diagnostics = []
+        matched_track_to_det = {int(i_track): int(i_det) for i_track, i_det in matches}
+        matched_det_to_track = {int(i_det): int(i_track) for i_track, i_det in matches}
+
+        for i_track, track in enumerate(unconfirmed):
+            payload = {
+                "tracker_id": getattr(track, "external_track_id", None),
+                "internal_track_id": getattr(track, "internal_track_id", None),
+                "track_class": getattr(track, "class_name", None),
+                "track_team": getattr(track, "equipo", None),
+                "tracklet_len": int(getattr(track, "tracklet_len", 0) or 0),
+                "is_activated": bool(getattr(track, "is_activated", False)),
+                "track_frame_id": int(getattr(track, "frame_id", self.frame_id) or self.frame_id),
+                "threshold": float(threshold),
+                "candidate_count": int(len(detections)),
+                "selected_candidate": None,
+                "best_candidate": None,
+                "top_candidates": [],
+                "outcome": None,
+            }
+            if len(detections) <= 0:
+                payload["outcome"] = "no_candidate_detections"
+                diagnostics.append(payload)
+                continue
+
+            row = final_costs[i_track]
+            finite_indices = [
+                idx for idx, value in enumerate(row.tolist()) if np.isfinite(value)
+            ]
+            if not finite_indices:
+                payload["outcome"] = "no_finite_candidate"
+                diagnostics.append(payload)
+                continue
+
+            sorted_indices = sorted(finite_indices, key=lambda idx: float(row[idx]))
+            top_indices = sorted_indices[:3]
+            top_candidates = [
+                self._summarize_unconfirmed_candidate(
+                    track,
+                    detections[i_det],
+                    i_track=i_track,
+                    i_det=i_det,
+                    iou_costs=iou_costs,
+                    class_penalties=class_penalties,
+                    bbox_size_penalties=bbox_size_penalties,
+                    after_bbox_costs=after_bbox_costs,
+                    after_field_costs=after_field_costs,
+                    after_fuse_costs=after_fuse_costs,
+                    final_costs=final_costs,
+                )
+                for i_det in top_indices
+            ]
+            payload["top_candidates"] = top_candidates
+            payload["best_candidate"] = top_candidates[0] if top_candidates else None
+
+            matched_det_idx = matched_track_to_det.get(i_track)
+            if matched_det_idx is not None:
+                payload["outcome"] = "matched"
+                payload["selected_candidate"] = self._summarize_unconfirmed_candidate(
+                    track,
+                    detections[matched_det_idx],
+                    i_track=i_track,
+                    i_det=matched_det_idx,
+                    iou_costs=iou_costs,
+                    class_penalties=class_penalties,
+                    bbox_size_penalties=bbox_size_penalties,
+                    after_bbox_costs=after_bbox_costs,
+                    after_field_costs=after_field_costs,
+                    after_fuse_costs=after_fuse_costs,
+                    final_costs=final_costs,
+                )
+                diagnostics.append(payload)
+                continue
+
+            best_det_idx = top_indices[0]
+            best_candidate = payload["best_candidate"]
+            if float(row[best_det_idx]) > float(threshold):
+                payload["outcome"] = "best_cost_above_threshold"
+            elif best_det_idx in matched_det_to_track:
+                payload["outcome"] = "assignment_conflict"
+                payload["conflict_with_tracker_id"] = getattr(
+                    unconfirmed[matched_det_to_track[best_det_idx]],
+                    "external_track_id",
+                    None,
+                )
+            else:
+                payload["outcome"] = "unmatched_without_assignment"
+            if best_candidate is not None:
+                payload["best_candidate_hard_blocker"] = best_candidate.get(
+                    "hard_blocker"
+                )
+            diagnostics.append(payload)
+
+        self.last_unconfirmed_association_debug = diagnostics
 
     def update_with_tensors(
         self,
@@ -869,6 +1135,7 @@ class ByteTrack:
         field_positions=None,
         yolo_class_labels=None,
         shirt_colors=None,
+        raw_det_indices=None,
     ) -> list[STrack]:
         """
         Updates the tracker with the provided tensors and returns the updated tracks.
@@ -880,6 +1147,8 @@ class ByteTrack:
             List[STrack]: Updated tracks.
         """
         self.frame_id += 1
+        self.last_detection_debug_by_raw_idx = {}
+        self.last_unconfirmed_association_debug = []
         activated_starcks = []
         refind_stracks = []
         lost_stracks = []
@@ -901,6 +1170,11 @@ class ByteTrack:
         second_indices = np.where(inds_second)[0]
         normalized_class_labels = self._normalize_class_labels(class_labels)
         normalized_yolo_class_labels = self._normalize_class_labels(yolo_class_labels)
+        raw_det_indices = (
+            np.asarray(raw_det_indices, dtype=np.int32).reshape(-1)
+            if raw_det_indices is not None
+            else np.arange(len(tensors), dtype=np.int32)
+        )
 
         # Filter team_labels with the same indices as high-confidence detections
         if team_labels is not None:
@@ -948,6 +1222,11 @@ class ByteTrack:
                 if shirt_colors is not None and keep_idx < len(shirt_colors)
                 else None
             )
+            det.raw_det_idx = (
+                int(raw_det_indices[keep_idx])
+                if keep_idx < len(raw_det_indices)
+                else int(keep_idx)
+            )
             
             detections.append(det)
 
@@ -987,6 +1266,14 @@ class ByteTrack:
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
+            self._set_detection_debug_reason(
+                getattr(det, "raw_det_idx", None),
+                "matched_existing_track_high",
+                class_name=getattr(det, "class_name", None),
+                confidence=getattr(det, "score", None),
+                stage="first_association",
+                tracker_id=getattr(track, "external_track_id", None),
+            )
             self._apply_track_metadata(track, det)
 
             # --- Normal track update ---
@@ -1046,6 +1333,11 @@ class ByteTrack:
                     if shirt_colors is not None and second_idx < len(shirt_colors)
                     else None
                 )
+                det.raw_det_idx = (
+                    int(raw_det_indices[second_idx])
+                    if second_idx < len(raw_det_indices)
+                    else int(second_idx)
+                )
                 detections_second.append(det)
         else:
             detections_second = []
@@ -1076,6 +1368,14 @@ class ByteTrack:
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
+            self._set_detection_debug_reason(
+                getattr(det, "raw_det_idx", None),
+                "matched_existing_track_low",
+                class_name=getattr(det, "class_name", None),
+                confidence=getattr(det, "score", None),
+                stage="second_association",
+                tracker_id=getattr(track, "external_track_id", None),
+            )
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id)
                 self._apply_track_metadata(track, det)
@@ -1093,23 +1393,54 @@ class ByteTrack:
 
         """Deal with unconfirmed tracks, usually tracks with only one beginning frame"""
         detections = [detections[i] for i in u_detection]
-        dists = matching.iou_distance(unconfirmed, detections)
-        dists = self._apply_bbox_center_costs(dists, unconfirmed, detections)
+        iou_costs = matching.iou_distance(unconfirmed, detections)
+        after_bbox_costs = self._apply_bbox_center_costs(
+            iou_costs.copy(), unconfirmed, detections
+        )
+        class_penalties = np.zeros_like(after_bbox_costs, dtype=np.float32)
+        bbox_size_penalties = np.zeros_like(after_bbox_costs, dtype=np.float32)
         for i, track in enumerate(unconfirmed):
             for j, det in enumerate(detections):
-                dists[i, j] += self._class_mismatch_pair_penalty(track, det)
-                dists[i, j] += self._bbox_size_pair_penalty(track, det)
+                class_penalties[i, j] = self._class_mismatch_pair_penalty(track, det)
+                bbox_size_penalties[i, j] = self._bbox_size_pair_penalty(track, det)
 
-        dists = self._apply_field_position_costs(dists, unconfirmed, detections)
-        dists = matching.fuse_score(dists, detections)
-        dists = self._apply_lost_time_penalty(dists, unconfirmed)
+        after_penalty_costs = after_bbox_costs + class_penalties + bbox_size_penalties
+        if self.use_field_positions_for_unconfirmed:
+            after_field_costs = self._apply_field_position_costs(
+                after_penalty_costs.copy(), unconfirmed, detections
+            )
+        else:
+            after_field_costs = after_penalty_costs.copy()
+        after_fuse_costs = matching.fuse_score(after_field_costs.copy(), detections)
+        dists = self._apply_lost_time_penalty(after_fuse_costs.copy(), unconfirmed)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(
             dists, thresh=self.unconfirmed_match_threshold
+        )
+        self._collect_unconfirmed_association_debug(
+            unconfirmed=unconfirmed,
+            detections=detections,
+            iou_costs=iou_costs,
+            class_penalties=class_penalties,
+            bbox_size_penalties=bbox_size_penalties,
+            after_bbox_costs=after_bbox_costs,
+            after_field_costs=after_field_costs,
+            after_fuse_costs=after_fuse_costs,
+            final_costs=dists,
+            matches=matches,
+            threshold=self.unconfirmed_match_threshold,
         )
         accepted_unconfirmed_tracks = []
         for itracked, idet in matches:
             track = unconfirmed[itracked]
             det = detections[idet]
+            self._set_detection_debug_reason(
+                getattr(det, "raw_det_idx", None),
+                "matched_unconfirmed_track",
+                class_name=getattr(det, "class_name", None),
+                confidence=getattr(det, "score", None),
+                stage="unconfirmed_association",
+                tracker_id=getattr(track, "external_track_id", None),
+            )
             track.update(det, self.frame_id)
             self._apply_track_metadata(track, det)
             activated_starcks.append(track)
@@ -1148,20 +1479,58 @@ class ByteTrack:
         candidate_indices = [
             inew for inew in u_detection if detections[inew].score >= self.det_thresh
         ]
-        filtered_candidate_indices = self._filter_new_track_candidate_indices(
+        filtered_candidate_indices, filter_reasons_by_index = self._filter_new_track_candidate_indices(
             detections=detections,
             candidate_indices=candidate_indices,
             active_tracked_pool=active_tracked_pool,
             reference_unconfirmed_pool=surviving_unconfirmed_tracks,
+            return_reasons=True,
         )
+
+        for inew in u_detection:
+            det = detections[inew]
+            if inew not in candidate_indices:
+                self._set_detection_debug_reason(
+                    getattr(det, "raw_det_idx", None),
+                    "below_new_track_init_threshold",
+                    class_name=getattr(det, "class_name", None),
+                    confidence=getattr(det, "score", None),
+                    stage="new_track_init",
+                )
+        for idx, reason in filter_reasons_by_index.items():
+            det = detections[idx]
+            if idx in filtered_candidate_indices:
+                continue
+            self._set_detection_debug_reason(
+                getattr(det, "raw_det_idx", None),
+                reason,
+                class_name=getattr(det, "class_name", None),
+                confidence=getattr(det, "score", None),
+                stage="new_track_filter",
+            )
 
         for inew in filtered_candidate_indices:
             track = detections[inew]
             if not self._can_activate_track(getattr(track, "class_name", None)):
+                self._set_detection_debug_reason(
+                    getattr(track, "raw_det_idx", None),
+                    "blocked_by_class_activation_limit",
+                    class_name=getattr(track, "class_name", None),
+                    confidence=getattr(track, "score", None),
+                    stage="new_track_activation",
+                )
                 continue
             track.activate(self.kalman_filter, self.frame_id)
             self._apply_track_metadata(track, track)
             self._register_track(track)
+            self._set_detection_debug_reason(
+                getattr(track, "raw_det_idx", None),
+                "activated_new_track",
+                class_name=getattr(track, "class_name", None),
+                confidence=getattr(track, "score", None),
+                stage="new_track_activation",
+                tracker_id=getattr(track, "external_track_id", None),
+            )
             activated_starcks.append(track)
         """ Step 5: Update state"""
         for track in self.lost_tracks:

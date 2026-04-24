@@ -2,7 +2,6 @@ import math
 
 import numpy as np
 
-
 class TrackerLogicMixin:
     @staticmethod
     def _normalize_class_label(class_name):
@@ -172,6 +171,20 @@ class TrackerLogicMixin:
         if not self.require_field_position_for_reassign:
             return False
         return bool(self.use_field_positions and class_name in self.field_position_classes)
+
+    def _motion_distance_space(
+        self,
+        class_name,
+        previous_field_position=None,
+        new_field_position=None,
+    ):
+        if not self.use_field_positions or class_name not in self.field_position_classes:
+            return "image"
+        previous_field_position = self._field_position_to_tuple(previous_field_position)
+        new_field_position = self._field_position_to_tuple(new_field_position)
+        if previous_field_position is not None and new_field_position is not None:
+            return "field"
+        return "image"
 
     def _max_lost_frames_for_class(self, class_name):
         if class_name in self.max_reassign_lost_frames_by_class:
@@ -856,11 +869,16 @@ class TrackerLogicMixin:
         previous_field_position=None,
         new_field_position=None,
     ):
-        if self._must_use_field_position_for_class(class_name):
+        if (
+            self._motion_distance_space(
+                class_name,
+                previous_field_position=previous_field_position,
+                new_field_position=new_field_position,
+            )
+            == "field"
+        ):
             previous_field_position = self._field_position_to_tuple(previous_field_position)
             new_field_position = self._field_position_to_tuple(new_field_position)
-            if previous_field_position is None or new_field_position is None:
-                return None
             px, py = previous_field_position
             nx, ny = new_field_position
             return float(((nx - px) ** 2 + (ny - py) ** 2) ** 0.5)
@@ -914,14 +932,11 @@ class TrackerLogicMixin:
         effective_class = class_name or previous_state.get("class_name")
         previous_bbox = previous_state.get("bbox")
         previous_field_position = previous_state.get("field_position")
-        if self._must_use_field_position_for_class(effective_class):
-            previous_field_position_tuple = self._field_position_to_tuple(previous_field_position)
-            new_field_position_tuple = self._field_position_to_tuple(new_field_position)
-            if (
-                previous_field_position_tuple is None
-                or new_field_position_tuple is None
-            ):
-                return False
+        motion_distance_space = self._motion_distance_space(
+            effective_class,
+            previous_field_position=previous_field_position,
+            new_field_position=new_field_position,
+        )
         step_distance = self._step_distance(
             previous_bbox,
             new_bbox,
@@ -941,14 +956,14 @@ class TrackerLogicMixin:
             motion_growth_frames = min(
                 lost_frames,
                 self.reassign_motion_growth_cap_frames,
-            )
+        )
         samples = int(previous_state.get("movement_samples", 0))
         mean_step_distance = float(previous_state.get("mean_step_distance", 0.0))
         reserved_seed = bool(previous_state.get("reserved_seed", False))
-        uses_field_position = self._use_field_position_for_class(
-            effective_class,
-            previous_field_position,
-        )
+        uses_field_position = motion_distance_space == "field"
+        if not uses_field_position and str(previous_state.get("motion_distance_space") or "") != "image":
+            samples = 0
+            mean_step_distance = 0.0
 
         # Limita reasignaciones tras demasiados frames perdidos también en clases
         # con field_position (player/goalkeeper), para evitar "resurrecciones" tardías.
@@ -988,6 +1003,8 @@ class TrackerLogicMixin:
             limits_per_frame = []
 
             track_stats_count = int(previous_state.get("step_per_frame_count", 0))
+            if str(previous_state.get("motion_distance_space") or "") != "image":
+                track_stats_count = 0
             if track_stats_count >= self.motion_std_min_samples:
                 track_stats_mean = float(
                     previous_state.get("step_per_frame_mean", 0.0)
@@ -1001,16 +1018,17 @@ class TrackerLogicMixin:
                     )
                 )
 
-            class_stats = self.class_motion_stats.get(effective_class, {})
-            class_stats_count = int(class_stats.get("count", 0))
-            if class_stats_count >= self.motion_std_min_samples:
-                limits_per_frame.append(
-                    self._motion_limit_per_frame(
-                        class_stats_count,
-                        float(class_stats.get("mean", 0.0)),
-                        float(class_stats.get("m2", 0.0)),
+            if effective_class not in self.field_position_classes:
+                class_stats = self.class_motion_stats.get(effective_class, {})
+                class_stats_count = int(class_stats.get("count", 0))
+                if class_stats_count >= self.motion_std_min_samples:
+                    limits_per_frame.append(
+                        self._motion_limit_per_frame(
+                            class_stats_count,
+                            float(class_stats.get("mean", 0.0)),
+                            float(class_stats.get("m2", 0.0)),
+                        )
                     )
-                )
 
             if limits_per_frame:
                 max_per_frame = min(limits_per_frame)
@@ -1183,11 +1201,16 @@ class TrackerLogicMixin:
         field_position_a=None,
         field_position_b=None,
     ):
-        if self._must_use_field_position_for_class(class_name):
+        if (
+            self._motion_distance_space(
+                class_name,
+                previous_field_position=field_position_a,
+                new_field_position=field_position_b,
+            )
+            == "field"
+        ):
             field_position_a = self._field_position_to_tuple(field_position_a)
             field_position_b = self._field_position_to_tuple(field_position_b)
-            if field_position_a is None or field_position_b is None:
-                return None
             ax, ay = field_position_a
             bx, by = field_position_b
             return (ax - bx) ** 2 + (ay - by) ** 2
