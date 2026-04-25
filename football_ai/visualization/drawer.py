@@ -80,24 +80,6 @@ class Drawer:
         return (int(np.clip(b, 0, 255)), int(np.clip(g, 0, 255)), int(np.clip(r, 0, 255)))
 
     @staticmethod
-    def _normalize_track_class_name(class_name):
-        token = str(class_name or "").strip().lower()
-        aliases = {
-            "player": "player",
-            "players": "player",
-            "goalkeeper": "goalkeeper",
-            "goalkeepers": "goalkeeper",
-            "gk": "goalkeeper",
-            "referee": "referee",
-            "referees": "referee",
-            "ref": "referee",
-            "refs": "referee",
-            "ball": "ball",
-            "balls": "ball",
-        }
-        return aliases.get(token, token)
-
-    @staticmethod
     def _coerce_int(value, default=0):
         try:
             return int(value)
@@ -147,20 +129,19 @@ class Drawer:
     def _resolve_debug_detection_class_name(self, det):
         for key in ("class_name", "class_tracker", "class_relabel", "class_team_detector", "class_yolo", "class"):
             value = det.get(key)
-            normalized = self._normalize_track_class_name(value)
-            if normalized:
-                return normalized
+            if value:
+                return value
         return ""
 
     def _resolve_detection_source_classes(self, data):
-        class_tracker = self._normalize_track_class_name(
+        class_tracker = (
             data.get("class_tracker")
             or data.get("class_name")
         )
-        class_yolo = self._normalize_track_class_name(
+        class_yolo = (
             data.get("class_yolo")
         )
-        class_team_detector = self._normalize_track_class_name(
+        class_team_detector = (
             data.get("class_relabel")
             or data.get("class_team_detector")
             or data.get("class")
@@ -498,19 +479,8 @@ class Drawer:
     def _extract_frame_tracks(self, tracks, frame_id):
         frame_tracks = {class_name: {} for class_name in self.tracked_draw_classes}
 
-        # Lee clases canónicas y también aliases legacy (ej. "ref" o "referees").
-        normalized_tracks = {}
-        for raw_class_name, class_tracks in tracks.items():
-            canonical_class_name = self._normalize_track_class_name(raw_class_name)
-            if canonical_class_name not in self.tracked_draw_classes:
-                continue
-            existing = normalized_tracks.get(canonical_class_name)
-            if isinstance(class_tracks, list):
-                if existing is None or len(class_tracks) > len(existing):
-                    normalized_tracks[canonical_class_name] = class_tracks
-
         for class_name in self.tracked_draw_classes:
-            class_tracks = normalized_tracks.get(class_name, [])
+            class_tracks = tracks.get(class_name, [])
             if frame_id < len(class_tracks):
                 frame_tracks[class_name] = class_tracks[frame_id]
         return frame_tracks
