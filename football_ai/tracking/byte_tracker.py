@@ -319,30 +319,6 @@ class ByteTrack:
         return field_position[:2]
 
     @staticmethod
-    def _normalize_class_label(class_name) -> Optional[str]:
-        token = str(class_name or "").strip().lower()
-        if not token:
-            return None
-        aliases = {
-            "player": "player",
-            "players": "player",
-            "goalkeeper": "goalkeeper",
-            "gk": "goalkeeper",
-            "keeper": "goalkeeper",
-            "referee": "referee",
-            "ref": "referee",
-            "refs": "referee",
-            "ball": "ball",
-            "balls": "ball",
-        }
-        return aliases.get(token, token)
-
-    def _normalize_class_labels(self, labels):
-        if labels is None:
-            return None
-        return [self._normalize_class_label(label) for label in labels]
-
-    @staticmethod
     def _shirt_color_to_array(shirt_color) -> Optional[np.ndarray]:
         if shirt_color is None:
             return None
@@ -761,9 +737,6 @@ class ByteTrack:
             else None
         )
 
-        class_labels = self._normalize_class_labels(class_labels)
-        yolo_class_labels = self._normalize_class_labels(yolo_class_labels)
-
         tracks = self.update_with_tensors(
             tensors=tensors,
             team_labels=team_labels,
@@ -1168,8 +1141,8 @@ class ByteTrack:
         scores_second = scores[inds_second]
         keep_indices = np.where(remain_inds)[0]
         second_indices = np.where(inds_second)[0]
-        normalized_class_labels = self._normalize_class_labels(class_labels)
-        normalized_yolo_class_labels = self._normalize_class_labels(yolo_class_labels)
+        normalized_class_labels = class_labels
+        normalized_yolo_class_labels = yolo_class_labels
         raw_det_indices = (
             np.asarray(raw_det_indices, dtype=np.int32).reshape(-1)
             if raw_det_indices is not None

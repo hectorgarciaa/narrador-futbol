@@ -4,25 +4,6 @@ import numpy as np
 
 class TrackerLogicMixin:
     @staticmethod
-    def _normalize_class_label(class_name):
-        token = str(class_name or "").strip().lower()
-        if not token:
-            return None
-        aliases = {
-            "player": "player",
-            "players": "player",
-            "goalkeeper": "goalkeeper",
-            "gk": "goalkeeper",
-            "keeper": "goalkeeper",
-            "referee": "referee",
-            "ref": "referee",
-            "refs": "referee",
-            "ball": "ball",
-            "balls": "ball",
-        }
-        return aliases.get(token, token)
-
-    @staticmethod
     def _bbox_to_list(bbox):
         if bbox is None:
             return None
@@ -68,10 +49,9 @@ class TrackerLogicMixin:
     def _ordered_detection_class_candidates(self, detection_class, detection_class_candidates):
         ordered = []
         for candidate_class in [detection_class, *(detection_class_candidates or [])]:
-            normalized = self._normalize_class_label(candidate_class)
-            if normalized is None or normalized in ordered:
+            if candidate_class is None or candidate_class in ordered:
                 continue
-            ordered.append(normalized)
+            ordered.append(candidate_class)
         return ordered
 
     def _select_detection_class_for_candidate(
@@ -80,13 +60,13 @@ class TrackerLogicMixin:
         detection_class,
         detection_class_candidates=None,
     ):
-        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        candidate_class = candidate_state.get("class_name")
         ordered_candidates = self._ordered_detection_class_candidates(
             detection_class,
             detection_class_candidates,
         )
         if not ordered_candidates:
-            return self._normalize_class_label(detection_class)
+            return detection_class
 
         if (
             candidate_state.get("special_penalty_seed")
@@ -356,8 +336,7 @@ class TrackerLogicMixin:
     ):
         reserved_referee_ids = set(getattr(self, "referee_canonical_ids", ()))
         reserved_goalkeeper_ids = set(getattr(self, "special_seed_canonical_ids", (1, 2)))
-        normalized_class_name = self._normalize_class_label(class_name)
-        if normalized_class_name == "referee":
+        if class_name == "referee":
             detection_zone = self._referee_zone_from_field_position(field_position)
             required_id = self._required_referee_canonical_id_for_zone(detection_zone)
             if required_id is None:
@@ -365,7 +344,7 @@ class TrackerLogicMixin:
             if not self._is_referee_canonical_slot_compatible(required_id, field_position):
                 return None
             candidate_range = [required_id]
-        elif normalized_class_name == "goalkeeper":
+        elif class_name == "goalkeeper":
             candidate_range = [
                 canonical_id for canonical_id in self.special_seed_canonical_ids
             ]
@@ -387,9 +366,7 @@ class TrackerLogicMixin:
     ):
         if not bool(getattr(self, "forced_absorption_enabled", False)):
             return False
-        detection_class = self._normalize_class_label(
-            pending_detection.get("preferred_class_name")
-        )
+        detection_class = pending_detection.get("preferred_class_name")
         if detection_class != "player":
             return False
         detected_team = pending_detection.get("detected_team")
@@ -1055,7 +1032,7 @@ class TrackerLogicMixin:
         detection_class_candidates=None,
         detection_shirt_color=None,
     ):
-        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        candidate_class = candidate_state.get("class_name")
         if candidate_class is None:
             return None
         detection_class = self._select_detection_class_for_candidate(
@@ -1154,7 +1131,7 @@ class TrackerLogicMixin:
         if resolved_class is not None:
             return resolved_class, None
 
-        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        candidate_class = candidate_state.get("class_name")
         if candidate_class is None:
             return None, "candidate_class_missing"
         detection_class = self._select_detection_class_for_candidate(
@@ -1579,7 +1556,7 @@ class TrackerLogicMixin:
         detection_class_candidates=None,
         detection_shirt_color=None,
     ):
-        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        candidate_class = candidate_state.get("class_name")
         if candidate_class is None:
             return None
         detection_class = self._select_detection_class_for_candidate(
@@ -1668,7 +1645,7 @@ class TrackerLogicMixin:
             - resolved_class_name: same value that `_resolve_candidate_class_for_detection` would return.
             - reason: None when resolved_class_name is not None, otherwise a short reason code.
         """
-        candidate_class = self._normalize_class_label(candidate_state.get("class_name"))
+        candidate_class = candidate_state.get("class_name")
         if candidate_class is None:
             return None, "candidate_class_missing"
         detection_class = self._select_detection_class_for_candidate(
