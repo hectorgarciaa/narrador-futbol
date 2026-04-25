@@ -54,36 +54,25 @@ python scripts/<nombre>.py
 
 ## Scripts de detección
 
-### `detect.py` — Detección base con YOLO
+### `detect.py` — Detección simple por CLI
 
-**Objetivo:** Prueba rápida de detección usando un modelo YOLO sin fine-tuning, para verificar que el modelo base funciona correctamente sobre el vídeo.
+**Objetivo:** ejecutar detección YOLO sobre un vídeo indicando por CLI tanto el vídeo como el modelo, usando atajos de `config.yaml` o rutas relativas a la raíz del proyecto.
 
-**Flujo:**
-1. Lee `paths.models.yolo_v11_m` y `paths.data.video_08fd33` de `config.yaml`.
-2. Instancia YOLO directamente (sin `Detector`) y llama a `model()` con `save=True`.
-3. Guarda el video anotado en `output/yoloDetectionTest/` (dentro del directorio base de output configurado).
+**CLI:**
+```bash
+.venv/bin/python scripts/detect.py video_prueba yolo_v11_m
+```
 
----
-
-### `detect_finetuned.py` — Detección con modelo fine-tuned
-
-**Objetivo:** Verificar el modelo fine-tuned de jugadores sobre un clip del partido.
+```bash
+.venv/bin/python scripts/detect.py data/partidoPrueba/partido.mp4 models/yolo/v11/yolo11m.pt
+```
 
 **Flujo:**
-1. Carga el modelo desde `paths.models.finetuned_player` en `config.yaml`.
-2. Ejecuta la detección sobre el vídeo configurado.
-3. Guarda el video anotado en el directorio de salida configurado.
-
----
-
-### `detect_ball.py` — Detección de balón con `DetectR8`
-
-**Objetivo:** Probar el modelo fine-tuned de balón con la cabeza de detección personalizada `DetectR8`.
-
-**Flujo:**
-1. Carga el modelo fine-tuned de balón desde `paths.models.finetuned_ball`.
-2. Sustituye la última capa del modelo por una instancia de `DetectR8` (esto es necesario porque el modelo fue entrenado con `reg_max=8` en lugar del estándar 16).
-3. Ejecuta la detección sobre el vídeo de prueba.
+1. Resuelve los dos argumentos como `paths.data.<atajo>` / `paths.models.<atajo>` o como rutas desde raíz.
+2. Ejecuta YOLO frame a frame.
+3. Normaliza las clases a `player`, `referee`, `ball` y `goalkeeper`.
+4. Dibuja `bbox`, confianza y la inicial de clase (`ball` solo muestra caja).
+5. Guarda MP4 y JSON en `output/detect/<modelo>/<timestamp>/`.
 
 ---
 

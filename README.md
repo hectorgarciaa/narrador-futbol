@@ -67,9 +67,7 @@ narrador-futbol/
 │   └── visualization/      # Drawer: genera vídeo anotado
 │
 ├── scripts/                # Scripts ejecutables de línea de comandos
-│   ├── detect.py           # Detección base con YOLO sin fine-tuning
-│   ├── detect_finetuned.py # Detección con modelo fine-tuned de jugadores
-│   ├── detect_ball.py      # Detección de balón con DetectR8
+│   ├── detect.py           # Detección YOLO simple por CLI
 │   ├── comparar_modelos.py # Comparativa de checkpoints YOLO en espacio canónico común
 │   ├── track.py            # Pipeline completo: tracking + evaluación + vídeo
 │   ├── track_experiments.py# Grid search de hiperparámetros del tracker
@@ -463,6 +461,36 @@ python scripts/track.py video_prueba_ajustado --profile-phases
 ```
 Esto imprime tiempos por fase y el total de cada frame.
 Alternativamente, puedes fijarlo en `config.yaml` con `tracking.profile_phases: true`.
+Para benchmarks o ejecuciones aisladas, `scripts/track.py` también acepta overrides útiles:
+```bash
+python scripts/track.py video_prueba \
+  --model-path models/finetuning/yolov11m/weights/best.pt \
+  --output-root output/analysis/run_video_prueba_best \
+  --experiment-label video_prueba__best \
+  --force-four-panel-debug \
+  --skip-render-video \
+  --skip-metrics-dataset
+```
+- `--model-path`: usa un checkpoint distinto sin tocar `config.yaml`.
+- `--output-root`: guarda `tracks.json`, `summary.json`, `debug_frames.json` y logs en un directorio dedicado.
+- `--force-four-panel-debug`: fuerza el guardado de decisiones frame a frame (`debug_frames.json`).
+- `--skip-render-video`: evita renderizar el MP4 anotado final.
+- `--skip-metrics-dataset`: no modifica `data/posiciones_etiquetadas/common/tracking_metrics.csv`.
+
+Para lanzar el benchmark 4x3 pedido sobre `video_prueba`, `clasico_30s`, `ferro_30s` y `ucl_30s` con los tres modelos base/fine-tuned:
+```bash
+python scripts/run_tracking_model_benchmark.py
+```
+Ese runner ejecuta las 12 combinaciones llamando internamente a `scripts/track.py` y deja un árbol como este:
+- `output/analysis/tracking_model_benchmark/<timestamp>/benchmark_manifest.json`
+- `.../comparison_summary.csv`
+- `.../comparison_summary.json`
+- `.../runs/<video>__<modelo>/tracks.json`
+- `.../runs/<video>__<modelo>/summary.json`
+- `.../runs/<video>__<modelo>/debug_frames.json`
+- `.../runs/<video>__<modelo>/stdout.log`
+- `.../runs/<video>__<modelo>/stderr.log`
+
 `--team-colors` acepta:
 - lenguaje natural de color (ej. `rojo`, `verde clarito`, `azul marino`, `rojo oscuro`)
 - HEX (ej. `#90EE90`)
@@ -555,10 +583,18 @@ Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline
 En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida. También puedes activar `visualization.four_panel_enabled=true` para generar una salida 2x2 de depuración (tracking compacto, mapa de campo, YOLO descartadas y continuidad), incluyendo el indicador de posesión en los paneles.
 Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `models/reference_points/pnlcalib_repo/` y descarga sus pesos automáticamente. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
 
-### Detección básica (sin fine-tuning)
+### Detección básica
 ```bash
-python scripts/detect.py
+.venv/bin/python scripts/detect.py video_prueba yolo_v11_m
 ```
+
+También acepta rutas desde la raíz del proyecto:
+
+```bash
+.venv/bin/python scripts/detect.py data/partidoPrueba/partido.mp4 models/yolo/v11/yolo11m.pt
+```
+
+El script normaliza clases a `player`, `referee`, `ball` y `goalkeeper`, dibuja `bbox + confidence + clase` y guarda el MP4 anotado junto al JSON en `output/detect/<modelo>/<timestamp>/`.
 
 ## 🧪 Experimentos de geometría del campo
 
@@ -709,16 +745,6 @@ Artefactos generados:
 - `output/predictions/possession/partido_ajustado_<timestamp>/frame_possession.csv`
 - `output/predictions/possession/partido_ajustado_<timestamp>/summary.json`
 - `output/predictions/possession/partido_ajustado_<timestamp>/partido_ajustado_possession_annotated.mp4`
-
-### Detección con modelo fine-tuned de jugadores
-```bash
-python scripts/detect_finetuned.py
-```
-
-### Detección de balón (con DetectR8)
-```bash
-python scripts/detect_ball.py
-```
 
 ### Fine-tuning del modelo
 ```bash
