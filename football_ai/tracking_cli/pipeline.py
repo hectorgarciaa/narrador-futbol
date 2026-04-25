@@ -232,17 +232,33 @@ def run_tracking_pipeline(args):
         ) = resolve_lineup_spec(args, config)
 
         # Get paths and parameters from config
-        model_path = config.get_path("paths", "models", "modelo_base")
+        model_path = (
+            str(Path(args.model_path).expanduser().resolve())
+            if getattr(args, "model_path", None)
+            else config.get_path("paths", "models", "modelo_base")
+        )
         effective_video_shortcut = args.video_shortcut or (
             str(lineup_spec.get("video_source") or "").strip()
             if lineup_spec is not None
             else None
         )
         video_path, video_source = resolve_video_path(config, effective_video_shortcut)
-        
-        output = build_output_video_path(config, video_path)
-        output_path_named, output_path_legacy = build_tracks_output_paths(config, video_path)
-        summary_path, metrics_dataset_path = build_tracking_metrics_output_paths(config, video_path)
+
+        output_root_arg = getattr(args, "output_root", None)
+        if output_root_arg:
+            output_root = Path(output_root_arg).expanduser()
+            if not output_root.is_absolute():
+                output_root = (config.project_root / output_root).resolve()
+            output_root.mkdir(parents=True, exist_ok=True)
+            output = str(output_root / "tracking.mp4")
+            output_path_named = str(output_root / "tracks.json")
+            output_path_legacy = str(output_root / "tracks_legacy.json")
+            summary_path = str(output_root / "summary.json")
+            metrics_dataset_path = str(output_root / "tracking_metrics.csv")
+        else:
+            output = build_output_video_path(config, video_path)
+            output_path_named, output_path_legacy = build_tracks_output_paths(config, video_path)
+            summary_path, metrics_dataset_path = build_tracking_metrics_output_paths(config, video_path)
         
         role_artifacts_dir = build_role_artifacts_output_dir(config, video_path)
         role_frame_csv_path, role_player_csv_path, role_greedy_csv_path = build_role_predictions_output_paths(config, video_path, use_artifacts_dir=True)
@@ -253,6 +269,8 @@ def run_tracking_pipeline(args):
         show_kmeans = config.get("visualization", "show_kmeans")
         show_output = config.get("visualization", "show_output")
         four_panel_enabled = bool(visualization_conf.get("four_panel_enabled", False))
+        if bool(getattr(args, "force_four_panel_debug", False)):
+            four_panel_enabled = True
 
         # Tracking configuration
         detector_conf = config.detection
@@ -295,7 +313,11 @@ def run_tracking_pipeline(args):
 
         logger.info(f"Model: {model_path}")
         logger.info(f"Video: {video_path}")
+        experiment_label = str(
+            getattr(args, "experiment_label", None) or video_source
+        )
         logger.info(f"Video source: {video_source}")
+        logger.info(f"Experiment label: {experiment_label}")
         logger.info(f"Named tracks JSON output: {output_path_named}")
         logger.info(f"Legacy tracks JSON output: {output_path_legacy}")
         logger.info(f"Summary JSON output: {summary_path}")
@@ -368,16 +390,19 @@ def run_tracking_pipeline(args):
         colors = config.get_visualization_colors()
         drawer = Drawer(colors=colors, visualization_conf=visualization_conf)
         logger.info("Drawing tracks on video...")
-        drawer.draw_tracks(
-            tracks,
-            video_path,
-            output,
-            show=show_output,
-            four_panel=four_panel_enabled,
-            debug_frames=(tracker.visualization_debug_frames if four_panel_enabled else None),
-            expected_counts=tracker.max_tracks_per_class,
-        )
-        logger.info(f"Video with tracks saved to: {output}")
+        if not bool(getattr(args, "skip_render_video", False)):
+            drawer.draw_tracks(
+                tracks,
+                video_path,
+                output,
+                show=show_output,
+                four_panel=four_panel_enabled,
+                debug_frames=(tracker.visualization_debug_frames if four_panel_enabled else None),
+                expected_counts=tracker.max_tracks_per_class,
+            )
+            logger.info(f"Video with tracks saved to: {output}")
+        else:
+            logger.info("Skipping annotated video rendering for this execution.")
 
         # Evaluation
         logger.info("Evaluating tracks...")
@@ -424,7 +449,16 @@ def run_tracking_pipeline(args):
                 legacy_output_dir=Path(role_frame_csv_path_legacy).parent,
             )
         save_summary(summary, summary_path, logger)
-        upsert_tracking_metrics_dataset(metrics_dataset_path, video_path, video_source, output_path_named, summary_path, summary, logger)
+        if not bool(getattr(args, "skip_metrics_dataset", False)):
+            upsert_tracking_metrics_dataset(
+                metrics_dataset_path,
+                video_path,
+                experiment_label,
+                output_path_named,
+                summary_path,
+                summary,
+                logger,
+            )
 
         # Show summary
         logger.info("Evaluation summary:")

@@ -18,8 +18,8 @@ paths:
     # El tracking principal consume `modelo_base`.
     # Por defecto usamos el detector fine-tuned de jugadores.
     # modelo_base: "models/yolo/v11/yolo11m.pt"
-    modelo_base: "models/finetuning/yolov11m/weights/best.pt"
-    # modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
+    # modelo_base: "models/finetuning/yolov11m/weights/best.pt"
+    modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_ball: "models/finetuning-balon/v11/yolo11m/weights/best.pt"
   
@@ -30,16 +30,14 @@ paths:
     video_prueba_corto: "data/partidoPrueba/partido_corto.mp4"
     video_prueba_medio: "data/partidoPrueba/partido_medio.mp4"
 
-    video_yt_30s: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_30s.mp4"
-    video_yt_30s_200f: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_30s_200f.mp4"
-    video_yt_8m: "data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_2-10.mp4"
+    clasico: "data/partidoPrueba/clasico.mp4"
+    clasico_30s: "data/partidoPrueba/clasico_4-5.mp4"
 
-    clasico: "data/partidoPrueba/el_clasico.mp4"
-    clasico_30s: "data/partidoPrueba/el_clasico_4-45_5-15_30s.mp4"
-    clasico_200f: "data/partidoPrueba/el_clasico_4-45_200f.mp4"
+    ferro: "data/partidoPrueba/ferro.mp4"
+    ferro_30s: "data/partidoPrueba/ferro_2-3.mp4"
 
-    video_08fd33: "data/partidoPrueba/08fd33_4.mp4"
-    video_08fd33_medio: "data/partidoPrueba/08fd33_4_medio.mp4"
+    ucl: "data/partidoPrueba/ucl_final.mp4"
+    ucl_30s: "data/partidoPrueba/ucl_final_5-5.mp4"
 
     # Clips para dataset de posiciones (data/partidosPosiciones)
     video_test_1: "data/partidosPosiciones/test (1).mp4"
