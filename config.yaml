@@ -18,8 +18,8 @@ paths:
     # El tracking principal consume `modelo_base`.
     # Por defecto usamos el detector fine-tuned de jugadores.
     # modelo_base: "models/yolo/v11/yolo11m.pt"
-    # modelo_base: "models/finetuning/yolov11m/weights/best.pt"
-    modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
+    modelo_base: "models/finetuning/yolov11m/weights/best.pt"
+    # modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_ball: "models/finetuning-balon/v11/yolo11m/weights/best.pt"
   

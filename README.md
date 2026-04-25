@@ -68,6 +68,7 @@ narrador-futbol/
 │
 ├── scripts/                # Scripts ejecutables de línea de comandos
 │   ├── detect.py           # Detección YOLO simple por CLI
+│   ├── homography.py       # Detección + PnLCalib + JSON/vídeo a pantalla partida
 │   ├── comparar_modelos.py # Comparativa de checkpoints YOLO en espacio canónico común
 │   ├── track.py            # Pipeline completo: tracking + evaluación + vídeo
 │   ├── track_experiments.py# Grid search de hiperparámetros del tracker
@@ -593,6 +594,22 @@ También acepta rutas desde la raíz del proyecto:
 ```bash
 .venv/bin/python scripts/detect.py data/partidoPrueba/partido.mp4 models/yolo/v11/yolo11m.pt
 ```
+
+Para generar detecciones más homografía PnLCalib en una sola pasada:
+
+```bash
+.venv/bin/python scripts/homography.py video_prueba_medio modelo_base
+```
+
+También acepta rutas desde la raíz del repo:
+
+```bash
+.venv/bin/python scripts/homography.py data/partidoPrueba/partido_medio.mp4 models/finetuning/yolov11m/weights/best.pt
+```
+
+La salida se guarda en `output/homography/<modelo>/<timestamp>/` con:
+- `homography.json`: detecciones por frame + metadatos completos de homografía (`quality_diagnostics`, intentos, keypoints, líneas, score, rechazo, etc.)
+- `homography.mp4`: vídeo a pantalla partida con detecciones a la izquierda y campo 2D a la derecha
 
 El script normaliza clases a `player`, `referee`, `ball` y `goalkeeper`, dibuja `bbox + confidence + clase` y guarda el MP4 anotado junto al JSON en `output/detect/<modelo>/<timestamp>/`.
 
