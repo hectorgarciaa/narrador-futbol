@@ -1,6 +1,5 @@
 from ultralytics import YOLO
 
-
 def normalize_detection_class_name(class_name):
     token = class_name.strip().lower()
     aliases = {
@@ -28,7 +27,7 @@ def normalize_detection_class_name(class_name):
         "sports ball": "ball",
         "sports balls": "ball",
     }
-    return aliases.get(token, token)
+    return aliases.get(token, None)
 
 
 class Detector:
@@ -39,10 +38,29 @@ class Detector:
 
     @staticmethod
     def _normalize_result(result):
-        result.names = {
-            class_id: normalize_detection_class_name(class_name)
-            for class_id, class_name in result.names.items()
-        }
+        normalized_names = {}
+        kept_class_ids = set()
+
+        for class_id, class_name in result.names.items():
+            normalized = normalize_detection_class_name(class_name)
+            if normalized is not None:
+                normalized_names[class_id] = normalized
+                kept_class_ids.add(int(class_id))
+
+        result.names = normalized_names
+
+        if result.boxes is None or len(result.boxes) == 0:
+            return result
+
+        keep_indices = [
+            idx
+            for idx, class_id in enumerate(result.boxes.cls.tolist())
+            if int(class_id) in kept_class_ids
+        ]
+
+        if len(keep_indices) != len(result.boxes):
+            result.boxes = result.boxes[keep_indices]
+        
         return result
 
     def detect(self, video, stream=True):

@@ -13,6 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from football_ai.core import convert_to_serializable
 from football_ai.detection import Detector
+from football_ai.filtering import filter_post_homography
 from football_ai.reference_points import PnLCalibFieldProjector
 from football_ai.reference_points.geometry import project_image_points
 from football_ai.visualization.simple_drawer import (
@@ -29,6 +30,8 @@ from scripts._cli_common import (
     resolve_video_and_model_paths,
     slugify_model_name,
 )
+
+REJECTED_DETECTION_COLOR = (0, 0, 255)
 
 
 def _result_to_detections(result):
@@ -132,10 +135,48 @@ def _position_label(position):
     return f"{float(position[0]):.1f},{float(position[1]):.1f}"
 
 
+def _colorize_detection(detection):
+    passed_filter = bool(detection.get("passed_post_homography_filter", False))
+    class_color = panel_color(detection["class"])
+    detection["render_color_video"] = class_color if passed_filter else REJECTED_DETECTION_COLOR
+    detection["render_color_field"] = class_color
+    return detection
+
+
+def _annotate_filtered_detections(detections, keep_mask, field_positions_all_m):
+    keep_mask = np.asarray(keep_mask, dtype=bool).reshape(-1)
+    field_positions_all_m = np.asarray(field_positions_all_m, dtype=np.float32).reshape(-1, 2)
+    for idx, detection in enumerate(detections):
+        passed_filter = bool(idx < len(keep_mask) and keep_mask[idx])
+        field_position = field_positions_all_m[idx] if idx < len(field_positions_all_m) else np.asarray([np.nan, np.nan], dtype=np.float32)
+        detection["passed_post_homography_filter"] = passed_filter
+        detection["field_position_m"] = field_position
+        _colorize_detection(detection)
+    return detections
+
+
+def _filter_summary(detections):
+    total = len(detections)
+    passed = sum(1 for detection in detections if detection.get("passed_post_homography_filter"))
+    return {
+        "total_detections_before_filter": int(total),
+        "total_detections_passed_filter": int(passed),
+        "total_detections_rejected_filter": int(total - passed),
+    }
+
+
+def _field_detections(detections):
+    return [
+        detection
+        for detection in detections
+        if detection.get("passed_post_homography_filter")
+    ]
+
+
 def _video_panel_item(detection):
     return {
         "bbox": detection["bbox"],
-        "color": panel_color(detection["class"]),
+        "color": detection.get("render_color_video") or panel_color(detection["class"]),
         "class_name": detection["class"],
         "confidence": detection["confidence"],
         "field_position_m": detection.get("field_position_m"),
@@ -145,7 +186,7 @@ def _video_panel_item(detection):
 def _field_entity(detection):
     return {
         "position_m": detection.get("field_position_m"),
-        "color": panel_color(detection["class"]),
+        "color": detection.get("render_color_field") or panel_color(detection["class"]),
         "canonical_id": detection.get("canonical_id"),
         "position_label": _position_label(detection.get("field_position_m")),
         "radius": 4 if detection["class"] == "ball" else 8,
@@ -205,8 +246,8 @@ def main():
     for frame_index, result in enumerate(results):
 
         detections = _result_to_detections(result)
-        boxes = np.asarray([item["bbox"] for item in detections], dtype=np.float32).reshape(-1, 4)
         class_names = [item["class"] for item in detections]
+        boxes = np.asarray([item["bbox"] for item in detections], dtype=np.float32).reshape(-1, 4)
         projection_result, projection_meta = projector.project_detections_with_metadata(
             result.orig_img,
             boxes,
@@ -215,16 +256,30 @@ def main():
 
         estimate = projection_meta.get("estimate")
         homography_image_to_field = projection_result.homography_image_to_field
-        field_positions_all_m = projection_meta.get("field_positions_all_m")
+        keep_mask, field_positions_all_m = filter_post_homography(
+            projection_meta.get("field_positions_all_m"),
+            has_homography=homography_image_to_field is not None,
+            field_positions_usable_for_tracking=projection_result.field_positions_usable_for_tracking,
+            geometry=projector.geometry,
+            field_length_m=projector.geometry.field_length_m,
+            field_width_m=projector.geometry.field_width_m,
+            detection_boxes=boxes if len(boxes) > 0 else None,
+            active_track_boxes=None,
+        )
         keypoints_field = _estimate_keypoints_field(estimate, homography_image_to_field)
         lines_field = _estimate_lines_field(estimate, homography_image_to_field)
-
-        for detection, field_position in zip(detections, field_positions_all_m):
-            detection["field_position_m"] = field_position
+        detections = _annotate_filtered_detections(
+            detections,
+            keep_mask,
+            field_positions_all_m,
+        )
+        field_detections = _field_detections(detections)
+        filter_summary = _filter_summary(detections)
 
         frame_record = {
             "frame_idx": frame_index,
             "detections": detections,
+            **filter_summary,
             "homography": {
                 "has_homography": homography_image_to_field is not None,
                 "homography_image_to_field": homography_image_to_field,
@@ -268,7 +323,7 @@ def main():
                         projector.geometry.field_length_m,
                         projector.geometry.field_width_m,
                     ),
-                    "entities": [_field_entity(detection) for detection in detections],
+                    "entities": [_field_entity(detection) for detection in field_detections],
                     "points": [_field_point(item, (255, 0, 255), 4) for item in keypoints_field],
                     "lines": [_field_line(item) for item in lines_field],
                     "text_lines": text_lines,

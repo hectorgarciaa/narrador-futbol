@@ -3,19 +3,15 @@ import supervision as sv
 from time import perf_counter
 
 from football_ai.detection import Detector
+from football_ai.filtering import filter_post_homography
 from football_ai.identification import TeamDetector
 from football_ai.reference_points import PnLCalibFieldProjector
-from football_ai.reference_points.pnlcalib_runtime import points_inside_field_mask
 from football_ai.tracking.byte_tracker import ByteTrack
 from football_ai.tracking.tracker_logic_mixin import TrackerLogicMixin
 from football_ai.tracking.possession import PossessionConfig, TeamPossessionEstimator
 
 
 class Tracker(TrackerLogicMixin):
-    SUPPORTED_DETECTION_CLASSES = frozenset(
-        {"player", "goalkeeper", "referee", "ball"}
-    )
-
     @staticmethod
     def _measure_phase_execution(fn, *args, **kwargs):
         start = perf_counter()
@@ -69,32 +65,6 @@ class Tracker(TrackerLogicMixin):
         if not candidates:
             return None, []
         return candidates[0], candidates
-
-    @staticmethod
-    def _tlbr_iou(box_a, box_b):
-        if box_a is None or box_b is None:
-            return 0.0
-        box_a = np.asarray(box_a, dtype=np.float32).reshape(-1)
-        box_b = np.asarray(box_b, dtype=np.float32).reshape(-1)
-        if box_a.size < 4 or box_b.size < 4:
-            return 0.0
-        if not np.all(np.isfinite(box_a[:4])) or not np.all(np.isfinite(box_b[:4])):
-            return 0.0
-        x1 = max(float(box_a[0]), float(box_b[0]))
-        y1 = max(float(box_a[1]), float(box_b[1]))
-        x2 = min(float(box_a[2]), float(box_b[2]))
-        y2 = min(float(box_a[3]), float(box_b[3]))
-        inter_w = max(0.0, x2 - x1)
-        inter_h = max(0.0, y2 - y1)
-        inter = inter_w * inter_h
-        if inter <= 0.0:
-            return 0.0
-        area_a = max(0.0, float(box_a[2] - box_a[0])) * max(0.0, float(box_a[3] - box_a[1]))
-        area_b = max(0.0, float(box_b[2] - box_b[0])) * max(0.0, float(box_b[3] - box_b[1]))
-        union = area_a + area_b - inter
-        if union <= 0.0:
-            return 0.0
-        return float(inter / union)
 
     def __init__(self, model_path, detector_conf, team_detector_conf, bytetracker_conf,
                  ball_conf, tracker_conf, projector_conf, project_root):
@@ -277,7 +247,6 @@ class Tracker(TrackerLogicMixin):
         subphase_rows = []
 
         t0 = perf_counter()
-        self._filter_supported_detection_boxes(detections)
         subphase_rows.append(("Filtrar clases YOLO soportadas", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
@@ -307,22 +276,51 @@ class Tracker(TrackerLogicMixin):
         subphase_rows.append(("Proyección de campo (PnLCalib)", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
-        (
-            detections,
-            detections_sv,
-            raw_detections,
-            detection_class_labels,
+        active_track_boxes = []
+        for track in getattr(self.tracker, "tracked_tracks", []):
+            if not bool(getattr(track, "is_activated", False)):
+                continue
+            tlbr = getattr(track, "tlbr", None)
+            if tlbr is None:
+                continue
+            tlbr = np.asarray(tlbr, dtype=np.float32).reshape(-1)
+            if tlbr.size < 4 or not np.all(np.isfinite(tlbr[:4])):
+                continue
+            active_track_boxes.append(tlbr[:4])
+
+        keep_mask, field_positions = filter_post_homography(
             field_positions,
-            ground_points_projected,
-        ) = self._filter_detections_outside_projected_field(
-            detections,
-            detections_sv,
-            raw_detections,
-            detection_class_labels,
-            field_projection,
-            field_positions,
-            ground_points_projected,
+            has_homography=bool(
+                field_projection is not None
+                and getattr(field_projection, "has_homography", False)
+            ),
+            field_positions_usable_for_tracking=bool(
+                getattr(field_projection, "field_positions_usable_for_tracking", True)
+            ),
+            geometry=getattr(self.field_projector, "geometry", None),
+            field_length_m=self.referee_field_length_m,
+            field_width_m=self.referee_field_width_m,
+            detection_boxes=detections_sv.xyxy if len(detections_sv) > 0 else None,
+            active_track_boxes=active_track_boxes,
         )
+        if not np.all(keep_mask):
+            keep_indices = np.flatnonzero(keep_mask).tolist()
+            detections.boxes = detections.boxes[keep_indices]
+            detections_sv = detections_sv[keep_mask]
+            detection_class_labels = [detection_class_labels[idx] for idx in keep_indices]
+            ground_points_projected = np.asarray(
+                ground_points_projected,
+                dtype=np.float32,
+            ).reshape(-1, 2)[keep_mask]
+            if raw_detections:
+                filtered_raw_detections = []
+                for new_raw_idx, old_idx in enumerate(keep_indices):
+                    if old_idx >= len(raw_detections):
+                        continue
+                    raw_detection = dict(raw_detections[old_idx])
+                    raw_detection["raw_det_idx"] = int(new_raw_idx)
+                    filtered_raw_detections.append(raw_detection)
+                raw_detections = filtered_raw_detections
         subphase_rows.append(("Filtrar detecciones fuera del campo proyectado", (perf_counter() - t0) * 1000.0))
         return {
             "payload": (
@@ -1273,134 +1271,6 @@ class Tracker(TrackerLogicMixin):
         self.visualization_debug_frames = visual_debug_frames if collect_visual_debug else []
         return tracks
 
-    def _filter_supported_detection_boxes(self, detections):
-        if detections.boxes is None or len(detections.boxes) == 0:
-            return
-
-        raw_cls = detections.boxes.cls.cpu().numpy().astype(int)
-        keep_indices = []
-        for idx, class_id in enumerate(raw_cls):
-            normalized_class_name = detections.names.get(int(class_id))
-            if normalized_class_name in self.SUPPORTED_DETECTION_CLASSES:
-                keep_indices.append(idx)
-
-        if len(keep_indices) == len(raw_cls):
-            return
-
-        detections.boxes = detections.boxes[keep_indices]
-
-    def _filter_detections_outside_projected_field(
-        self,
-        detections,
-        detections_sv,
-        raw_detections,
-        detection_class_labels,
-        field_projection,
-        field_positions,
-        ground_points_projected,
-    ):
-        if (
-            field_projection is None
-            or not getattr(field_projection, "has_homography", False)
-            or len(detections_sv) == 0
-        ):
-            return (
-                detections,
-                detections_sv,
-                raw_detections,
-                detection_class_labels,
-                field_positions,
-                ground_points_projected,
-            )
-
-        field_positions_array = np.asarray(field_positions, dtype=np.float32).reshape(-1, 2)
-        finite_mask = np.all(np.isfinite(field_positions_array), axis=1)
-        inside_mask = np.zeros(len(field_positions_array), dtype=bool)
-        if np.any(finite_mask):
-            candidate_points = field_positions_array[finite_mask]
-            base_inside_mask = points_inside_field_mask(
-                candidate_points,
-                geometry=getattr(self.field_projector, "geometry", None),
-                margin_m=0.0,
-            )
-            x_coords = candidate_points[:, 0]
-            y_coords = candidate_points[:, 1]
-            sideline_margin_mask = (
-                (x_coords >= 0.0)
-                & (x_coords <= float(self.referee_field_length_m))
-                & (y_coords >= -0.75)
-                & (y_coords <= float(self.referee_field_width_m) + 0.75)
-            )
-            inside_mask[finite_mask] = np.logical_or(base_inside_mask, sideline_margin_mask)
-
-        keep_mask = np.logical_or(~finite_mask, inside_mask)
-        if not np.all(keep_mask):
-            active_track_boxes = []
-            for track in getattr(self.tracker, "tracked_tracks", []):
-                if not bool(getattr(track, "is_activated", False)):
-                    continue
-                tlbr = getattr(track, "tlbr", None)
-                if tlbr is None:
-                    continue
-                tlbr = np.asarray(tlbr, dtype=np.float32).reshape(-1)
-                if tlbr.size < 4 or not np.all(np.isfinite(tlbr[:4])):
-                    continue
-                active_track_boxes.append(tlbr[:4])
-
-            if active_track_boxes:
-                detection_boxes = np.asarray(detections_sv.xyxy, dtype=np.float32).reshape(-1, 4)
-                overlap_keep_mask = np.zeros(len(detection_boxes), dtype=bool)
-                for det_idx, det_box in enumerate(detection_boxes):
-                    if keep_mask[det_idx]:
-                        continue
-                    for track_box in active_track_boxes:
-                        if self._tlbr_iou(det_box, track_box) > 0.0:
-                            overlap_keep_mask[det_idx] = True
-                            break
-                keep_mask = np.logical_or(keep_mask, overlap_keep_mask)
-
-        if np.all(keep_mask):
-            return (
-                detections,
-                detections_sv,
-                raw_detections,
-                detection_class_labels,
-                field_positions,
-                ground_points_projected,
-            )
-
-        keep_indices = np.flatnonzero(keep_mask).tolist()
-        detections.boxes = detections.boxes[keep_indices]
-        detections_sv = detections_sv[keep_mask]
-        detection_class_labels = [
-            detection_class_labels[idx]
-            for idx in keep_indices
-        ]
-        field_positions = field_positions_array[keep_mask]
-        ground_points_projected = np.asarray(
-            ground_points_projected,
-            dtype=np.float32,
-        ).reshape(-1, 2)[keep_mask]
-
-        if raw_detections:
-            filtered_raw_detections = []
-            for new_raw_idx, old_idx in enumerate(keep_indices):
-                if old_idx >= len(raw_detections):
-                    continue
-                raw_detection = dict(raw_detections[old_idx])
-                raw_detection["raw_det_idx"] = int(new_raw_idx)
-                filtered_raw_detections.append(raw_detection)
-            raw_detections = filtered_raw_detections
-
-        return (
-            detections,
-            detections_sv,
-            raw_detections,
-            detection_class_labels,
-            field_positions,
-            ground_points_projected,
-        )
-    
     def _get_raw_detections(self, detections, collect_visual_debug):
         raw_detections = []
         detection_class_labels = []
@@ -1433,10 +1303,6 @@ class Tracker(TrackerLogicMixin):
                 )
                 field_positions = field_projection.field_positions_m
                 ground_points_projected = field_projection.ground_points_image_projected
-                if not bool(
-                    getattr(field_projection, "field_positions_usable_for_tracking", True)
-                ):
-                    field_positions = np.full_like(field_positions, np.nan, dtype=np.float32)
 
         return field_projection, field_positions, ground_points_projected
     
