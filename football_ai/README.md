@@ -8,12 +8,13 @@ Paquete Python principal del sistema de narración de fútbol con IA. Contiene t
 football_ai/
 ├── __init__.py
 ├── actions/        # Adaptadores y utilidades para datasets de acciones (PathCRF)
+├── bytetrack/      # Fase desacoplada de asociacion multi-objeto basada en ByteTrack
 ├── core/           # Configuración global, logging centralizado, serialización
 ├── detection/      # Inferencia YOLO (jugadores, árbitros, balón)
 ├── positions/      # Roles posicionales online, estabilización y artefactos CSV/PNG
 ├── report/         # Informes tecnicos y decisiones de arquitectura
 ├── reference_points/ # Calibración del campo y proyección a coordenadas 2D reales
-├── tracking/       # Pipeline completo de tracking multi-objeto con ByteTrack
+├── tracking/       # Capa canónica de tracking, posesión y artefactos finales
 ├── identification/ # Identificación de equipo por color de camiseta (KMeans)
 ├── evaluation/     # Cálculo de métricas por track y comparación de experimentos
 └── visualization/  # Generación de video anotado con bounding boxes
@@ -29,7 +30,8 @@ football_ai/
 | [`positions`](positions/README.md) | Inferencia online de roles, estabilización táctica y exportes/plots de posiciones | `OnlineSpecialSeedRoleAssigner` |
 | [`report`](report/README.md) | Informes tecnicos, benchmarkings y decisiones documentadas | Documentacion Markdown |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
-| [`tracking`](tracking/README.md) | Orquestación detección → equipo → proyección 2D → ByteTrack → tracks | `Tracker`, `ByteTrack` |
+| [`bytetrack`](bytetrack/README.md) | Asociación multi-objeto desacoplada: `IDENTIFICATION.clean` → `BYTETRACK` | `ByteTrackPhase`, `ByteTrack` |
+| [`tracking`](tracking/README.md) | Capa de tracking canónico y orquestación posterior a `BYTETRACK` | `Tracker` |
 | [`identification`](identification/README.md) | Extracción de color de camiseta y asignación de equipo | `ShirtDetector`, `TeamDetector` |
 | [`evaluation`](evaluation/README.md) | Métricas cuantitativas por track y experimento | `Evaluator`, `ExperimentVisualizer`, ... |
 | [`visualization`](visualization/README.md) | Dibujado de bounding boxes y exportación de video | `Drawer` |
@@ -40,16 +42,19 @@ football_ai/
 Video MP4
    │
    ▼
-Detector (YOLO)          → detecciones por frame [bbox, conf, clase]
+Detector (YOLO)          → packet DETECTOR [clean, trace]
    │
    ▼
-TeamDetector (KMeans)    → color de camiseta + asignación de equipo
+PnLCalibFieldProjector   → packet REFERENCE_POINTS [clean, trace]
    │
    ▼
-PnLCalibFieldProjector   → coordenadas del campo [x_m, y_m] por detección
+Filtering                → packet FILTERING [clean filtrado, trace aceptadas/rechazadas]
    │
    ▼
-ByteTrack                → IDs persistentes entre frames usando bbox + posición 2D
+TeamDetector (KMeans)    → packet IDENTIFICATION [clean enriquecido, trace clustering/relabel]
+   │
+   ▼
+football_ai.bytetrack    → packet BYTETRACK [clean trackeado, trace matching/debug]
    │
    ▼
 tracks dict              → {"player": [{id: {bbox, field_position_m, team, ...}}], ...}

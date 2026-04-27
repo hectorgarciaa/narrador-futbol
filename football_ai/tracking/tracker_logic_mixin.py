@@ -100,27 +100,6 @@ class TrackerLogicMixin:
 
         return ordered_candidates[0]
 
-    def _shirt_color_distance_gate_for_lost_frames(self, lost_frames):
-        base_gate = float(getattr(self, "shirt_color_reassign_distance_gate", 45.0))
-        growth_per_frame = float(
-            getattr(self, "shirt_color_reassign_distance_growth_per_frame", 0.0)
-        )
-        raw_gate = base_gate + (growth_per_frame * max(0, int(lost_frames) - 1))
-        gate_cap = getattr(self, "shirt_color_reassign_distance_cap", None)
-        if gate_cap is not None:
-            raw_gate = min(raw_gate, float(gate_cap))
-        return float(max(1.0, raw_gate))
-
-    def _is_shirt_color_compatible(
-        self,
-        previous_state,
-        detection_shirt_color,
-        current_frame,
-        class_name=None,
-    ):
-        # Color-LAB gate disabled: canonical reassignment no longer vetoes by shirt color.
-        return True
-
     @staticmethod
     def _update_running_stats(prev_count, prev_mean, prev_m2, value):
         """Update running mean and variance accumulator (Welford)."""

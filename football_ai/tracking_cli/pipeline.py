@@ -180,8 +180,7 @@ def _resolve_pnlcalib_device(tracker):
     field_projector = getattr(tracker, "field_projector", None)
     if field_projector is None:
         return "cpu (pnlcalib disabled)"
-    estimator = getattr(field_projector, "estimator", None)
-    runtime = getattr(estimator, "runtime", None)
+    runtime = getattr(field_projector, "runtime", None)
     runtime_device = getattr(runtime, "device", "cpu")
     return _resolve_runtime_device_label(runtime_device)
 

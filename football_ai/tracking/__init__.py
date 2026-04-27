@@ -1,9 +1,8 @@
 """
-Tracking module - ByteTrack and tracking orchestrator.
+Tracking module - canonical tracking orchestration and downstream logic.
 """
 
-from .byte_tracker import ByteTrack
 from .possession import PossessionConfig, TeamPossessionEstimator
 from .tracker import Tracker
 
-__all__ = ["ByteTrack", "Tracker", "PossessionConfig", "TeamPossessionEstimator"]
+__all__ = ["Tracker", "PossessionConfig", "TeamPossessionEstimator"]

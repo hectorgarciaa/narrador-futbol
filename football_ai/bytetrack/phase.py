@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+import numpy as np
+import supervision as sv
+
+from football_ai.core import PHASE_BYTETRACK, make_phase_packet
+
+from .byte_tracker import ByteTrack
+
+
+def _serialize_value(value):
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Mapping):
+        return {str(key): _serialize_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialize_value(item) for item in value]
+    return value
+
+
+class ByteTrackPhase:
+    def __init__(self, **bytetracker_conf):
+        self.tracker = ByteTrack(**bytetracker_conf)
+
+    def reset(self):
+        self.tracker.reset()
+
+    def active_track_boxes_xyxy(self):
+        boxes = []
+        for track in getattr(self.tracker, "tracked_tracks", []):
+            if not bool(getattr(track, "is_activated", False)):
+                continue
+            tlbr = np.asarray(getattr(track, "tlbr", None), dtype=np.float32).reshape(-1)
+            if tlbr.size >= 4 and np.all(np.isfinite(tlbr[:4])):
+                boxes.append(tlbr[:4])
+        return boxes
+
+    def track_packet(self, identification_packet, *, collect_visual_debug=False):
+        clean_in = identification_packet["clean"]
+        detections = self._build_detections(clean_in)
+        setattr(self.tracker, "collect_internal_matching_debug", bool(collect_visual_debug))
+        tracked = self.tracker.update_with_detections(
+            detections,
+            np.asarray(clean_in["team"], dtype=object),
+            np.asarray(clean_in["class_name_td"], dtype=object),
+            yolo_class_labels=np.asarray(clean_in["class_name"], dtype=object),
+        )
+        return self._build_packet(identification_packet, tracked)
+
+    @staticmethod
+    def _build_detections(clean):
+        num_detections = int(clean["num_detections"])
+        boxes = np.asarray(clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4)
+        confidences = np.asarray(clean["confidence"], dtype=np.float32).reshape(-1)
+        detections = sv.Detections(
+            xyxy=boxes,
+            confidence=confidences,
+            class_id=np.zeros(num_detections, dtype=np.int32),
+        )
+        detections.data = {
+            "team": np.asarray(clean["team"], dtype=object),
+            "class": np.asarray(clean["class_name_td"], dtype=object),
+            "class_name_td": np.asarray(clean["class_name_td"], dtype=object),
+            "class_yolo": np.asarray(clean["class_name"], dtype=object),
+            "distances": np.asarray(clean["distances"], dtype=object),
+            "shirt_color": np.asarray(clean["shirt_color"], dtype=object),
+            "bbox_size": np.asarray(clean["bbox_size"], dtype=np.float32),
+            "referee_reassign_gate": np.asarray(clean["referee_reassign_gate"], dtype=object),
+            "goalkeeper_reassign_gate": np.asarray(clean["goalkeeper_reassign_gate"], dtype=object),
+            "field_position": np.asarray(clean["field_positions_m"], dtype=np.float32),
+            "ground_point_image": np.asarray(clean["ground_points_image_original"], dtype=np.float32),
+            "raw_det_idx": np.asarray(clean["det_id"], dtype=np.int32),
+        }
+        return detections
+
+    def _build_packet(self, identification_packet, tracked):
+        clean_in = identification_packet["clean"]
+        det_id_to_index = {
+            int(det_id): index for index, det_id in enumerate(clean_in["det_id"])
+        }
+        tracker_ids = [None] * int(clean_in["num_detections"])
+        class_trackers = [None] * int(clean_in["num_detections"])
+        tracked_mask = [False] * int(clean_in["num_detections"])
+        tracked_detections = []
+
+        for bbox, _mask, confidence, _class_id, tracker_id, metadata in list(tracked):
+            raw_det_idx = metadata.get("raw_det_idx")
+            if raw_det_idx is None:
+                continue
+            raw_det_idx = int(raw_det_idx)
+            index = det_id_to_index.get(raw_det_idx)
+            if index is None:
+                continue
+            tracker_ids[index] = int(tracker_id)
+            class_trackers[index] = metadata.get("class_tracker") or metadata.get("class_name")
+            tracked_mask[index] = True
+            tracked_detections.append(
+                {
+                    "raw_det_idx": raw_det_idx,
+                    "tracker_id": int(tracker_id),
+                    "bbox_xyxy": _serialize_value(bbox),
+                    "confidence": float(confidence),
+                    "class_tracker": class_trackers[index],
+                    "class_name_td": metadata.get("class_name_td") or metadata.get("class"),
+                    "class_name": metadata.get("class_yolo"),
+                    "team": metadata.get("team"),
+                    "field_position": _serialize_value(metadata.get("field_position")),
+                    "ground_point_image": _serialize_value(metadata.get("ground_point_image")),
+                    "distances": _serialize_value(metadata.get("distances")),
+                    "shirt_color": _serialize_value(metadata.get("shirt_color")),
+                    "bbox_size": _serialize_value(metadata.get("bbox_size")),
+                    "referee_reassign_gate": _serialize_value(metadata.get("referee_reassign_gate")),
+                    "goalkeeper_reassign_gate": _serialize_value(metadata.get("goalkeeper_reassign_gate")),
+                }
+            )
+
+        debug_by_raw_idx = dict(getattr(self.tracker, "last_detection_debug_by_raw_idx", {}) or {})
+        detection_debug = []
+        for index, det_id in enumerate(clean_in["det_id"]):
+            debug_payload = dict(debug_by_raw_idx.get(int(det_id), {}) or {})
+            detection_debug.append(
+                {
+                    "det_id": int(det_id),
+                    "tracked": bool(tracked_mask[index]),
+                    "tracker_id": tracker_ids[index],
+                    "class_tracker": class_trackers[index],
+                    **{str(key): _serialize_value(value) for key, value in debug_payload.items()},
+                }
+            )
+
+        clean_out = {
+            **clean_in,
+            "tracker_id": tracker_ids,
+            "class_tracker": class_trackers,
+            "tracked_mask": tracked_mask,
+            "tracked_count": int(sum(tracked_mask)),
+            "tracked_detections": tracked_detections,
+        }
+        trace = {
+            "detection_debug": detection_debug,
+            "unconfirmed_association_debug": _serialize_value(
+                getattr(self.tracker, "last_unconfirmed_association_debug", []) or []
+            ),
+            "summary": {
+                "total_input_detections": int(clean_in["num_detections"]),
+                "total_tracked_detections": int(sum(tracked_mask)),
+                "total_untracked_detections": int(len(tracked_mask) - sum(tracked_mask)),
+            },
+        }
+        return make_phase_packet(
+            phase_name=PHASE_BYTETRACK,
+            frame_index=identification_packet["frame_index"],
+            frame_time_ms=identification_packet["frame_time_ms"],
+            image_width=identification_packet["image_width"],
+            image_height=identification_packet["image_height"],
+            clean=clean_out,
+            trace=trace,
+        )
+
+
+__all__ = ["ByteTrackPhase"]

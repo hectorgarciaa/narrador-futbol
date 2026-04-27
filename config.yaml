@@ -109,7 +109,7 @@ team_detector:
 
 # Configuración de tracking (ByteTrack)
 tracking:
-  print_runtime_devices: true  # Si true, imprime dispositivo de PnLCalib y frame hook (cuda/cpu)
+  print_runtime_devices: true  # Si true, imprime el dispositivo efectivo real de PnLCalib y frame hook (cuda/cpu)
   projector:
     enabled: true     # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching
     classes: ["player", "goalkeeper"]
@@ -190,8 +190,6 @@ tracking:
     class_vote_weight_relabel: 1.0  # Peso del voto de clase reetiquetada (TeamDetector) en el consenso por track
     class_vote_weight_yolo: 1.0  # Peso del voto de clase original YOLO en el consenso por track
     class_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para permitir cambio de clase del track interno
-    shirt_color_distance_weight: 0.0  # Sin efecto en matching interno (penalización LAB desactivada)
-    shirt_color_distance_gate: 45.0  # Distancia LAB a partir de la cual el cambio de color deja de penalizar linealmente
     bbox_size_mismatch_penalty: 1000.0  # Penalización por cambio brusco de tamaño entre bbox previa y bbox candidata
     bbox_height_ratio_threshold: 0.50  # Penaliza si la altura cambia más de un 50%
     bbox_width_ratio_threshold: 1  # Penaliza si el ancho cambia más de un 100%
@@ -252,14 +250,9 @@ tracking:
   referee_recovery_max_distance: 45.0  # Distancia máxima en metros para
   referee_canonical_ids: [23, 24, 25]
   referee_sideline_band_distance_m: 3.0
-  use_shirt_color_for_reassign: false  # Sin efecto en canonización (gate LAB desactivado)
-  shirt_color_reassign_distance_gate: 45.0  # Distancia LAB máxima base entre color previo y actual para aceptar continuidad
-  shirt_color_reassign_distance_growth_per_frame: 1.5  # Apertura del gate de color por frame perdido
-  shirt_color_reassign_distance_cap: 70.0  # Tope del gate dinámico de color LAB
   strict_person_class_separation: true  # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
   # Legacy: ByteTrack ya no limita internamente la creación por clase (se ignora este flag).
   # El límite por clase se aplica en la capa canónica/salida final.
-  enforce_internal_class_limits: false
   require_field_position_for_reassign: true  # Legacy: para player/goalkeeper prioriza field_position cuando existe, pero si la homografía falta o se rechaza el canónico hace fallback a píxeles para no bloquear la continuidad.
   max_reassign_lost_frames: null  # Tope opcional de frames perdidos para reasignar un ID. null/0/desactivado => un track puede reaparecer tras muchos frames.
   max_reassign_lost_frames_by_class: {}  # Sin corte por clase (legacy). Evita capar reenganches tardíos.

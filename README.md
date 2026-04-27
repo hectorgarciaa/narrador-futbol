@@ -27,8 +27,11 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo, doble señal de clase (YOLO + reetiquetado por color) y remapeo controlado por consenso.
 - Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker solo cuando la homografía del frame supera una validación explícita basada en `geometry_fit`, `support_quality` y `coverage_quality`. El proyector puede relajar thresholds para rescatar el frame, compara todos los intentos por score y solo conserva la homografía si queda clasificada como `good`; si no, el pipeline cae a bbox y no usa `field_position_m` para decisiones de tracking/canonización.
 - Si existe homografía válida del frame anterior, el proyector puede aplicar `temporal_blend` como suavizado temporal, pero ese blend solo se adopta cuando también supera la validación de calidad y no empeora el `quality_score`; en caso contrario se mantiene la homografía actual sin suavizar.
-- El pipeline visual y de tracking encadena tres packets por frame: `DETECTOR`, `REFERENCE_POINTS` y `FILTERING`. `clean` se usa para la lógica del pipeline y `trace` para JSON/debug/drawer; `FILTERING` ya no elimina detecciones, solo publica `keep_mask` y `reject_code`.
+- El pipeline visual y de tracking encadena cinco packets por frame: `DETECTOR`, `REFERENCE_POINTS`, `FILTERING`, `IDENTIFICATION` y `BYTETRACK`. `clean` se usa para la lógica del pipeline y `trace` para JSON/debug/drawer.
+- `FILTERING` sí elimina detecciones en `clean`: conserva el mismo esquema que `REFERENCE_POINTS`, pero solo con las detecciones aceptadas. El detalle de aceptadas/rechazadas y su `reject_code` queda separado en `trace`.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
+- `IDENTIFICATION` consume `FILTERING.clean` y devuelve un `clean` enriquecido con `class_name_td`, `team`, `shirt_color`, `distances`, `bbox_size` y las gates de relabel que usan fases posteriores, manteniendo además la clase YOLO original en `class_name`. Su `trace` incluye el detalle por detección, motivos de relabel y estado/eventos de clustering.
+- `BYTETRACK` consume `IDENTIFICATION.clean` como fase independiente y devuelve un `clean` que conserva las señales de entrada y añade `tracker_id`, `class_tracker`, `tracked_mask` y `tracked_detections`; el `trace` contiene el debug por detección y la traza de asociaciones tentativas.
 - Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
 - Anti-solape de ByteTrack limitado al nacimiento de tracks nuevos: los `unconfirmed` ya nacidos siguen el matching normal y el filtro duro de solape solo se aplica antes de crear un track nuevo frente a activos, `unconfirmed` previos y otros candidatos del mismo frame, con thresholds independientes para cada comparación.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
@@ -62,7 +65,8 @@ narrador-futbol/
 │   ├── actions/            # Adaptadores de tracking a datasets de acciones (PathCRF)
 │   ├── detection/          # Wrapper YOLO + cabeza DetectR8 para balón
 │   ├── positions/          # Lógica de roles posicionales y estabilización online
-│   ├── tracking/           # Tracker (orquestador) + ByteTrack extendido
+│   ├── bytetrack/         # Fase ByteTrack desacoplada (packet IDENTIFICATION -> BYTETRACK)
+│   ├── tracking/          # Capa canónica/orquestador posterior a ByteTrack
 │   ├── identification/     # ShirtDetector (KMeans LAB) + TeamDetector
 │   ├── evaluation/         # Métricas por track y comparador de experimentos
 │   └── visualization/      # Drawer: genera vídeo anotado
@@ -578,7 +582,7 @@ Y se actualiza automáticamente un dataset acumulado de métricas de tracking en
 El tracking también calcula posesión online con `tracking.possession` (equipo + jugador poseedor por frame). Ese dato se inyecta en los payloads de `tracks.json` (`ball_owning_team_id`, `ball_owning_player_id`, `player_id`, `is_possession_player`, `possession_reason`), se guarda también por frame en `tracks["possession"]` y se visualiza en el vídeo con un segundo recuadro amarillo en el jugador poseedor y un banner `POS: <equipo>`.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 La calibración adaptativa de `PnLCalib` ya no repite la inferencia de red en cada intento de thresholds: hace un único `forward` por frame, reutiliza esos heatmaps para reconstruir candidatos con cada par `keypoint_threshold`/`line_threshold` y solo reintenta la parte de decodificación, calibración y validación de calidad. El resultado externo se mantiene, pero baja el coste por frame cuando hay varios intentos adaptativos.
-`FILTERING` conserva la cardinalidad del frame y solo marca `keep_mask/reject_code`; el tracker es quien decide después qué subconjunto de detecciones soportadas pasa a ByteTrack.
+`FILTERING` ya entrega en `clean` solo las detecciones aceptadas; el detalle completo de aceptadas/rechazadas y sus `reject_code` queda en `trace`.
 Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría. Mientras no se absorban, también se escriben en el JSON con `synthetic_seed=true`.
 Si `tracking.special_seed_role_team_assignment_enabled=true`, el tracking principal ejecuta además el modelo de `position_role` frame a frame durante el tracking para los jugadores normales y usa a los defensas detectados en ese frame para asignar equipo a los IDs reservados `1-2` por defensa más cercano. Esos dos IDs no entran al Set Transformer: se etiquetan manualmente como `POR`. Si defines `tracking.expected_roles_by_team`, ese once esperado sí se aplica frame a frame en la salida online mediante Hungarian por equipo, pero el histórico acumulado sigue guardando también la etiqueta cruda del modelo (`predicted_role_unconstrained`) para detectar swaps y evitar contaminar segmentos. Esos IDs no usan color de camiseta para recuperar identidad ni para fijar su equipo.
 Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa exactamente el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), sin suelo extra ni expansión por velocidad en la capa 2. Así un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
@@ -841,7 +845,7 @@ team_detector:
     batch_tol: 0.001
 
 tracking:
-  print_runtime_devices: true  # print de dispositivo para PnLCalib y frame_hook (cuda/cpu)
+  print_runtime_devices: true  # print del dispositivo efectivo real de PnLCalib y frame_hook (cuda/cpu)
   projector:
     constructor:
       pnl_refine: false
@@ -940,10 +944,9 @@ Puntos importantes:
 - Cuando se alcanza el máximo global de IDs visibles (`max_total_tracks`), se prioriza reasignar IDs previos compatibles antes de crear IDs nuevos.
 - La reasignación mantiene coherencia por clase/equipo y aplica filtros de movimiento/cercanía para evitar saltos de identidad.
 
-Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/tracking/byte_tracker.py`):
+Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/bytetrack/byte_tracker.py`):
 
 - `max_total_tracks`
-- `enforce_internal_class_limits` (legacy; ByteTrack ya no aplica límite interno por clase)
 - `team_mismatch_penalty`
 - `second_match_threshold`
 - `unconfirmed_match_threshold`

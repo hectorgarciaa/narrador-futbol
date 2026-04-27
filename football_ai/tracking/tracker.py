@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import supervision as sv
 from time import perf_counter
 
 from football_ai.detection import Detector
@@ -10,7 +9,7 @@ from football_ai.reference_points import (
     PnLCalibFieldProjector,
     build_reference_points_packet_without_homography,
 )
-from football_ai.tracking.byte_tracker import ByteTrack
+from football_ai.bytetrack import ByteTrackPhase
 from football_ai.tracking.tracker_logic_mixin import TrackerLogicMixin
 from football_ai.tracking.possession import PossessionConfig, TeamPossessionEstimator
 
@@ -56,7 +55,7 @@ class Tracker(TrackerLogicMixin):
         if not isinstance(metadata, dict):
             return []
         candidates = []
-        for key in ("class_tracker", "class", "class_yolo"):
+        for key in ("class_tracker", "class_name_td", "class", "class_yolo"):
             value = metadata.get(key)
             if not value or value in candidates:
                 continue
@@ -76,15 +75,9 @@ class Tracker(TrackerLogicMixin):
         print("*"*100, model_path)
         self.model = Detector(model_path, **detector_conf)
         self.team_detector = TeamDetector(**team_detector_conf)
-        # Legacy behavior (pre-refactor): do not cap track activation inside ByteTrack.
-        # We still apply limits later in the canonical-ID layer (`max_tracks_per_class`).
-        enforce_internal_class_limits = bool(
-            (tracker_conf or {}).get("enforce_internal_class_limits", False)
-        )
         bytetracker_runtime_conf = dict(bytetracker_conf or {})
-        if not enforce_internal_class_limits:
-            bytetracker_runtime_conf.pop("max_tracks_per_class", None)
-        self.tracker = ByteTrack(**bytetracker_runtime_conf)
+        bytetracker_runtime_conf.pop("max_tracks_per_class", None)
+        self.bytetrack_phase = ByteTrackPhase(**bytetracker_runtime_conf)
         self.field_projector = None
         if projector_conf["enabled"]:
             self.field_projector = PnLCalibFieldProjector(project_root=project_root, **projector_conf["constructor"])
@@ -160,27 +153,6 @@ class Tracker(TrackerLogicMixin):
         self.referee_field_width_m = float(
             projector_conf.get("constructor", {}).get("field_width_m", 68.0)
         )
-        self.use_shirt_color_for_reassign = bool(
-            tracker_conf.get("use_shirt_color_for_reassign", False)
-        )
-        self.shirt_color_reassign_distance_gate = float(
-            tracker_conf.get("shirt_color_reassign_distance_gate", 45.0)
-        )
-        self.shirt_color_reassign_distance_growth_per_frame = float(
-            tracker_conf.get("shirt_color_reassign_distance_growth_per_frame", 0.0)
-        )
-        raw_shirt_color_reassign_distance_cap = tracker_conf.get(
-            "shirt_color_reassign_distance_cap",
-            None,
-        )
-        if raw_shirt_color_reassign_distance_cap is None:
-            self.shirt_color_reassign_distance_cap = None
-        else:
-            shirt_color_cap = float(raw_shirt_color_reassign_distance_cap)
-            self.shirt_color_reassign_distance_cap = (
-                shirt_color_cap if np.isfinite(shirt_color_cap) and shirt_color_cap > 0.0 else None
-            )
-
         self.use_field_positions = projector_conf["enabled"]
         self.field_position_classes = projector_conf["classes"]
         self.reassign_min_field_distance_m = projector_conf["reassign_min_field_distance_m"]
@@ -252,17 +224,7 @@ class Tracker(TrackerLogicMixin):
         detector_clean = detector_packet["clean"]
         detector_trace = detector_packet["trace"]
 
-        t0 = perf_counter()
         frame_size = (detector_packet["image_width"], detector_packet["image_height"])
-        detection_boxes_all = np.asarray(detector_clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4)
-        detection_confidence_all = np.asarray(detector_clean["confidence"], dtype=np.float32).reshape(-1)
-        detection_class_ids_all = np.asarray(detector_clean["class_id"], dtype=np.int32).reshape(-1)
-        detections_sv_all = sv.Detections(
-            xyxy=detection_boxes_all,
-            confidence=detection_confidence_all,
-            class_id=detection_class_ids_all,
-        )
-        subphase_rows.append(("Convertir a supervision + frame_size", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
         raw_detections, detection_class_labels, detection_det_ids, detection_bbox_xyxy, detection_confidence = self._get_raw_detections(
@@ -282,66 +244,53 @@ class Tracker(TrackerLogicMixin):
         subphase_rows.append(("Proyección de campo (PnLCalib)", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
-        active_track_boxes = []
-        for track in getattr(self.tracker, "tracked_tracks", []):
-            if not bool(getattr(track, "is_activated", False)):
-                continue
-            tlbr = getattr(track, "tlbr", None)
-            if tlbr is None:
-                continue
-            tlbr = np.asarray(tlbr, dtype=np.float32).reshape(-1)
-            if tlbr.size < 4 or not np.all(np.isfinite(tlbr[:4])):
-                continue
-            active_track_boxes.append(tlbr[:4])
-
         filtering_packet = filter_reference_points(
             reference_packet,
-            active_track_boxes_xyxy=active_track_boxes,
+            active_track_boxes_xyxy=self.bytetrack_phase.active_track_boxes_xyxy(),
             geometry=getattr(self.field_projector, "geometry", None),
             field_length_m=self.referee_field_length_m,
             field_width_m=self.referee_field_width_m,
         )
         filtering_clean = filtering_packet["clean"]
-
-        field_positions_supported = np.asarray(
+        filtered_det_ids = np.asarray(
+            filtering_clean["det_id"],
+            dtype=np.int32,
+        ).reshape(-1)
+        field_positions = np.asarray(
             filtering_clean["field_positions_m"],
             dtype=np.float32,
         ).reshape(-1, 2)
-        ground_points_supported = np.asarray(
-            reference_clean["ground_points_image_original"],
+        ground_points_projected = np.asarray(
+            filtering_clean["ground_points_image_original"],
             dtype=np.float32,
         ).reshape(-1, 2)
-        keep_mask = np.asarray(filtering_clean["keep_mask"], dtype=bool)
-        if len(keep_mask) > 0:
-            detections_sv = detections_sv_all[keep_mask]
-            field_positions = field_positions_supported[keep_mask]
-            ground_points_projected = ground_points_supported[keep_mask]
-            detection_class_labels = [
-                detection_class_labels[index]
-                for index, keep in enumerate(keep_mask.tolist())
-                if keep
+        detection_bbox_xyxy = np.asarray(
+            filtering_clean["bbox_xyxy"],
+            dtype=np.float32,
+        ).reshape(-1, 4)
+        detection_confidence = np.asarray(
+            filtering_clean["confidence"],
+            dtype=np.float32,
+        ).reshape(-1)
+        detection_class_labels = [
+            str(class_name) for class_name in filtering_clean["class_name"]
+        ]
+        detection_det_ids = filtered_det_ids
+        if raw_detections:
+            kept_det_ids = {int(det_id) for det_id in filtered_det_ids.tolist()}
+            raw_detections = [
+                raw_detection
+                for raw_detection in raw_detections
+                if int(raw_detection["raw_det_idx"]) in kept_det_ids
             ]
-            detection_det_ids = detection_det_ids[keep_mask]
-            detection_bbox_xyxy = detection_bbox_xyxy[keep_mask]
-            detection_confidence = detection_confidence[keep_mask]
-            if raw_detections:
-                raw_detections = [
-                    raw_detection
-                    for raw_detection, keep in zip(raw_detections, keep_mask.tolist())
-                    if keep
-                ]
-        else:
-            detections_sv = detections_sv_all
-            field_positions = field_positions_supported
-            ground_points_projected = ground_points_supported
         subphase_rows.append(("Filtrar detecciones fuera del campo proyectado", (perf_counter() - t0) * 1000.0))
         return {
             "payload": (
-                detections_sv,
                 frame_size,
                 raw_detections,
                 detection_class_labels,
                 reference_packet,
+                filtering_packet,
                 field_positions,
                 ground_points_projected,
                 detection_bbox_xyxy,
@@ -354,45 +303,27 @@ class Tracker(TrackerLogicMixin):
     def _phase_assign_team_and_enrich_metadata(
         self,
         frame_bgr,
-        detections_sv,
         raw_detections,
-        detection_det_ids,
-        detection_bbox_xyxy,
-        detection_confidence,
-        detection_class_labels,
+        filtering_packet,
         show_kmeans,
-        field_positions,
-        ground_points_projected,
     ):
         subphase_rows = []
 
         t0 = perf_counter()
-        yolo_class_labels = np.array(
-            detection_class_labels,
-            dtype=object,
-        )
-        teams_of_detected_objects = self.team_detector.detect_teams(
+        identification_packet = self.team_detector.identify_packet(
             frame_bgr,
-            detection_bbox_xyxy,
-            detection_confidence,
-            yolo_class_labels,
-            field_positions,
+            filtering_packet,
             self.referee_field_width_m,
             self.referee_sideline_band_distance_m,
             show_kmeans,
         )
+        identification_clean = identification_packet["clean"]
         subphase_rows.append(("TeamDetector.detect_teams", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
-        teams_labels = np.array(
-            [dicc["team"] for dicc in teams_of_detected_objects],
-            dtype=object,
-        )
-        class_labels = np.array(
-            [dicc["class"] for dicc in teams_of_detected_objects],
-            dtype=object,
-        )
         if raw_detections:
+            yolo_class_labels = list(identification_clean["class_name"])
+            class_labels = list(identification_clean["class_name_td"])
             for raw_idx, raw_detection in enumerate(raw_detections):
                 class_yolo_value = (
                     str(yolo_class_labels[raw_idx])
@@ -405,58 +336,27 @@ class Tracker(TrackerLogicMixin):
                     else None
                 )
                 raw_detection["class_yolo"] = class_yolo_value
+                raw_detection["class_name_td"] = class_relabel_value
                 raw_detection["class_relabel"] = class_relabel_value
                 raw_detection["class_team_detector"] = class_relabel_value
-                if raw_idx < len(teams_of_detected_objects):
-                    raw_detection["referee_reassign_gate"] = teams_of_detected_objects[raw_idx].get(
-                        "referee_reassign_gate"
-                    )
-                    raw_detection["goalkeeper_reassign_gate"] = teams_of_detected_objects[raw_idx].get(
-                        "goalkeeper_reassign_gate"
-                    )
+                if raw_idx < int(identification_clean["num_detections"]):
+                    raw_detection["referee_reassign_gate"] = identification_clean["referee_reassign_gate"][raw_idx]
+                    raw_detection["goalkeeper_reassign_gate"] = identification_clean["goalkeeper_reassign_gate"][raw_idx]
         subphase_rows.append(("Construir arrays de labels", (perf_counter() - t0) * 1000.0))
-
-        t0 = perf_counter()
-        self._enrich_metadata(
-            detections_sv,
-            teams_labels,
-            class_labels,
-            yolo_class_labels,
-            teams_of_detected_objects,
-            field_positions,
-            ground_points_projected,
-            detection_det_ids,
-        )
-        subphase_rows.append(("Enriquecer metadata de detecciones", (perf_counter() - t0) * 1000.0))
         return {
-            "payload": (
-                teams_of_detected_objects,
-                teams_labels,
-                class_labels,
-                yolo_class_labels,
-            ),
+            "payload": identification_packet,
             "subphase_rows": subphase_rows,
         }
 
     def _phase_update_bytetrack(
         self,
-        detections_sv,
-        teams_labels,
-        class_labels,
-        yolo_class_labels,
+        identification_packet,
         collect_visual_debug,
     ):
-        setattr(self.tracker, "collect_internal_matching_debug", bool(collect_visual_debug))
-        tracked = self.tracker.update_with_detections(
-            detections_sv,
-            teams_labels,
-            class_labels,
-            yolo_class_labels=yolo_class_labels,
+        return self.bytetrack_phase.track_packet(
+            identification_packet,
+            collect_visual_debug=collect_visual_debug,
         )
-        not_tracked_reason_by_raw_idx = dict(
-            getattr(self.tracker, "last_detection_debug_by_raw_idx", {}) or {}
-        )
-        return tracked, not_tracked_reason_by_raw_idx
 
     @staticmethod
     def _phase_initialize_empty_frame_tracks(tracks):
@@ -1103,6 +1003,7 @@ class Tracker(TrackerLogicMixin):
         profile_phases=False,
     ):
         self.possession_estimator = TeamPossessionEstimator(self.possession_config)
+        self.bytetrack_phase.reset()
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [], "possession": []}
         
         visual_debug_frames = [] if collect_visual_debug else None
@@ -1141,11 +1042,11 @@ class Tracker(TrackerLogicMixin):
                 )
                 (
                     (
-                        detections_sv,
                         frame_size,
                         raw_detections,
                         detection_class_labels,
                         reference_packet,
+                        filtering_packet,
                         field_positions,
                         ground_points_projected,
                         detection_bbox_xyxy,
@@ -1165,24 +1066,11 @@ class Tracker(TrackerLogicMixin):
                 ) = self._measure_phase_execution(
                     self._phase_assign_team_and_enrich_metadata,
                     frame_bgr,
-                    detections_sv,
                     raw_detections,
-                    detection_det_ids,
-                    detection_bbox_xyxy,
-                    detection_confidence,
-                    detection_class_labels,
+                    filtering_packet,
                     show_kmeans,
-                    field_positions,
-                    ground_points_projected,
                 )
-                (
-                    (
-                        teams_of_detected_objects,
-                        teams_labels,
-                        class_labels,
-                        yolo_class_labels,
-                    )
-                ) = assign_phase_result["payload"]
+                identification_packet = assign_phase_result["payload"]
                 frame_phase_rows.append((
                     "Asignar equipo y enriquecer metadata",
                     elapsed_ms,
@@ -1191,16 +1079,10 @@ class Tracker(TrackerLogicMixin):
 
                 bytetrack_phase_result, elapsed_ms = self._measure_phase_execution(
                     self._phase_update_bytetrack,
-                    detections_sv,
-                    teams_labels,
-                    class_labels,
-                    yolo_class_labels,
+                    identification_packet,
                     collect_visual_debug,
                 )
-                (
-                    tracks_detection,
-                    bytetrack_not_tracked_reason_by_raw_idx,
-                ) = bytetrack_phase_result
+                bytetrack_packet = bytetrack_phase_result
                 frame_phase_rows.append(("Asociación ByteTrack", elapsed_ms))
 
                 _, elapsed_ms = self._measure_phase_execution(
@@ -1209,10 +1091,15 @@ class Tracker(TrackerLogicMixin):
                 )
                 frame_phase_rows.append(("Inicializar contenedores de frame", elapsed_ms))
 
-                sorted_tracked_detections = self._sort_tracked_detections(tracks_detection)
+                sorted_tracked_detections = self._sort_tracked_detections(
+                    self._tracked_detections_from_bytetrack_packet(bytetrack_packet)
+                )
                 self._update_referee_absorption_context(sorted_tracked_detections)
 
                 bytetrack_raw_detection_indexes, bytetrack_id_by_raw_idx = self._collect_bytetrack_detection_info(sorted_tracked_detections, collect_visual_debug)
+                bytetrack_not_tracked_reason_by_raw_idx = self._bytetrack_debug_map_from_packet(
+                    bytetrack_packet
+                )
 
                 used_canonical_ids_in_frame = set()
 
@@ -1307,7 +1194,7 @@ class Tracker(TrackerLogicMixin):
                     bytetrack_id_by_raw_idx,
                     bytetrack_discard_reason_by_raw_idx,
                     bytetrack_not_tracked_reason_by_raw_idx,
-                    getattr(self.tracker, "last_unconfirmed_association_debug", []),
+                    bytetrack_packet["trace"].get("unconfirmed_association_debug", []),
                     visual_debug_frames,
                 )
                 frame_phase_rows.append(("Construir debug visual del frame", elapsed_ms))
@@ -1357,39 +1244,51 @@ class Tracker(TrackerLogicMixin):
             detection_bbox_xyxy,
             detection_confidence,
         )
-    
-    def _enrich_metadata(
-        self,
-        detections_sv,
-        teams_labels,
-        class_labels,
-        yolo_class_labels,
-        teams_of_detected_objects,
-        field_positions,
-        ground_points_projected,
-        detection_det_ids,
-    ):
-        # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
-        if detections_sv.data is None:
-            detections_sv.data = {}
-        detections_sv.data["team"] = teams_labels
-        detections_sv.data["class"] = class_labels
-        detections_sv.data["class_yolo"] = yolo_class_labels
-        detections_sv.data["distances"] = np.array([dicc["distances"] for dicc in teams_of_detected_objects], dtype=object)
-        detections_sv.data["shirt_color"] = np.array([dicc["shirt_color"] for dicc in teams_of_detected_objects], dtype=object)
-        detections_sv.data["bbox_size"] = np.array([dicc["bbox_size"] for dicc in teams_of_detected_objects], dtype=float)
-        detections_sv.data["referee_reassign_gate"] = np.array(
-            [dicc.get("referee_reassign_gate") for dicc in teams_of_detected_objects],
-            dtype=object,
-        )
-        detections_sv.data["goalkeeper_reassign_gate"] = np.array(
-            [dicc.get("goalkeeper_reassign_gate") for dicc in teams_of_detected_objects],
-            dtype=object,
-        )
 
-        detections_sv.data["field_position"] = np.asarray(field_positions, dtype=np.float32)
-        detections_sv.data["ground_point_image"] = np.asarray(ground_points_projected, dtype=np.float32)
-        detections_sv.data["raw_det_idx"] = np.asarray(detection_det_ids, dtype=np.int32)
+    @staticmethod
+    def _tracked_detections_from_bytetrack_packet(bytetrack_packet):
+        tracked = []
+        for item in bytetrack_packet["clean"].get("tracked_detections", []):
+            metadata = {
+                "team": item.get("team"),
+                "field_position": item.get("field_position"),
+                "raw_det_idx": item.get("raw_det_idx"),
+                "shirt_color": item.get("shirt_color"),
+                "class_tracker": item.get("class_tracker"),
+                "class_name_td": item.get("class_name_td"),
+                "class": item.get("class_name_td"),
+                "class_yolo": item.get("class_name"),
+                "distances": item.get("distances"),
+                "bbox_size": item.get("bbox_size"),
+                "ground_point_image": item.get("ground_point_image"),
+                "referee_reassign_gate": item.get("referee_reassign_gate"),
+                "goalkeeper_reassign_gate": item.get("goalkeeper_reassign_gate"),
+            }
+            tracked.append(
+                (
+                    item.get("bbox_xyxy"),
+                    None,
+                    float(item.get("confidence", 0.0)),
+                    None,
+                    int(item.get("tracker_id")),
+                    metadata,
+                )
+            )
+        return tracked
+
+    @staticmethod
+    def _bytetrack_debug_map_from_packet(bytetrack_packet):
+        debug_map = {}
+        for item in bytetrack_packet["trace"].get("detection_debug", []):
+            det_id = item.get("det_id")
+            if det_id is None:
+                continue
+            debug_map[int(det_id)] = {
+                key: value
+                for key, value in item.items()
+                if key != "det_id"
+            }
+        return debug_map
 
     def _sort_tracked_detections(self, tracks_detection, class_priority={"referee": 0, "goalkeeper": 1, "player": 2, "ball": 3}):
         def _priority_from_metadata(metadata):
@@ -1603,6 +1502,7 @@ class Tracker(TrackerLogicMixin):
             "distances": metadata.get("distances"),
             "shirt_color": metadata.get("shirt_color"),
             "class_tracker": output_class_name,
+            "class_name_td": metadata.get("class_name_td") or metadata.get("class"),
             "class_relabel": metadata.get("class"),
             "class_yolo": metadata.get("class_yolo"),
             "referee_reassign_gate": metadata.get("referee_reassign_gate"),
