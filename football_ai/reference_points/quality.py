@@ -20,50 +20,60 @@ class ProjectionQualityAnalyzer:
     def __init__(
         self,
         geometry: PitchGeometry,
-        adaptive_min_visible_keypoints: int,
-        adaptive_min_visible_lines: int,
-        validation_score_threshold: float,
-        validation_geometry_fit_min: float,
-        validation_support_quality_min: float,
-        validation_coverage_quality_min: float,
-        validation_reprojection_error_threshold_px: float,
-        validation_homography_condition_number_threshold: float,
-        validation_keypoint_world_error_threshold_m: float,
-        validation_line_world_error_threshold_m: float,
-        validation_target_visible_keypoints: int,
-        validation_target_visible_lines: int,
-        validation_target_image_point_hull_area_ratio: float,
-        validation_target_image_x_span_ratio: float,
-        validation_target_image_y_span_ratio: float,
-        validation_target_field_coverage_ratio: float,
+        min_visible_keypoints: int = 6,
+        min_visible_lines: int = 1,
+        
+        validation_score_threshold: float = 0.55,
+        validation_geometry_fit_min: float = 0.35,
+        validation_support_quality_min: float = 0.35,
+        validation_coverage_quality_min: float = 0.20,
+        
+        validation_reprojection_error_threshold_px: float = 8.0,
+        validation_homography_condition_number_threshold: float = 1.0e8,
+        validation_keypoint_world_error_threshold_m: float = 3.0,
+        validation_line_world_error_threshold_m: float = 4.0,
+        
+        validation_target_visible_keypoints: int = 14,
+        validation_target_visible_lines: int = 5,
+        
+        validation_target_image_point_hull_area_ratio: float = 0.18,
+        validation_target_image_x_span_ratio: float = 0.55,
+        validation_target_image_y_span_ratio: float = 0.40,
+        validation_target_field_coverage_ratio: float = 0.20,
     ) -> None:
         self.geometry = geometry
-        self.adaptive_min_visible_keypoints = adaptive_min_visible_keypoints
-        self.adaptive_min_visible_lines = adaptive_min_visible_lines
-        self.validation_score_threshold = validation_score_threshold
-        self.validation_geometry_fit_min = validation_geometry_fit_min
-        self.validation_support_quality_min = validation_support_quality_min
-        self.validation_coverage_quality_min = validation_coverage_quality_min
+        self.min_visible_keypoints = max(0, int(min_visible_keypoints))
+        self.min_visible_lines = max(0, int(min_visible_lines))
+        self.validation_score_threshold = float(validation_score_threshold)
+        self.validation_geometry_fit_min = float(validation_geometry_fit_min)
+        self.validation_support_quality_min = float(validation_support_quality_min)
+        self.validation_coverage_quality_min = float(validation_coverage_quality_min)
         self.validation_reprojection_error_threshold_px = (
-            validation_reprojection_error_threshold_px
+            float(validation_reprojection_error_threshold_px)
         )
         self.validation_homography_condition_number_threshold = (
-            validation_homography_condition_number_threshold
+            float(validation_homography_condition_number_threshold)
         )
         self.validation_keypoint_world_error_threshold_m = (
-            validation_keypoint_world_error_threshold_m
+            float(validation_keypoint_world_error_threshold_m)
         )
         self.validation_line_world_error_threshold_m = (
-            validation_line_world_error_threshold_m
+            float(validation_line_world_error_threshold_m)
         )
-        self.validation_target_visible_keypoints = validation_target_visible_keypoints
-        self.validation_target_visible_lines = validation_target_visible_lines
+        self.validation_target_visible_keypoints = max(
+            self.min_visible_keypoints,
+            int(validation_target_visible_keypoints),
+        )
+        self.validation_target_visible_lines = max(
+            self.min_visible_lines,
+            int(validation_target_visible_lines),
+        )
         self.validation_target_image_point_hull_area_ratio = (
-            validation_target_image_point_hull_area_ratio
+            float(validation_target_image_point_hull_area_ratio)
         )
-        self.validation_target_image_x_span_ratio = validation_target_image_x_span_ratio
-        self.validation_target_image_y_span_ratio = validation_target_image_y_span_ratio
-        self.validation_target_field_coverage_ratio = validation_target_field_coverage_ratio
+        self.validation_target_image_x_span_ratio = float(validation_target_image_x_span_ratio)
+        self.validation_target_image_y_span_ratio = float(validation_target_image_y_span_ratio)
+        self.validation_target_field_coverage_ratio = float(validation_target_field_coverage_ratio)
 
     @staticmethod
     def _project_or_none(
@@ -106,7 +116,7 @@ class ProjectionQualityAnalyzer:
         if value is None or not np.isfinite(float(value)):
             return None
         safe_threshold = max(float(threshold), 1e-6)
-        return cls._clamp01(safe_threshold / (safe_threshold + max(float(value), 0.0)))
+        return safe_threshold / (safe_threshold + max(float(value), 0.0))
 
     @classmethod
     def _range_score(
@@ -359,34 +369,34 @@ class ProjectionQualityAnalyzer:
     def _geometry_fit_score(
         self,
         estimate,
-        homography_image_to_field: Optional[np.ndarray],
     ) -> tuple[Optional[float], Dict[str, Any], list[str]]:
-        details: Dict[str, Any] = {}
-        rejection_reasons: list[str] = []
-        if homography_image_to_field is None:
-            return None, details, ["no_homography"]
 
         reprojection_error = getattr(estimate, "reprojection_error", None)
-        details["reprojection_error"] = reprojection_error
         reprojection_score = self._inverse_error_score(
             reprojection_error,
             self.validation_reprojection_error_threshold_px,
         )
-        details["reprojection_score"] = reprojection_score
-
+        
+        homography_image_to_field = estimate.homography_image_to_field
+        if homography_image_to_field is None:
+            return None, {}, ["no_homography"]
+        
         homography = np.asarray(homography_image_to_field, dtype=np.float64)
         if homography.shape != (3, 3) or not np.all(np.isfinite(homography)):
-            return None, details, ["invalid_homography_matrix"]
+            return None, {}, ["invalid_homography_matrix"]
+        
         normalized_homography = homography.copy()
         if abs(float(normalized_homography[2, 2])) < 1e-9:
-            return None, details, ["homography_scale_zero"]
+            return None, {}, ["homography_scale_zero"]
         normalized_homography /= normalized_homography[2, 2]
         condition_number = float(np.linalg.cond(normalized_homography))
-        details["homography_condition_number"] = condition_number
+
         if not np.isfinite(condition_number):
-            return None, details, ["invalid_homography_condition_number"]
+            return None, {}, ["invalid_homography_condition_number"]
+
         if condition_number > self.validation_homography_condition_number_threshold:
-            rejection_reasons.append("ill_conditioned_homography")
+            return None, {}, ["ill_conditioned_homography"]
+    
         log_condition_threshold = max(
             np.log10(self.validation_homography_condition_number_threshold),
             1e-6,
@@ -394,29 +404,26 @@ class ProjectionQualityAnalyzer:
         condition_score = self._clamp01(
             1.0 - (np.log10(max(condition_number, 1.0)) / log_condition_threshold)
         )
-        details["condition_score"] = condition_score
 
         keypoint_world_error_m = self._keypoint_world_alignment_error_m(
             estimate,
             homography_image_to_field,
         )
-        details["keypoint_world_error_m"] = keypoint_world_error_m
+        
         keypoint_alignment_score = self._inverse_error_score(
             keypoint_world_error_m,
             self.validation_keypoint_world_error_threshold_m,
         )
-        details["keypoint_alignment_score"] = keypoint_alignment_score
 
         line_world_error_m = self._line_world_alignment_error_m(
             estimate,
             homography_image_to_field,
         )
-        details["line_world_error_m"] = line_world_error_m
+        
         line_alignment_score = self._inverse_error_score(
             line_world_error_m,
             self.validation_line_world_error_threshold_m,
         )
-        details["line_alignment_score"] = line_alignment_score
 
         geometry_fit = self._weighted_average(
             [
@@ -426,23 +433,35 @@ class ProjectionQualityAnalyzer:
                 (line_alignment_score, 0.20),
             ]
         )
-        details["geometry_fit"] = geometry_fit
-        return geometry_fit, details, rejection_reasons
+        
+        details = {
+            "reprojection_error": reprojection_error,
+            "reprojection_score": reprojection_score,
+            "homography_condition_number": condition_number,
+            "condition_score": condition_score,
+            "keypoint_world_error_m": keypoint_world_error_m,
+            "keypoint_alignment_score": keypoint_alignment_score,
+            "line_world_error_m": line_world_error_m,
+            "line_alignment_score": line_alignment_score,
+            "geometry_fit": geometry_fit,
+        }
+        
+        return geometry_fit, details, []
 
     def _support_quality_score(
         self,
         estimate,
     ) -> tuple[Optional[float], Dict[str, Any]]:
-        keypoint_count = int(getattr(estimate, "visible_keypoints_count", 0))
-        line_count = int(getattr(estimate, "visible_lines_count", 0))
+        keypoint_count = estimate.visible_keypoints_count
+        line_count = estimate.visible_lines_count
         keypoint_count_score = self._range_score(
             keypoint_count,
-            self.adaptive_min_visible_keypoints,
+            self.min_visible_keypoints,
             self.validation_target_visible_keypoints,
         )
         line_count_score = self._range_score(
             line_count,
-            self.adaptive_min_visible_lines,
+            self.min_visible_lines,
             self.validation_target_visible_lines,
         )
         keypoint_confidence_score = self._keypoint_confidence_score(estimate)
@@ -593,10 +612,7 @@ class ProjectionQualityAnalyzer:
         line_threshold: float,
         attempt_index: int,
     ) -> Dict[str, Any]:
-        geometry_fit, geometry_details, rejection_reasons = self._geometry_fit_score(
-            estimate,
-            estimate.homography_image_to_field,
-        )
+        geometry_fit, geometry_details, rejection_reasons = self._geometry_fit_score(estimate)
         support_quality, support_details = self._support_quality_score(estimate)
         coverage_quality, coverage_details = self._coverage_quality_score(
             estimate,
@@ -605,9 +621,9 @@ class ProjectionQualityAnalyzer:
 
         if estimate.homography_image_to_field is None:
             rejection_reasons.append("no_homography")
-        if estimate.visible_keypoints_count < self.adaptive_min_visible_keypoints:
+        if estimate.visible_keypoints_count < self.min_visible_keypoints:
             rejection_reasons.append("insufficient_keypoints")
-        if estimate.visible_lines_count < self.adaptive_min_visible_lines:
+        if estimate.visible_lines_count < self.min_visible_lines:
             rejection_reasons.append("insufficient_lines")
 
         has_homography = estimate.homography_image_to_field is not None

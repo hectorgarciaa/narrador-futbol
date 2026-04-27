@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-
-FIELD_POSITION_CLASSES = frozenset({"player", "goalkeeper", "referee", "ball"})
 GROUND_POINT_BOTTOM_OFFSET_BY_CLASS = {
     "player": 0.04,
     "goalkeeper": 0.04,
@@ -115,7 +113,6 @@ PNLCALIB_LINE_WORLD_COORDS_M = {
 
 
 __all__ = [
-    "FIELD_POSITION_CLASSES",
     "GROUND_POINT_BOTTOM_OFFSET_BY_CLASS",
     "PNLCALIB_AUX_KEYPOINT_WORLD_COORDS_M",
     "PNLCALIB_LINE_WORLD_COORDS_M",

@@ -8,29 +8,7 @@ import numpy as np
 from .common import PitchGeometry
 
 
-def _projection_from_cam_params(cam_params: Dict[str, Any]) -> np.ndarray:
-    x_focal_length = float(cam_params["x_focal_length"])
-    y_focal_length = float(cam_params["y_focal_length"])
-    principal_point = np.asarray(cam_params["principal_point"], dtype=np.float64)
-    position_meters = np.asarray(cam_params["position_meters"], dtype=np.float64)
-    rotation = np.asarray(cam_params["rotation_matrix"], dtype=np.float64)
-
-    it_matrix = np.eye(4, dtype=np.float64)[:-1]
-    it_matrix[:, -1] = -position_meters
-    intrinsics = np.array(
-        [
-            [x_focal_length, 0.0, principal_point[0]],
-            [0.0, y_focal_length, principal_point[1]],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float64,
-    )
-    return intrinsics @ (rotation @ it_matrix)
-
-
-def _homography_from_camera_result(
-    camera_result: Optional[Dict[str, Any]],
-) -> Optional[np.ndarray]:
+def homography_from_camera_result(camera_result: Optional[Dict[str, Any]]) -> Optional[np.ndarray]:
     if camera_result is None:
         return None
 
@@ -56,7 +34,7 @@ def _homography_from_camera_result(
     return homography_image_to_centered / homography_image_to_centered[2, 2]
 
 
-def _centered_to_field_homography(
+def centered_to_field_homography(
     homography_image_to_centered: Optional[np.ndarray],
     geometry: PitchGeometry,
 ) -> Optional[np.ndarray]:
@@ -73,21 +51,6 @@ def _centered_to_field_homography(
     )
     homography_image_to_field = centered_to_field @ homography_image_to_centered
     return homography_image_to_field / homography_image_to_field[2, 2]
-
-
-def _to_template_homography(
-    homography_image_to_field: np.ndarray,
-    pixels_per_meter: float = 8.0,
-) -> np.ndarray:
-    return np.array(
-        [
-            [pixels_per_meter, 0.0, 0.0],
-            [0.0, pixels_per_meter, 0.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float64,
-    ) @ homography_image_to_field
-
 
 def project_image_points(
     points_xy: np.ndarray,
@@ -117,10 +80,8 @@ def points_inside_field_mask(
 
 
 __all__ = [
-    "_centered_to_field_homography",
-    "_homography_from_camera_result",
-    "_projection_from_cam_params",
-    "_to_template_homography",
+    "centered_to_field_homography",
+    "homography_from_camera_result",
     "points_inside_field_mask",
     "project_image_points",
 ]

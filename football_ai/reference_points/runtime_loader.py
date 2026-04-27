@@ -6,6 +6,7 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Dict, Optional, Tuple
 
 import torch
@@ -50,102 +51,8 @@ PNLCALIB_REQUIRED_MODULES = {
 }
 
 
-def get_default_pnlcalib_repo_path(project_root: Optional[Path] = None) -> Path:
-    root = find_project_root(project_root)
-    return root / "models" / "reference_points" / PNLCALIB_REPO_DIRNAME
-
-
-def _get_default_pnlcalib_weights_dir(project_root: Optional[Path] = None) -> Path:
-    root = find_project_root(project_root)
-    return root / "models" / "reference_points" / "pnlcalib_weights"
-
-
-def get_default_pnlcalib_weight_paths(
-    project_root: Optional[Path] = None,
-) -> Tuple[Path, Path]:
-    weights_dir = _get_default_pnlcalib_weights_dir(project_root)
-    return weights_dir / "SV_kp", weights_dir / "SV_lines"
-
-
-def get_missing_pnlcalib_modules() -> Dict[str, str]:
-    missing: Dict[str, str] = {}
-    for module_name, package_name in PNLCALIB_REQUIRED_MODULES.items():
-        try:
-            importlib.import_module(module_name)
-        except Exception:
-            missing[module_name] = package_name
-    return missing
-
-
-def ensure_pnlcalib_repo(
-    repo_dir: Optional[Path] = None,
-    repo_url: str = PNLCALIB_REPO_URL,
-) -> Path:
-    target_dir = get_default_pnlcalib_repo_path() if repo_dir is None else Path(repo_dir)
-    if target_dir.exists():
-        return target_dir
-
-    target_dir.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "clone", "--depth", "1", repo_url, str(target_dir)],
-        check=True,
-    )
-    return target_dir
-
-
-def ensure_pnlcalib_weights(
-    weights_kp_path: Optional[Path] = None,
-    weights_line_path: Optional[Path] = None,
-) -> Tuple[Path, Path]:
-    default_kp_path, default_line_path = get_default_pnlcalib_weight_paths()
-    resolved_kp_path = default_kp_path if weights_kp_path is None else Path(weights_kp_path)
-    resolved_line_path = default_line_path if weights_line_path is None else Path(weights_line_path)
-
-    resolved_kp_path.parent.mkdir(parents=True, exist_ok=True)
-    resolved_line_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not resolved_kp_path.exists():
-        urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_kp"], resolved_kp_path)
-    if not resolved_line_path.exists():
-        urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_lines"], resolved_line_path)
-
-    return resolved_kp_path, resolved_line_path
-
-
-def _prepend_sys_path(path: Path) -> None:
-    path_str = str(path)
-    if path_str in sys.path:
-        sys.path.remove(path_str)
-    sys.path.insert(0, path_str)
-
-
-def _import_pnlcalib_modules(repo_dir: Path) -> Dict[str, Any]:
-    _prepend_sys_path(repo_dir)
-    importlib.invalidate_caches()
-
-    cls_hrnet = importlib.import_module("model.cls_hrnet")
-    cls_hrnet_l = importlib.import_module("model.cls_hrnet_l")
-    utils_calib = importlib.import_module("utils.utils_calib")
-    utils_heatmap = importlib.import_module("utils.utils_heatmap")
-
-    return {
-        "get_cls_net": cls_hrnet.get_cls_net,
-        "get_cls_net_l": cls_hrnet_l.get_cls_net,
-        "FramebyFrameCalib": utils_calib.FramebyFrameCalib,
-        "get_keypoints_from_heatmap_batch_maxpool": utils_heatmap.get_keypoints_from_heatmap_batch_maxpool,
-        "get_keypoints_from_heatmap_batch_maxpool_l": utils_heatmap.get_keypoints_from_heatmap_batch_maxpool_l,
-        "complete_keypoints": utils_heatmap.complete_keypoints,
-        "coords_to_dict": utils_heatmap.coords_to_dict,
-    }
-
-
-def load_pnlcalib_runtime(
-    repo_dir: Optional[Path] = None,
-    weights_kp_path: Optional[Path] = None,
-    weights_line_path: Optional[Path] = None,
-    device: Optional[str] = None,
-) -> PnLCalibRuntime:
-    missing_modules = get_missing_pnlcalib_modules()
+def load_pnlcalib_runtime(device: Optional[str] = None) -> PnLCalibRuntime:
+    missing_modules = _get_missing_pnlcalib_modules()
     if missing_modules:
         missing_description = ", ".join(
             f"{module} -> pip install {package}"
@@ -155,8 +62,8 @@ def load_pnlcalib_runtime(
             f"Faltan dependencias para PnLCalib: {missing_description}"
         )
 
-    resolved_repo_dir = ensure_pnlcalib_repo(repo_dir)
-    resolved_kp_path, resolved_line_path = ensure_pnlcalib_weights(weights_kp_path, weights_line_path)
+    resolved_repo_dir = _ensure_pnlcalib_repo()
+    resolved_kp_path, resolved_line_path = _ensure_pnlcalib_weights()
     imported = _import_pnlcalib_modules(resolved_repo_dir)
 
     resolved_device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -196,16 +103,107 @@ def load_pnlcalib_runtime(
         coords_to_dict=imported["coords_to_dict"],
     )
 
+def _ensure_pnlcalib_repo(project_root: Optional[Path] = None, repo_url: str = PNLCALIB_REPO_URL) -> Path:
+    target_dir = _get_default_pnlcalib_repo_path(project_root)
+    if target_dir.exists():
+        return target_dir
 
-__all__ = [
-    "PNLCALIB_REPO_DIRNAME",
-    "PNLCALIB_REPO_URL",
-    "PNLCALIB_REQUIRED_MODULES",
-    "PNLCALIB_WEIGHTS",
-    "ensure_pnlcalib_repo",
-    "ensure_pnlcalib_weights",
-    "get_default_pnlcalib_repo_path",
-    "get_default_pnlcalib_weight_paths",
-    "get_missing_pnlcalib_modules",
-    "load_pnlcalib_runtime",
-]
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "clone", "--depth", "1", repo_url, str(target_dir)],
+        check=True,
+    )
+    return target_dir
+
+def _ensure_pnlcalib_weights(project_root: Optional[Path] = None) -> Tuple[Path, Path]:
+    kp_path, line_path = _get_default_pnlcalib_weight_paths(project_root)
+
+    kp_path.parent.mkdir(parents=True, exist_ok=True)
+    line_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not kp_path.exists():
+        urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_kp"], kp_path)
+    if not line_path.exists():
+        urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_lines"], line_path)
+
+    return kp_path, line_path
+
+def _get_default_pnlcalib_repo_path(project_root: Optional[Path] = None) -> Path:
+    root = find_project_root(project_root)
+    return root / "models" / "reference_points" / PNLCALIB_REPO_DIRNAME
+
+def _get_default_pnlcalib_weights_dir(project_root: Optional[Path] = None) -> Path:
+    root = find_project_root(project_root)
+    return root / "models" / "reference_points" / "pnlcalib_weights"
+
+def _get_default_pnlcalib_weight_paths(project_root: Optional[Path] = None) -> Tuple[Path, Path]:
+    weights_dir = _get_default_pnlcalib_weights_dir(project_root)
+    return weights_dir / "SV_kp", weights_dir / "SV_lines"
+
+def _get_missing_pnlcalib_modules() -> Dict[str, str]:
+    missing: Dict[str, str] = {}
+    for module_name, package_name in PNLCALIB_REQUIRED_MODULES.items():
+        try:
+            importlib.import_module(module_name)
+        except Exception:
+            missing[module_name] = package_name
+    return missing
+
+def _prepend_sys_path(path: Path) -> None:
+    path_str = str(path)
+    if path_str in sys.path:
+        sys.path.remove(path_str)
+    sys.path.insert(0, path_str)
+
+def _clear_conflicting_modules(repo_dir: Path, module_roots: tuple[str, ...]) -> None:
+    resolved_repo_dir = repo_dir.resolve()
+    for module_name in list(sys.modules.keys()):
+        if not any(
+            module_name == module_root or module_name.startswith(f"{module_root}.")
+            for module_root in module_roots
+        ):
+            continue
+        module = sys.modules.get(module_name)
+        module_file = getattr(module, "__file__", None)
+        if module_file is None:
+            sys.modules.pop(module_name, None)
+            continue
+        try:
+            resolved_module_file = Path(module_file).resolve()
+        except Exception:
+            sys.modules.pop(module_name, None)
+            continue
+        if resolved_repo_dir not in resolved_module_file.parents:
+            sys.modules.pop(module_name, None)
+
+def _register_repo_package(repo_dir: Path, package_name: str) -> None:
+    package_dir = (repo_dir / package_name).resolve()
+    package_module = ModuleType(package_name)
+    package_module.__file__ = str(package_dir)
+    package_module.__path__ = [str(package_dir)]
+    package_module.__package__ = package_name
+    sys.modules[package_name] = package_module
+
+def _import_pnlcalib_modules(repo_dir: Path) -> Dict[str, Any]:
+    _prepend_sys_path(repo_dir)
+    _clear_conflicting_modules(repo_dir, ("utils", "model"))
+    _register_repo_package(repo_dir, "utils")
+    _register_repo_package(repo_dir, "model")
+    importlib.invalidate_caches()
+
+    cls_hrnet = importlib.import_module("model.cls_hrnet")
+    cls_hrnet_l = importlib.import_module("model.cls_hrnet_l")
+    utils_calib = importlib.import_module("utils.utils_calib")
+    utils_heatmap = importlib.import_module("utils.utils_heatmap")
+
+    return {
+        "get_cls_net": cls_hrnet.get_cls_net,
+        "get_cls_net_l": cls_hrnet_l.get_cls_net,
+        "FramebyFrameCalib": utils_calib.FramebyFrameCalib,
+        "get_keypoints_from_heatmap_batch_maxpool": utils_heatmap.get_keypoints_from_heatmap_batch_maxpool,
+        "get_keypoints_from_heatmap_batch_maxpool_l": utils_heatmap.get_keypoints_from_heatmap_batch_maxpool_l,
+        "complete_keypoints": utils_heatmap.complete_keypoints,
+        "coords_to_dict": utils_heatmap.coords_to_dict,
+    }
+
+__all__ = [ "load_pnlcalib_runtime" ]
