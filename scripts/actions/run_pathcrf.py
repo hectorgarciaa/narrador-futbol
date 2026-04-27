@@ -17,7 +17,7 @@ from football_ai.actions import (  # noqa: E402
 )
 from football_ai.core.config import Config  # noqa: E402
 from football_ai.positions.position_dataset import resolve_tracks_path_for_video  # noqa: E402
-from football_ai.tracking_cli.paths import resolve_video_path, sanitize_video_stem  # noqa: E402
+from football_ai.pipeline.paths import resolve_video_path, sanitize_video_stem  # noqa: E402
 
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi"}

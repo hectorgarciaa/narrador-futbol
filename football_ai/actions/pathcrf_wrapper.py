@@ -12,7 +12,7 @@ import pandas as pd
 import torch
 
 from football_ai.core.serialization import convert_to_serializable
-from football_ai.tracking_cli.paths import sanitize_video_stem
+from football_ai.pipeline.paths import sanitize_video_stem
 from football_ai.visualization.pathcrf_drawer import PathCRFDrawer
 
 from .pathcrf_commentary import build_commentary_events_json

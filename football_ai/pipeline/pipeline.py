@@ -175,8 +175,8 @@ def _resolve_runtime_device_label(raw_device):
     return f"{normalized} (cpu)"
 
 
-def _resolve_pnlcalib_device(tracker):
-    field_projector = getattr(tracker, "field_projector", None)
+def _resolve_pnlcalib_device(tracking_phase):
+    field_projector = getattr(tracking_phase.tracker, "field_projector", None) if hasattr(tracking_phase, "tracker") else None
     if field_projector is None:
         return "cpu (pnlcalib disabled)"
     runtime = getattr(field_projector, "runtime", None)
@@ -197,8 +197,7 @@ def _resolve_frame_hook_device(frame_hook):
     return _resolve_runtime_device_label(runtime_device)
 
 
-def _resolve_position_infering_device(tracker):
-    position_phase = getattr(tracker, "position_infering_phase", None)
+def _resolve_position_infering_device(position_phase):
     if position_phase is None:
         return "cpu (position infering disabled)"
     role_session = getattr(position_phase, "role_session", None)
@@ -340,7 +339,12 @@ def run_tracking_pipeline(args):
         logger.info(f"Team detector configuration: {team_detector_conf}")
 
         # Run tracking
-        tracker = Tracker(
+        from football_ai.tracking import TrackingPhase
+        from football_ai.posession.phase import PosessionPhase
+        from football_ai.positions.phase import PositionInferingPhase
+        from scripts.utils import iter_video_frames
+
+        tracking_phase = TrackingPhase(
             model_path,
             detector_conf,
             team_detector_conf,
@@ -349,12 +353,19 @@ def run_tracking_pipeline(args):
             tracker_conf,
             projector_conf,
             config.project_root,
-            config=config,
-            video_path=video_path,
-            logger=logger,
-            expected_roles_by_team_override=lineup_expected_roles_by_team,
-            lineup_matcher=lineup_matcher,
         )
+        posession_phase = PosessionPhase(tracker_conf.get("possession"))
+        
+        position_phase = None
+        if config is not None and video_path is not None and logger is not None:
+            position_phase = PositionInferingPhase(
+                config,
+                video_path,
+                logger,
+                expected_roles_by_team_override=lineup_expected_roles_by_team,
+                lineup_matcher=lineup_matcher,
+            )
+
         online_commentary_bridge = create_app_live_commentary_bridge_from_env()
         if online_commentary_bridge is not None:
             logger.info("PathCRF live commentary bridge activado para esta ejecución.")
@@ -364,11 +375,11 @@ def run_tracking_pipeline(args):
 
         if bool(tracker_conf.get("print_runtime_devices", True)):
             print(
-                f"[runtime] pnlcalib: {_resolve_pnlcalib_device(tracker)}",
+                f"[runtime] pnlcalib: {_resolve_pnlcalib_device(tracking_phase)}",
                 flush=True,
             )
             print(
-                f"[runtime] position_infering: {_resolve_position_infering_device(tracker)}",
+                f"[runtime] position_infering: {_resolve_position_infering_device(position_phase)}",
                 flush=True,
             )
             print(
@@ -383,22 +394,81 @@ def run_tracking_pipeline(args):
 
         logger.info("Extracting tracks from video...")
         
-        tracks = tracker.get_tracks(
-            video_path,
-            show_kmeans,
-            frame_hook=frame_hook,
-            collect_visual_debug=four_panel_enabled,
-            profile_phases=profile_phases_enabled,
-        )
+        tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [], "possession": []}
+        visual_debug_frames = []
 
-        if four_panel_enabled:
+        tracking_phase.reset()
+        posession_phase.reset()
+        if position_phase:
+            position_phase.reset()
+
+        for frame_index, frame_time_ms, frame_bgr in iter_video_frames(video_path, getattr(args, "max_frames", None)):
+            tracking_packet, tracking_ms = tracking_phase.process(
+                frame_bgr,
+                frame_index=frame_index,
+                frame_time_ms=frame_time_ms,
+                show_kmeans=show_kmeans,
+                collect_visual_debug=four_panel_enabled,
+            )
+            
+            posession_packet, posession_ms = posession_phase.process(tracking_packet)
+            
+            final_packet = posession_packet
+            position_ms = 0.0
+            if position_phase:
+                position_packet, position_ms = position_phase.process(posession_packet)
+                final_packet = position_packet
+            
+            tracks_frame = final_packet["clean"]["tracks_frame"]
+            for cls in ["player", "goalkeeper", "referee", "ball"]:
+                tracks[cls].append(dict(tracks_frame[cls]))
+            
+            possession_info = final_packet["clean"].get("possession", {})
+            tracks["possession"].append(dict(possession_info))
+
+            if four_panel_enabled:
+                trace_debug = final_packet["trace"].get("visual_debug")
+                if trace_debug:
+                    visual_debug_frames.append(trace_debug)
+
+            if profile_phases_enabled:
+                prof = tracking_packet["trace"].get("profile_ms", {})
+                d_ms = prof.get("detector_ms", 0.0)
+                p_ms = prof.get("proj_ms", 0.0)
+                f_ms = prof.get("filter_ms", 0.0)
+                i_ms = prof.get("id_ms", 0.0)
+                b_ms = prof.get("byte_ms", 0.0)
+                c_ms = prof.get("canon_ms", 0.0)
+                
+                total_ms = tracking_ms + posession_ms + position_ms
+                pos_inf = f" | PosInf: {position_ms:.1f}ms" if position_phase else ""
+                
+                print(
+                    f"[frame {frame_index:04d}] "
+                    f"Detect: {d_ms:.1f}ms | Proj: {p_ms:.1f}ms | Filter: {f_ms:.1f}ms | "
+                    f"Id: {i_ms:.1f}ms | Byte: {b_ms:.1f}ms | Canon: {c_ms:.1f}ms | "
+                    f"Poss: {posession_ms:.1f}ms{pos_inf} || Total AI: {total_ms:.1f}ms",
+                    flush=True
+                )
+
+            if frame_hook is not None:
+                frame_hook(frame_index, frame_bgr, final_packet)
+
+        # Config required max tracks for drawing
+        max_tracks_per_class = {
+            "player": 22,
+            "goalkeeper": 2,
+            "referee": 3,
+            "ball": 1
+        }
+
+        if four_panel_enabled and visual_debug_frames:
             debug_frames_path = build_debug_frames_output_path(config, video_path)
-            save_debug_frames(tracker.visualization_debug_frames, debug_frames_path, logger)
+            save_debug_frames(visual_debug_frames, debug_frames_path, logger)
         
-        position_phase = tracker.position_infering_phase
         role_postprocess_result = (
             position_phase.summary()
-            if position_phase is not None and position_phase.enabled
+            if position_phase is not None and getattr(position_phase, "enabled", True)
             else None
         )
         if role_postprocess_result is not None:
@@ -419,8 +489,8 @@ def run_tracking_pipeline(args):
                 output,
                 show=show_output,
                 four_panel=four_panel_enabled,
-                debug_frames=(tracker.visualization_debug_frames if four_panel_enabled else None),
-                expected_counts=tracker.max_tracks_per_class,
+                debug_frames=(visual_debug_frames if four_panel_enabled else None),
+                expected_counts=max_tracks_per_class,
             )
             logger.info(f"Video with tracks saved to: {output}")
         else:

@@ -93,6 +93,32 @@ class Tracker:
         self.bytetrack_phase.reset()
         self.canonical_phase.reset()
 
+
+    def _phase_build_visual_debug_frame(
+        self, frame_index, detector_packet, bytetrack_packet, canonical_packet
+    ):
+        trace_detector = detector_packet.get("trace", {})
+        raw_detections = trace_detector.get("raw_detections", [])
+        
+        trace_bytetrack = bytetrack_packet.get("trace", {})
+        bytetrack_unconfirmed_association_debug = trace_bytetrack.get(
+            "unconfirmed_association_debug", []
+        )
+        
+        trace_canonical = canonical_packet.get("trace", {})
+        discarded = trace_canonical.get("discarded_detections", [])
+        discarded_not_tracked = trace_canonical.get("discarded_yolo_not_tracked", [])
+        discarded_tracked_no_canonical = trace_canonical.get("discarded_bytetrack_not_canonical", [])
+        
+        return {
+            "frame_num": int(frame_index),
+            "raw_detections": raw_detections,
+            "discarded_detections": discarded,
+            "discarded_yolo_not_tracked": discarded_not_tracked,
+            "discarded_bytetrack_not_canonical": discarded_tracked_no_canonical,
+            "bytetrack_unconfirmed_association": bytetrack_unconfirmed_association_debug,
+        }
+
     def process_frame(
         self,
         frame_bgr,
@@ -122,43 +148,57 @@ class Tracker:
             }
         """
         # 1. Detección
-        detector_packet, _ = self.detection_phase.process(
+        detector_packet, detector_ms = self.detection_phase.process(
             frame_bgr,
             frame_index=frame_index,
             frame_time_ms=frame_time_ms,
         )
 
         # 2. Proyección
-        reference_packet, _ = self.projection_phase.process(
+        reference_packet, proj_ms = self.projection_phase.process(
             frame_bgr,
             detector_packet,
         )
 
         # 3. Filtrado
-        filtering_packet, _ = self.filtering_phase.process(
+        filtering_packet, filter_ms = self.filtering_phase.process(
             reference_packet,
             active_track_boxes_xyxy=self.bytetrack_phase.active_track_boxes_xyxy(),
             geometry=self.projection_phase.geometry,
         )
 
         # 4. Identificación de equipos / clases
-        identification_packet, _ = self.identification_phase.process(
+        identification_packet, id_ms = self.identification_phase.process(
             frame_bgr,
             filtering_packet,
             show_kmeans=show_kmeans,
         )
 
         # 5. ByteTrack
-        bytetrack_packet, _ = self.bytetrack_phase.process(
+        bytetrack_packet, byte_ms = self.bytetrack_phase.process(
             identification_packet,
             collect_visual_debug=collect_visual_debug,
         )
 
         # 6. Canonización → salida pública
-        canonical_packet, _ = self.canonical_phase.process(
+        canonical_packet, canon_ms = self.canonical_phase.process(
             bytetrack_packet,
             collect_visual_debug=collect_visual_debug,
         )
+
+        canonical_packet.setdefault("trace", {})["profile_ms"] = {
+            "detector_ms": detector_ms,
+            "proj_ms": proj_ms,
+            "filter_ms": filter_ms,
+            "id_ms": id_ms,
+            "byte_ms": byte_ms,
+            "canon_ms": canon_ms,
+        }
+
+        if collect_visual_debug:
+            canonical_packet["trace"]["visual_debug"] = self._phase_build_visual_debug_frame(
+                frame_index, detector_packet, bytetrack_packet, canonical_packet
+            )
 
         # Re-etiquetamos la fase para que los consumidores externos vean
         # "TRACKING" en lugar de "CANONICALTRACK".

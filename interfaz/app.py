@@ -52,7 +52,7 @@ from football_ai.positions import (
     sanitize_video_stem,
     validate_lineup_payload,
 )
-from football_ai.tracking_cli.paths import (
+from football_ai.pipeline.paths import (
     build_output_video_path,
     resolve_video_path,
 )
