@@ -25,21 +25,19 @@ def _tlbr_iou(box_a, box_b):
         return 0.0
     if not np.all(np.isfinite(box_a[:4])) or not np.all(np.isfinite(box_b[:4])):
         return 0.0
+
     x1 = max(float(box_a[0]), float(box_b[0]))
     y1 = max(float(box_a[1]), float(box_b[1]))
     x2 = min(float(box_a[2]), float(box_b[2]))
     y2 = min(float(box_a[3]), float(box_b[3]))
-    inter_w = max(0.0, x2 - x1)
-    inter_h = max(0.0, y2 - y1)
-    inter = inter_w * inter_h
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
     if inter <= 0.0:
         return 0.0
+
     area_a = max(0.0, float(box_a[2] - box_a[0])) * max(0.0, float(box_a[3] - box_a[1]))
     area_b = max(0.0, float(box_b[2] - box_b[0])) * max(0.0, float(box_b[3] - box_b[1]))
     union = area_a + area_b - inter
-    if union <= 0.0:
-        return 0.0
-    return float(inter / union)
+    return 0.0 if union <= 0.0 else float(inter / union)
 
 
 def filter_reference_points(
@@ -51,131 +49,127 @@ def filter_reference_points(
     field_length_m=None,
     field_width_m=None,
 ):
-    reference_clean = reference_packet["clean"]
-    num_detections = reference_clean["num_detections"]
-    det_id = reference_clean["det_id"]
-    bbox_xyxy = reference_clean["bbox_xyxy"]
-    confidence = reference_clean["confidence"]
-    class_name = reference_clean["class_name"]
-    field_positions_m = reference_clean["field_positions_m"]
-    homography = np.asarray(reference_clean["homography_image_to_field_3x3"], dtype=np.float64)
-    ground_points_image_original = np.asarray(
-        reference_clean["ground_points_image_original"],
+    clean_in = reference_packet["clean"]
+    num_detections = int(clean_in["num_detections"])
+    homography_valid = bool(clean_in["homography_valid"])
+    field_positions_usable = bool(clean_in["field_positions_usable_for_tracking"])
+
+    if geometry is None:
+        geometry = PitchGeometry(
+            field_length_m=106.0 if field_length_m is None else float(field_length_m),
+            field_width_m=68.0 if field_width_m is None else float(field_width_m),
+        )
+    field_length_m = float(geometry.field_length_m if field_length_m is None else field_length_m)
+    field_width_m = float(geometry.field_width_m if field_width_m is None else field_width_m)
+
+    ground_points = np.asarray(
+        clean_in["ground_points_image_original"],
         dtype=np.float32,
     ).reshape(-1, 2)
-    recomputed_positions = project_image_points(ground_points_image_original, homography).astype(np.float32)
-    finite_mask = np.all(np.isfinite(recomputed_positions), axis=1)
+    homography = np.asarray(
+        clean_in["homography_image_to_field_3x3"],
+        dtype=np.float64,
+    )
+    projected_positions = project_image_points(ground_points, homography).astype(np.float32)
+    finite_mask = np.all(np.isfinite(projected_positions), axis=1)
     inside_mask = np.zeros(num_detections, dtype=bool)
+
+    if homography_valid and field_positions_usable and np.any(finite_mask):
+        candidates = projected_positions[finite_mask]
+        inside_pitch = points_inside_field_mask(candidates, geometry=geometry, margin_m=0.0)
+        inside_sideline_band = (
+            (candidates[:, 0] >= 0.0)
+            & (candidates[:, 0] <= field_length_m)
+            & (candidates[:, 1] >= -float(sideline_margin_m))
+            & (candidates[:, 1] <= field_width_m + float(sideline_margin_m))
+        )
+        inside_mask[finite_mask] = np.logical_or(inside_pitch, inside_sideline_band)
+
     active_track_boxes = []
     for box in active_track_boxes_xyxy or []:
         box = np.asarray(box, dtype=np.float32).reshape(-1)
         if box.size >= 4:
             active_track_boxes.append(box[:4])
 
-    homography_valid = reference_clean["homography_valid"]
-    field_positions_usable = reference_clean["field_positions_usable_for_tracking"]
-    if geometry is None:
-        geometry = PitchGeometry(
-            field_length_m=106.0 if field_length_m is None else float(field_length_m),
-            field_width_m=68.0 if field_width_m is None else float(field_width_m),
-        )
-    current_field_length = float(field_length_m if field_length_m is not None else geometry.field_length_m)
-    current_field_width = float(field_width_m if field_width_m is not None else geometry.field_width_m)
-
-    if homography_valid and field_positions_usable and np.any(finite_mask):
-        candidate_points = recomputed_positions[finite_mask]
-        base_inside_mask = points_inside_field_mask(
-            candidate_points,
-            geometry=geometry,
-            margin_m=0.0,
-        )
-        x_coords = candidate_points[:, 0]
-        y_coords = candidate_points[:, 1]
-        sideline_inside_mask = (
-            (x_coords >= 0.0)
-            & (x_coords <= current_field_length)
-            & (y_coords >= -float(sideline_margin_m))
-            & (y_coords <= current_field_width + float(sideline_margin_m))
-        )
-        inside_mask[finite_mask] = np.logical_or(base_inside_mask, sideline_inside_mask)
-
-    keep_mask = []
-    reject_code = []
-    trace_detections = []
+    kept_indices = []
+    accepted_trace = []
+    rejected_trace = []
     rescued_count = 0
 
     for index in range(num_detections):
-        max_iou = 0.0
-        det_box = bbox_xyxy[index]
-        for track_box in active_track_boxes:
-            max_iou = max(max_iou, _tlbr_iou(det_box, track_box))
-
+        max_iou = max(
+            (_tlbr_iou(clean_in["bbox_xyxy"][index], track_box) for track_box in active_track_boxes),
+            default=0.0,
+        )
         is_finite = bool(finite_mask[index])
         inside_field = bool(inside_mask[index])
-        rescued_by_track_overlap = False
+        rescued_by_iou = False
 
         if not homography_valid or not field_positions_usable:
             keep = True
-            code = REJECT_CODE_HOMOGRAPHY_NOT_USABLE
+            reject_code = REJECT_CODE_HOMOGRAPHY_NOT_USABLE
         elif not is_finite:
             keep = False
-            code = REJECT_CODE_INVALID_FIELD_POSITION
+            reject_code = REJECT_CODE_INVALID_FIELD_POSITION
         elif inside_field:
             keep = True
-            code = REJECT_CODE_KEPT
+            reject_code = REJECT_CODE_KEPT
         elif max_iou > 0.0:
             keep = True
-            code = REJECT_CODE_RESCUED_BY_TRACK_OVERLAP
-            rescued_by_track_overlap = True
+            reject_code = REJECT_CODE_RESCUED_BY_TRACK_OVERLAP
+            rescued_by_iou = True
             rescued_count += 1
         else:
             keep = False
-            code = REJECT_CODE_OUTSIDE_FIELD
+            reject_code = REJECT_CODE_OUTSIDE_FIELD
 
-        keep_mask.append(bool(keep))
-        reject_code.append(int(code))
-        trace_detections.append(
-            {
-                "det_id": det_id[index],
-                "keep": keep,
-                "reject_code": code,
-                "reject_label": REJECT_CODE_LABELS[code],
-                "is_finite_field_position": is_finite,
-                "inside_field": inside_field,
-                "rescued_by_track_overlap": rescued_by_track_overlap,
-                "max_iou_with_active_tracks": float(max_iou),
-            }
-        )
+        trace_item = {
+            "det_id": clean_in["det_id"][index],
+            "bbox_xyxy": list(clean_in["bbox_xyxy"][index]),
+            "confidence": float(clean_in["confidence"][index]),
+            "class_name": str(clean_in["class_name"][index]),
+            "field_position_m": list(clean_in["field_positions_m"][index]),
+            "keep": bool(keep),
+            "reject_code": int(reject_code),
+            "reject_label": REJECT_CODE_LABELS[reject_code],
+            "is_finite_field_position": is_finite,
+            "inside_field": inside_field,
+            "rescued_by_track_overlap": rescued_by_iou,
+            "max_iou_with_active_tracks": float(max_iou),
+        }
+        if keep:
+            kept_indices.append(index)
+            accepted_trace.append(trace_item)
+        else:
+            rejected_trace.append(trace_item)
 
-    clean = {
-        "num_detections": num_detections,
-        "det_id": det_id,
-        "bbox_xyxy": bbox_xyxy,
-        "confidence": confidence,
-        "class_name": class_name,
-        "field_positions_m": field_positions_m,
-        "keep_mask": keep_mask,
-        "reject_code": reject_code,
-        "kept_count": sum(1 for item in keep_mask if item),
-        "rejected_count": sum(1 for item in keep_mask if not item),
+    clean_out = {
+        key: [value[index] for index in kept_indices]
+        if isinstance(value, list) and len(value) == num_detections
+        else value
+        for key, value in clean_in.items()
     }
-    trace = {
-        "detections": trace_detections,
-        "summary": {
-            "total_before_filter": num_detections,
-            "total_kept": clean["kept_count"],
-            "total_rejected": clean["rejected_count"],
-            "total_rescued_by_iou": rescued_count,
-        },
-    }
+    clean_out["num_detections"] = len(kept_indices)
+
     return make_phase_packet(
         phase_name=PHASE_FILTERING,
         frame_index=reference_packet["frame_index"],
         frame_time_ms=reference_packet["frame_time_ms"],
         image_width=reference_packet["image_width"],
         image_height=reference_packet["image_height"],
-        clean=clean,
-        trace=trace,
+        clean=clean_out,
+        trace={
+            "accepted_detections": accepted_trace,
+            "rejected_detections": rejected_trace,
+            "summary": {
+                "total_before_filter": num_detections,
+                "total_kept": len(kept_indices),
+                "total_rejected": len(rejected_trace),
+                "total_rescued_by_iou": rescued_count,
+                "homography_valid": homography_valid,
+                "field_positions_usable_for_tracking": field_positions_usable,
+            },
+        },
     )
 
 
