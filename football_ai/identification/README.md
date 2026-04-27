@@ -100,8 +100,17 @@ td = TeamDetector(
     team_candidate_classes=["player", "goalkeeper"],
 )
 
-# frame_detections es el resultado YOLO de un frame (objeto Results)
-team_info_list = td.detect_teams(frame_detections, show_plot=False)
+# Entrada desacoplada de YOLO: frame + arrays alineados por detección
+team_info_list = td.detect_teams(
+    frame_bgr=frame_bgr,
+    bbox_xyxy=bbox_xyxy,
+    confidence=confidence,
+    yolo_class_labels=class_name,
+    field_positions=field_positions,
+    field_width_m=68.0,
+    sideline_band_distance_m=3.0,
+    show_plot=False,
+)
 # → lista con un dict por detección:
 # [{"class": "player", "team": "Real Madrid", "distances": {...}, "shirt_color": [L, A, B], "bbox_size": float}, ...]
 ```

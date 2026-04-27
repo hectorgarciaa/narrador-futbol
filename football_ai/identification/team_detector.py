@@ -40,10 +40,23 @@ class TeamDetector:
 
         self.n_frame = -1
 
-    def detect_teams(self, frame_detections, field_positions, yolo_class_labels, field_width_m, sideline_band_distance_m, show_plot=False):
+    def detect_teams(
+        self,
+        frame_bgr,
+        bbox_xyxy,
+        confidence,
+        yolo_class_labels,
+        field_positions,
+        field_width_m,
+        sideline_band_distance_m,
+        show_plot=False,
+    ):
         self.n_frame += 1
         shirts = []
         teams_of_detected_objects = []
+        boxes = np.asarray(bbox_xyxy, dtype=np.float32).reshape(-1, 4)
+        confidences = np.asarray(confidence, dtype=np.float32).reshape(-1)
+        yolo_class_labels = np.asarray(yolo_class_labels, dtype=object).reshape(-1)
         x_positions = self._get_k_positions(field_positions, yolo_class_labels, 0)
         y_positions = self._get_k_positions(field_positions, yolo_class_labels, 1)
         x_positions.sort()
@@ -54,12 +67,12 @@ class TeamDetector:
         color_candidate_indices = []
         color_candidate_shirts = []
 
-        for det_idx, object_detected in enumerate(frame_detections):
-            class_name = object_detected.names[object_detected.boxes.cls.item()]
+        for det_idx, class_name in enumerate(yolo_class_labels):
+            class_name = str(class_name)
             if class_name not in self.candidate_classes:
                 continue
 
-            shirt = self._extract_shirt_crop(object_detected)
+            shirt = self._extract_shirt_crop(frame_bgr, boxes[det_idx])
             shirts_by_detection_idx[det_idx] = shirt
             if show_plot and shirt is not None:
                 shirts.append(shirt)
@@ -74,10 +87,10 @@ class TeamDetector:
             for det_idx, shirt_color in zip(color_candidate_indices, shirt_colors):
                 colors_by_detection_idx[det_idx] = shirt_color
         
-        for det_idx, (object_detected, field_position) in enumerate(zip(frame_detections, field_positions)):
+        for det_idx, field_position in enumerate(field_positions):
             field_position = self._field_position_to_tuple(field_position)
-            class_name = object_detected.names[object_detected.boxes.cls.item()]
-            bbox_size = self._extract_bbox_size(object_detected)
+            class_name = str(yolo_class_labels[det_idx])
+            bbox_size = self._extract_bbox_size(boxes[det_idx])
             if class_name in self.candidate_classes:
                 shirt = shirts_by_detection_idx.get(det_idx)
                 shirt_color = colors_by_detection_idx.get(det_idx)
@@ -92,7 +105,7 @@ class TeamDetector:
                             effective_class = effective_class if effective_class is not None else class_name
                         
                         if sample_bucket in self.updated:
-                            conf = float(object_detected.boxes.conf.item()) if object_detected.boxes.conf is not None else 0
+                            conf = float(confidences[det_idx])
                             if conf >= self.min_conf[sample_bucket] or (not self.updated[sample_bucket] and self.n_frame > 200):
                                 self.class_samples[sample_bucket].append(shirt_color)
 
@@ -135,8 +148,7 @@ class TeamDetector:
             if class_name not in {"player", "goalkeeper"}:
                 continue
 
-            field_position_aux = (field_positions[det_idx] if det_idx < len(field_positions) else None)
-            field_position_aux = self._field_position_to_tuple(field_position_aux)
+            field_position_aux = self._field_position_to_tuple(field_positions[det_idx])
             if field_position_aux is None:
                 continue
             x_positions.append(float(field_position_aux[k]))
@@ -154,9 +166,11 @@ class TeamDetector:
         except (TypeError, ValueError):
             return None
 
-    def _extract_shirt_crop(self, object_detected):
-        x1, y1, x2, y2 = map(int, object_detected.boxes.xyxy[0])
-        player_pixels = object_detected.orig_img[y1:y2, x1:x2]
+    def _extract_shirt_crop(self, frame_bgr, bbox_xyxy):
+        if frame_bgr is None or bbox_xyxy is None:
+            return None
+        x1, y1, x2, y2 = map(int, np.asarray(bbox_xyxy, dtype=np.float32).reshape(-1)[:4])
+        player_pixels = frame_bgr[y1:y2, x1:x2]
         if player_pixels.size > 0:
             h = player_pixels.shape[0]
             shirt = player_pixels[:int(0.5*h), :]
@@ -164,9 +178,9 @@ class TeamDetector:
         return None
     
     @staticmethod
-    def _extract_bbox_size(object_detected):
+    def _extract_bbox_size(bbox_xyxy):
         try:
-            x1, y1, x2, y2 = map(int, object_detected.boxes.xyxy[0])
+            x1, y1, x2, y2 = map(int, np.asarray(bbox_xyxy, dtype=np.float32).reshape(-1)[:4])
         except Exception:
             return 0.0
         return max(0, x2 - x1) * max(0, y2 - y1)
