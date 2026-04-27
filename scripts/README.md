@@ -104,7 +104,7 @@ python scripts/analyze_pnlcalib_on_detections.py
 
 **Notas:**
 - Usa los thresholds y parámetros del proyector definidos en `tracking.projector.constructor` dentro de `config.yaml`.
-- Es útil para depurar clips donde PnLCalib encuentra pocos keypoints/líneas o genera homografías degeneradas. Si el pipeline activo del tracker usa rescate adaptativo de thresholds, conviene contrastar este análisis con la salida real de `field_projection.quality_diagnostics` para ver en qué intento se aceptó o rechazó cada frame.
+- Es útil para depurar clips donde PnLCalib encuentra pocos keypoints/líneas o genera homografías degeneradas. Si el pipeline activo del tracker usa rescate adaptativo de thresholds, conviene contrastar este análisis con la salida real de `reference_points.trace.attempts` y `reference_points.trace.diagnostics` para ver en qué intento se aceptó o rechazó cada frame.
 
 ---
 
@@ -156,7 +156,7 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto el mismo comportamiento que
 python scripts/analyze_debug_frames.py output/tracks_json/tracker/<video_sanitizado>_debug_frames.json
 ```
 
-Cuando la instrumentación de depuración está activa, `discarded_yolo_not_tracked` también puede incluir `bytetrack_reason` y `bytetrack_stage`, útiles para saber si la detección cayó por umbral de activación, supresión de nuevos candidatos por solape o falta de matching. Además, cada frame puede guardar `frame_num` y `bytetrack_unconfirmed_association`, con el diagnóstico detallado del matching de tracks tentativos (`unconfirmed`): mejor candidato, IoU, penalizaciones de clase/tamaño/campo, conflicto de asignación y outcome final. En `field_projection.quality_diagnostics` también quedan `homography_quality_status` (`good` o `rejected`), `homography_quality_score` y el desglose de `geometry_fit`, `support_quality` y `coverage_quality`; si el estado es `rejected`, el pipeline ya no usa `field_position_m` y cae a bbox.
+Cuando la instrumentación de depuración está activa, `discarded_yolo_not_tracked` también puede incluir `bytetrack_reason` y `bytetrack_stage`, útiles para saber si la detección cayó por umbral de activación, supresión de nuevos candidatos por solape o falta de matching. Además, cada frame puede guardar `frame_num` y `bytetrack_unconfirmed_association`, con el diagnóstico detallado del matching de tracks tentativos (`unconfirmed`): mejor candidato, IoU, penalizaciones de clase/tamaño/campo, conflicto de asignación y outcome final. En el packet `reference_points`, la traza conserva `attempts`, `selected_attempt_index`, `rejection_type` y `rejection_reasons`; si la homografía del frame no es usable, el pipeline ya no usa `field_position_m` y cae a bbox.
 
 **Auditoría conjunta de homografía + ByteTrack + canónico:**
 ```bash

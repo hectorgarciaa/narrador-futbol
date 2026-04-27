@@ -1,11 +1,15 @@
+import cv2
 import numpy as np
 import supervision as sv
 from time import perf_counter
 
 from football_ai.detection import Detector
-from football_ai.filtering import filter_post_homography
+from football_ai.filtering import filter_reference_points
 from football_ai.identification import TeamDetector
-from football_ai.reference_points import PnLCalibFieldProjector
+from football_ai.reference_points import (
+    PnLCalibFieldProjector,
+    build_reference_points_packet_without_homography,
+)
 from football_ai.tracking.byte_tracker import ByteTrack
 from football_ai.tracking.tracker_logic_mixin import TrackerLogicMixin
 from football_ai.tracking.possession import PossessionConfig, TeamPossessionEstimator
@@ -243,36 +247,38 @@ class Tracker(TrackerLogicMixin):
             == cls._normalize_track_identifier(right_track_id)
         )
 
-    def _phase_prepare_frame_inputs(self, detections, collect_visual_debug):
+    def _phase_prepare_frame_inputs(self, frame_bgr, detector_packet, collect_visual_debug):
         subphase_rows = []
+        detector_clean = detector_packet["clean"]
+        detector_trace = detector_packet["trace"]
 
         t0 = perf_counter()
-        subphase_rows.append(("Filtrar clases YOLO soportadas", (perf_counter() - t0) * 1000.0))
-
-        t0 = perf_counter()
-        detections_sv = sv.Detections.from_ultralytics(detections)
-        frame_size = (
-            None
-            if detections.orig_img is None
-            else (int(detections.orig_img.shape[1]), int(detections.orig_img.shape[0]))
+        frame_size = (detector_packet["image_width"], detector_packet["image_height"])
+        detection_boxes_all = np.asarray(detector_clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4)
+        detection_confidence_all = np.asarray(detector_clean["confidence"], dtype=np.float32).reshape(-1)
+        detection_class_ids_all = np.asarray(detector_clean["class_id"], dtype=np.int32).reshape(-1)
+        detections_sv_all = sv.Detections(
+            xyxy=detection_boxes_all,
+            confidence=detection_confidence_all,
+            class_id=detection_class_ids_all,
         )
         subphase_rows.append(("Convertir a supervision + frame_size", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
-        raw_detections, detection_class_labels = self._get_raw_detections(
-            detections,
+        raw_detections, detection_class_labels, detection_det_ids, detection_bbox_xyxy, detection_confidence = self._get_raw_detections(
+            detector_clean,
+            detector_trace,
             collect_visual_debug,
         )
         subphase_rows.append(("Extraer detecciones RAW", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
-        field_projection, field_positions, ground_points_projected = (
-            self._get_field_projection_and_positions(
-                detections_sv,
-                detection_class_labels,
-                detections.orig_img,
-            )
+        reference_packet = (
+            self.field_projector.project_frame(frame_bgr, detector_packet)
+            if self.field_projector is not None
+            else build_reference_points_packet_without_homography(detector_packet)
         )
+        reference_clean = reference_packet["clean"]
         subphase_rows.append(("Proyección de campo (PnLCalib)", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
@@ -288,39 +294,46 @@ class Tracker(TrackerLogicMixin):
                 continue
             active_track_boxes.append(tlbr[:4])
 
-        keep_mask, field_positions = filter_post_homography(
-            field_positions,
-            has_homography=bool(
-                field_projection is not None
-                and getattr(field_projection, "has_homography", False)
-            ),
-            field_positions_usable_for_tracking=bool(
-                getattr(field_projection, "field_positions_usable_for_tracking", True)
-            ),
+        filtering_packet = filter_reference_points(
+            reference_packet,
+            active_track_boxes_xyxy=active_track_boxes,
             geometry=getattr(self.field_projector, "geometry", None),
             field_length_m=self.referee_field_length_m,
             field_width_m=self.referee_field_width_m,
-            detection_boxes=detections_sv.xyxy if len(detections_sv) > 0 else None,
-            active_track_boxes=active_track_boxes,
         )
-        if not np.all(keep_mask):
-            keep_indices = np.flatnonzero(keep_mask).tolist()
-            detections.boxes = detections.boxes[keep_indices]
-            detections_sv = detections_sv[keep_mask]
-            detection_class_labels = [detection_class_labels[idx] for idx in keep_indices]
-            ground_points_projected = np.asarray(
-                ground_points_projected,
-                dtype=np.float32,
-            ).reshape(-1, 2)[keep_mask]
+        filtering_clean = filtering_packet["clean"]
+
+        field_positions_supported = np.asarray(
+            filtering_clean["field_positions_m"],
+            dtype=np.float32,
+        ).reshape(-1, 2)
+        ground_points_supported = np.asarray(
+            reference_clean["ground_points_image_original"],
+            dtype=np.float32,
+        ).reshape(-1, 2)
+        keep_mask = np.asarray(filtering_clean["keep_mask"], dtype=bool)
+        if len(keep_mask) > 0:
+            detections_sv = detections_sv_all[keep_mask]
+            field_positions = field_positions_supported[keep_mask]
+            ground_points_projected = ground_points_supported[keep_mask]
+            detection_class_labels = [
+                detection_class_labels[index]
+                for index, keep in enumerate(keep_mask.tolist())
+                if keep
+            ]
+            detection_det_ids = detection_det_ids[keep_mask]
+            detection_bbox_xyxy = detection_bbox_xyxy[keep_mask]
+            detection_confidence = detection_confidence[keep_mask]
             if raw_detections:
-                filtered_raw_detections = []
-                for new_raw_idx, old_idx in enumerate(keep_indices):
-                    if old_idx >= len(raw_detections):
-                        continue
-                    raw_detection = dict(raw_detections[old_idx])
-                    raw_detection["raw_det_idx"] = int(new_raw_idx)
-                    filtered_raw_detections.append(raw_detection)
-                raw_detections = filtered_raw_detections
+                raw_detections = [
+                    raw_detection
+                    for raw_detection, keep in zip(raw_detections, keep_mask.tolist())
+                    if keep
+                ]
+        else:
+            detections_sv = detections_sv_all
+            field_positions = field_positions_supported
+            ground_points_projected = ground_points_supported
         subphase_rows.append(("Filtrar detecciones fuera del campo proyectado", (perf_counter() - t0) * 1000.0))
         return {
             "payload": (
@@ -328,18 +341,24 @@ class Tracker(TrackerLogicMixin):
                 frame_size,
                 raw_detections,
                 detection_class_labels,
-                field_projection,
+                reference_packet,
                 field_positions,
                 ground_points_projected,
+                detection_bbox_xyxy,
+                detection_confidence,
+                detection_det_ids,
             ),
             "subphase_rows": subphase_rows,
         }
 
     def _phase_assign_team_and_enrich_metadata(
         self,
-        detections,
+        frame_bgr,
         detections_sv,
         raw_detections,
+        detection_det_ids,
+        detection_bbox_xyxy,
+        detection_confidence,
         detection_class_labels,
         show_kmeans,
         field_positions,
@@ -352,8 +371,16 @@ class Tracker(TrackerLogicMixin):
             detection_class_labels,
             dtype=object,
         )
-                                       
-        teams_of_detected_objects = self.team_detector.detect_teams(detections, field_positions, yolo_class_labels, self.referee_field_width_m, self.referee_sideline_band_distance_m, show_kmeans)
+        teams_of_detected_objects = self.team_detector.detect_teams(
+            frame_bgr,
+            detection_bbox_xyxy,
+            detection_confidence,
+            yolo_class_labels,
+            field_positions,
+            self.referee_field_width_m,
+            self.referee_sideline_band_distance_m,
+            show_kmeans,
+        )
         subphase_rows.append(("TeamDetector.detect_teams", (perf_counter() - t0) * 1000.0))
 
         t0 = perf_counter()
@@ -398,6 +425,7 @@ class Tracker(TrackerLogicMixin):
             teams_of_detected_objects,
             field_positions,
             ground_points_projected,
+            detection_det_ids,
         )
         subphase_rows.append(("Enriquecer metadata de detecciones", (perf_counter() - t0) * 1000.0))
         return {
@@ -845,7 +873,7 @@ class Tracker(TrackerLogicMixin):
         used_canonical_ids_in_frame,
         tracks,
         n_frame,
-        field_projection,
+        reference_packet,
         build_reserved_seed_track_payload_fn,
     ):
         for canonical_id, state in canonical_state.items():
@@ -855,24 +883,29 @@ class Tracker(TrackerLogicMixin):
                 continue
             tracks["goalkeeper"][n_frame][canonical_id] = build_reserved_seed_track_payload_fn(
                 state,
-                field_projection,
+                reference_packet,
             )
 
     def _phase_collect_raw_ball_candidates(
         self,
-        detections,
+        detection_bbox_xyxy,
+        detection_confidence,
+        detection_class_labels,
+        detection_det_ids,
         field_positions,
         ground_points_projected,
         ball_candidates,
     ):
-        if detections.boxes is None or len(detections.boxes) <= 0:
+        if len(detection_bbox_xyxy) <= 0:
             return
-        boxes = detections.boxes
-        xyxy = boxes.xyxy.cpu().numpy()
-        conf = boxes.conf.cpu().numpy()
-        cls = boxes.cls.cpu().numpy().astype(int)
-        for raw_idx, (bbox, score, cid) in enumerate(zip(xyxy, conf, cls)):
-            class_name = detections.names[cid]
+        for raw_idx, (bbox, score, class_name, det_id) in enumerate(
+            zip(
+                detection_bbox_xyxy,
+                detection_confidence,
+                detection_class_labels,
+                detection_det_ids,
+            )
+        ):
             if class_name != "ball" or score < self.ball_min_conf:
                 continue
             x1, y1, x2, y2 = bbox.tolist()
@@ -897,7 +930,7 @@ class Tracker(TrackerLogicMixin):
                         ),
                     },
                     "source": "raw",
-                    "raw_det_idx": int(raw_idx),
+                    "raw_det_idx": int(det_id),
                 }
             )
 
@@ -1071,8 +1104,6 @@ class Tracker(TrackerLogicMixin):
     ):
         self.possession_estimator = TeamPossessionEstimator(self.possession_config)
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [], "possession": []}
-
-        model_detections = self.model.detect(video)
         
         visual_debug_frames = [] if collect_visual_debug else None
         
@@ -1083,228 +1114,249 @@ class Tracker(TrackerLogicMixin):
         self._initialize_reserved_penalty_spot_players(canonical_state)
         
         ball_state = None
-        for n_frame, detections in enumerate(model_detections):
-            frame_phase_rows = []
+        capture = cv2.VideoCapture(str(video))
+        fps = capture.get(cv2.CAP_PROP_FPS) or 25.0
+        frame_interval_ms = 1000.0 / float(fps if fps > 0 else 25.0)
+        n_frame = 0
+        try:
+            while True:
+                ok, frame_bgr = capture.read()
+                if not ok:
+                    break
+                frame_phase_rows = []
+                detector_packet = self.model.predict_frame(
+                    frame_bgr,
+                    frame_index=n_frame,
+                    frame_time_ms=n_frame * frame_interval_ms,
+                )
 
-            (
-                prepare_phase_result,
-                elapsed_ms,
-            ) = self._measure_phase_execution(
-                self._phase_prepare_frame_inputs,
-                detections,
-                collect_visual_debug,
-            )
-            (
                 (
+                    prepare_phase_result,
+                    elapsed_ms,
+                ) = self._measure_phase_execution(
+                    self._phase_prepare_frame_inputs,
+                    frame_bgr,
+                    detector_packet,
+                    collect_visual_debug,
+                )
+                (
+                    (
+                        detections_sv,
+                        frame_size,
+                        raw_detections,
+                        detection_class_labels,
+                        reference_packet,
+                        field_positions,
+                        ground_points_projected,
+                        detection_bbox_xyxy,
+                        detection_confidence,
+                        detection_det_ids,
+                    )
+                ) = prepare_phase_result["payload"]
+                frame_phase_rows.append((
+                    "Preparar detecciones y proyección",
+                    elapsed_ms,
+                    prepare_phase_result.get("subphase_rows"),
+                ))
+
+                (
+                    assign_phase_result,
+                    elapsed_ms,
+                ) = self._measure_phase_execution(
+                    self._phase_assign_team_and_enrich_metadata,
+                    frame_bgr,
                     detections_sv,
-                    frame_size,
                     raw_detections,
+                    detection_det_ids,
+                    detection_bbox_xyxy,
+                    detection_confidence,
                     detection_class_labels,
-                    field_projection,
+                    show_kmeans,
                     field_positions,
                     ground_points_projected,
                 )
-            ) = prepare_phase_result["payload"]
-            frame_phase_rows.append((
-                "Preparar detecciones y proyección",
-                elapsed_ms,
-                prepare_phase_result.get("subphase_rows"),
-            ))
-
-            (
-                assign_phase_result,
-                elapsed_ms,
-            ) = self._measure_phase_execution(
-                self._phase_assign_team_and_enrich_metadata,
-                detections,
-                detections_sv,
-                raw_detections,
-                detection_class_labels,
-                show_kmeans,
-                field_positions,
-                ground_points_projected,
-            )
-            (
                 (
-                    teams_of_detected_objects,
+                    (
+                        teams_of_detected_objects,
+                        teams_labels,
+                        class_labels,
+                        yolo_class_labels,
+                    )
+                ) = assign_phase_result["payload"]
+                frame_phase_rows.append((
+                    "Asignar equipo y enriquecer metadata",
+                    elapsed_ms,
+                    assign_phase_result.get("subphase_rows"),
+                ))
+
+                bytetrack_phase_result, elapsed_ms = self._measure_phase_execution(
+                    self._phase_update_bytetrack,
+                    detections_sv,
                     teams_labels,
                     class_labels,
                     yolo_class_labels,
+                    collect_visual_debug,
                 )
-            ) = assign_phase_result["payload"]
-            frame_phase_rows.append((
-                "Asignar equipo y enriquecer metadata",
-                elapsed_ms,
-                assign_phase_result.get("subphase_rows"),
-            ))
+                (
+                    tracks_detection,
+                    bytetrack_not_tracked_reason_by_raw_idx,
+                ) = bytetrack_phase_result
+                frame_phase_rows.append(("Asociación ByteTrack", elapsed_ms))
 
-            bytetrack_phase_result, elapsed_ms = self._measure_phase_execution(
-                self._phase_update_bytetrack,
-                detections_sv,
-                teams_labels,
-                class_labels,
-                yolo_class_labels,
-                collect_visual_debug,
-            )
-            (
-                tracks_detection,
-                bytetrack_not_tracked_reason_by_raw_idx,
-            ) = bytetrack_phase_result
-            frame_phase_rows.append(("Asociación ByteTrack", elapsed_ms))
+                _, elapsed_ms = self._measure_phase_execution(
+                    self._phase_initialize_empty_frame_tracks,
+                    tracks,
+                )
+                frame_phase_rows.append(("Inicializar contenedores de frame", elapsed_ms))
 
-            _, elapsed_ms = self._measure_phase_execution(
-                self._phase_initialize_empty_frame_tracks,
-                tracks,
-            )
-            frame_phase_rows.append(("Inicializar contenedores de frame", elapsed_ms))
+                sorted_tracked_detections = self._sort_tracked_detections(tracks_detection)
+                self._update_referee_absorption_context(sorted_tracked_detections)
 
-            sorted_tracked_detections = self._sort_tracked_detections(tracks_detection)
-            self._update_referee_absorption_context(sorted_tracked_detections)
+                bytetrack_raw_detection_indexes, bytetrack_id_by_raw_idx = self._collect_bytetrack_detection_info(sorted_tracked_detections, collect_visual_debug)
 
-            bytetrack_raw_detection_indexes, bytetrack_id_by_raw_idx = self._collect_bytetrack_detection_info(sorted_tracked_detections, collect_visual_debug)
+                used_canonical_ids_in_frame = set()
 
-            used_canonical_ids_in_frame = set()
+                bytetrack_discard_reason_by_raw_idx = {}
+                accepted_raw_detection_indexes = set()
 
-            bytetrack_discard_reason_by_raw_idx = {}
-            accepted_raw_detection_indexes = set()
+                pending_detections = []
+                ball_candidates = []
 
-            pending_detections = []
-            ball_candidates = []
+                _, elapsed_ms = self._measure_phase_execution(
+                    self._phase_process_tracked_detections,
+                    sorted_tracked_detections,
+                    canonical_state,
+                    raw_to_canonical_id,
+                    canonical_to_raw_id,
+                    used_canonical_ids_in_frame,
+                    tracks,
+                    accepted_raw_detection_indexes,
+                    collect_visual_debug,
+                    n_frame,
+                    pending_detections,
+                    ball_candidates,
+                    bytetrack_discard_reason_by_raw_idx,
+                )
+                frame_phase_rows.append(("Canonización inicial desde tracks detectados", elapsed_ms))
 
-            _, elapsed_ms = self._measure_phase_execution(
-                self._phase_process_tracked_detections,
-                sorted_tracked_detections,
-                canonical_state,
-                raw_to_canonical_id,
-                canonical_to_raw_id,
-                used_canonical_ids_in_frame,
-                tracks,
-                accepted_raw_detection_indexes,
-                collect_visual_debug,
-                n_frame,
-                pending_detections,
-                ball_candidates,
-                bytetrack_discard_reason_by_raw_idx,
-            )
-            frame_phase_rows.append(("Canonización inicial desde tracks detectados", elapsed_ms))
+                _, elapsed_ms = self._measure_phase_execution(
+                    self._phase_assign_pending_detections,
+                    pending_detections,
+                    canonical_state,
+                    used_canonical_ids_in_frame,
+                    n_frame,
+                    collect_visual_debug,
+                    bytetrack_discard_reason_by_raw_idx,
+                    canonical_to_raw_id,
+                    raw_to_canonical_id,
+                    tracks,
+                    accepted_raw_detection_indexes,
+                    forced_absorption_state,
+                )
+                frame_phase_rows.append(("Resolver pendientes y asignar IDs canónicos", elapsed_ms))
 
-            _, elapsed_ms = self._measure_phase_execution(
-                self._phase_assign_pending_detections,
-                pending_detections,
-                canonical_state,
-                used_canonical_ids_in_frame,
-                n_frame,
-                collect_visual_debug,
-                bytetrack_discard_reason_by_raw_idx,
-                canonical_to_raw_id,
-                raw_to_canonical_id,
-                tracks,
-                accepted_raw_detection_indexes,
-                forced_absorption_state,
-            )
-            frame_phase_rows.append(("Resolver pendientes y asignar IDs canónicos", elapsed_ms))
+                _, elapsed_ms = self._measure_phase_execution(
+                    self._phase_emit_reserved_seed_tracks,
+                    canonical_state,
+                    used_canonical_ids_in_frame,
+                    tracks,
+                    n_frame,
+                    reference_packet,
+                    self._build_reserved_seed_track_payload,
+                )
+                frame_phase_rows.append(("Emitir tracks de seeds reservadas", elapsed_ms))
 
-            _, elapsed_ms = self._measure_phase_execution(
-                self._phase_emit_reserved_seed_tracks,
-                canonical_state,
-                used_canonical_ids_in_frame,
-                tracks,
-                n_frame,
-                field_projection,
-                self._build_reserved_seed_track_payload,
-            )
-            frame_phase_rows.append(("Emitir tracks de seeds reservadas", elapsed_ms))
+                _, elapsed_ms = self._measure_phase_execution(
+                    self._phase_collect_raw_ball_candidates,
+                    detection_bbox_xyxy,
+                    detection_confidence,
+                    detection_class_labels,
+                    detection_det_ids,
+                    field_positions,
+                    ground_points_projected,
+                    ball_candidates,
+                )
+                frame_phase_rows.append(("Añadir candidatas de balón YOLO crudo", elapsed_ms))
 
-            _, elapsed_ms = self._measure_phase_execution(
-                self._phase_collect_raw_ball_candidates,
-                detections,
-                field_positions,
-                ground_points_projected,
-                ball_candidates,
-            )
-            frame_phase_rows.append(("Añadir candidatas de balón YOLO crudo", elapsed_ms))
+                ball_state, elapsed_ms = self._measure_phase_execution(
+                    self._phase_select_and_update_ball_track,
+                    ball_candidates,
+                    ball_state,
+                    n_frame,
+                    frame_size,
+                    tracks,
+                    collect_visual_debug,
+                    accepted_raw_detection_indexes,
+                )
+                frame_phase_rows.append(("Seleccionar balón y actualizar estado", elapsed_ms))
 
-            ball_state, elapsed_ms = self._measure_phase_execution(
-                self._phase_select_and_update_ball_track,
-                ball_candidates,
-                ball_state,
-                n_frame,
-                frame_size,
-                tracks,
-                collect_visual_debug,
-                accepted_raw_detection_indexes,
-            )
-            frame_phase_rows.append(("Seleccionar balón y actualizar estado", elapsed_ms))
+                _, elapsed_ms = self._measure_phase_execution(
+                    self._phase_update_possession,
+                    tracks,
+                    n_frame,
+                )
+                frame_phase_rows.append(("Actualizar posesión del frame", elapsed_ms))
 
-            _, elapsed_ms = self._measure_phase_execution(
-                self._phase_update_possession,
-                tracks,
-                n_frame,
-            )
-            frame_phase_rows.append(("Actualizar posesión del frame", elapsed_ms))
+                _, elapsed_ms = self._measure_phase_execution(
+                    self._phase_build_visual_debug_frame,
+                    collect_visual_debug,
+                    n_frame,
+                    raw_detections,
+                    accepted_raw_detection_indexes,
+                    bytetrack_raw_detection_indexes,
+                    bytetrack_id_by_raw_idx,
+                    bytetrack_discard_reason_by_raw_idx,
+                    bytetrack_not_tracked_reason_by_raw_idx,
+                    getattr(self.tracker, "last_unconfirmed_association_debug", []),
+                    visual_debug_frames,
+                )
+                frame_phase_rows.append(("Construir debug visual del frame", elapsed_ms))
 
-            _, elapsed_ms = self._measure_phase_execution(
-                self._phase_build_visual_debug_frame,
-                collect_visual_debug,
-                n_frame,
-                raw_detections,
-                accepted_raw_detection_indexes,
-                bytetrack_raw_detection_indexes,
-                bytetrack_id_by_raw_idx,
-                bytetrack_discard_reason_by_raw_idx,
-                bytetrack_not_tracked_reason_by_raw_idx,
-                getattr(self.tracker, "last_unconfirmed_association_debug", []),
-                visual_debug_frames,
-            )
-            frame_phase_rows.append(("Construir debug visual del frame", elapsed_ms))
+                hook_subphase_rows, elapsed_ms = self._measure_phase_execution(
+                    self._phase_run_frame_hook,
+                    frame_hook,
+                    tracks,
+                    n_frame,
+                )
+                frame_phase_rows.append(("Ejecutar frame hook", elapsed_ms, hook_subphase_rows))
 
-            hook_subphase_rows, elapsed_ms = self._measure_phase_execution(
-                self._phase_run_frame_hook,
-                frame_hook,
-                tracks,
-                n_frame,
-            )
-            frame_phase_rows.append(("Ejecutar frame hook", elapsed_ms, hook_subphase_rows))
-
-            if profile_phases:
-                self._print_frame_phase_profile(frame_phase_rows)
+                if profile_phases:
+                    self._print_frame_phase_profile(frame_phase_rows)
+                n_frame += 1
+        finally:
+            capture.release()
         self.visualization_debug_frames = visual_debug_frames if collect_visual_debug else []
         return tracks
 
-    def _get_raw_detections(self, detections, collect_visual_debug):
+    def _get_raw_detections(
+        self,
+        detector_clean,
+        detector_trace,
+        collect_visual_debug,
+    ):
         raw_detections = []
-        detection_class_labels = []
-        if detections.boxes is not None and len(detections.boxes) > 0:
-            raw_cls = detections.boxes.cls.cpu().numpy().astype(int)
-            detection_class_labels = [detections.names[class_id] for class_id in raw_cls]
-            if collect_visual_debug: 
-                raw_xyxy = detections.boxes.xyxy.cpu().numpy()
-                raw_conf = detections.boxes.conf.cpu().numpy()
-                for raw_idx, (bbox, score, cid) in enumerate(zip(raw_xyxy, raw_conf, raw_cls)):
-                    raw_detections.append(
-                        {
-                            "raw_det_idx": int(raw_idx),
-                            "class_yolo": detections.names[cid],
-                            "bbox": [float(v) for v in bbox.tolist()],
-                            "confidence": float(score),
-                        }
-                    )
-        return raw_detections, detection_class_labels
-    
-    def _get_field_projection_and_positions(self, detections_sv, detection_class_labels, orig_img):
-        field_projection = None
-        field_positions = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
-        ground_points_projected = np.full((len(detections_sv), 2), np.nan, dtype=np.float32)
-        if self.field_projector is not None and orig_img is not None:
-                field_projection = self.field_projector.project_detections(
-                    orig_img,
-                    detections_sv.xyxy,
-                    class_names=detection_class_labels,
+        detection_class_labels = [str(class_name) for class_name in detector_clean["class_name"]]
+        detection_det_ids = np.asarray(detector_clean["det_id"], dtype=np.int32)
+        detection_bbox_xyxy = np.asarray(detector_clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4)
+        detection_confidence = np.asarray(detector_clean["confidence"], dtype=np.float32)
+        trace_detections = detector_trace["detections"]
+        if collect_visual_debug:
+            for trace_item in trace_detections:
+                raw_detections.append(
+                    {
+                        "raw_det_idx": int(trace_item["det_id"]),
+                        "class_yolo": trace_item["class_name"],
+                        "bbox": list(trace_item["bbox_xyxy"]),
+                        "confidence": float(trace_item["confidence"]),
+                    }
                 )
-                field_positions = field_projection.field_positions_m
-                ground_points_projected = field_projection.ground_points_image_projected
-
-        return field_projection, field_positions, ground_points_projected
+        return (
+            raw_detections,
+            detection_class_labels,
+            detection_det_ids,
+            detection_bbox_xyxy,
+            detection_confidence,
+        )
     
     def _enrich_metadata(
         self,
@@ -1315,6 +1367,7 @@ class Tracker(TrackerLogicMixin):
         teams_of_detected_objects,
         field_positions,
         ground_points_projected,
+        detection_det_ids,
     ):
         # Conserva metadatos por detección para recuperarlos tras filtrar por tracking.
         if detections_sv.data is None:
@@ -1336,7 +1389,7 @@ class Tracker(TrackerLogicMixin):
 
         detections_sv.data["field_position"] = np.asarray(field_positions, dtype=np.float32)
         detections_sv.data["ground_point_image"] = np.asarray(ground_points_projected, dtype=np.float32)
-        detections_sv.data["raw_det_idx"] = np.arange(len(detections_sv), dtype=np.int32)
+        detections_sv.data["raw_det_idx"] = np.asarray(detection_det_ids, dtype=np.int32)
 
     def _sort_tracked_detections(self, tracks_detection, class_priority={"referee": 0, "goalkeeper": 1, "player": 2, "ball": 3}):
         def _priority_from_metadata(metadata):

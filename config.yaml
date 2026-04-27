@@ -122,39 +122,36 @@ tracking:
     match_distance_decay_per_frame: 0.3
 
     constructor:
-      field_length_m: 106.0
-      field_width_m: 68.0
       max_width: 1280
       bottom_offset_ratio: 0.04
       keypoint_threshold: 0.30
       line_threshold: 0.60
       pnl_refine: false
       temporal_blend: 0.20
-      pixels_per_meter: 8
-      device: null
-      tracking_field_positions_require_attempt0: false  # Legacy: la decisión real de uso la toma validation good/rejected.
       adaptive_thresholds_enabled: true
       adaptive_max_attempts: 4
       adaptive_keypoint_threshold_step: 0.02
       adaptive_line_threshold_step: 0.05
       adaptive_keypoint_threshold_min: 0.28
       adaptive_line_threshold_min: 0.55
-      adaptive_min_visible_keypoints: 7
-      adaptive_min_visible_lines: 1
-      validation_score_threshold: 0.56
-      validation_geometry_fit_min: 0.38
-      validation_support_quality_min: 0.31
-      validation_coverage_quality_min: 0.18
-      validation_reprojection_error_threshold_px: 8.0
-      validation_homography_condition_number_threshold: 100000000.0
-      validation_keypoint_world_error_threshold_m: 3.0
-      validation_line_world_error_threshold_m: 4.0
-      validation_target_visible_keypoints: 9
-      validation_target_visible_lines: 4
-      validation_target_image_point_hull_area_ratio: 0.18
-      validation_target_image_x_span_ratio: 0.55
-      validation_target_image_y_span_ratio: 0.40
-      validation_target_field_coverage_ratio: 0.20
+      device: null
+      projection_quality_analyzer_conf:
+        min_visible_keypoints: 7
+        min_visible_lines: 1
+        validation_score_threshold: 0.56
+        validation_geometry_fit_min: 0.38
+        validation_support_quality_min: 0.31
+        validation_coverage_quality_min: 0.18
+        validation_reprojection_error_threshold_px: 8.0
+        validation_homography_condition_number_threshold: 100000000.0
+        validation_keypoint_world_error_threshold_m: 3.0
+        validation_line_world_error_threshold_m: 4.0
+        validation_target_visible_keypoints: 9
+        validation_target_visible_lines: 4
+        validation_target_image_point_hull_area_ratio: 0.18
+        validation_target_image_x_span_ratio: 0.55
+        validation_target_image_y_span_ratio: 0.40
+        validation_target_field_coverage_ratio: 0.20
 
   bytetracker:
     track_activation_threshold: 0.01

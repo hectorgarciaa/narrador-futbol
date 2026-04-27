@@ -760,28 +760,26 @@ class TrackerLogicMixin:
             return None
         return [x1, y1, x2, y2]
 
-    def _build_reserved_seed_track_payload(self, state, field_projection):
+    def _build_reserved_seed_track_payload(self, state, reference_packet):
         field_position = self._field_position_to_tuple(state.get("field_position"))
         projected_ground_point = None
         original_ground_point = None
         frame_shape_original = None
-        if field_projection is not None:
+        reference_clean = dict((reference_packet or {}).get("clean") or {})
+        if reference_clean:
+            homography_image_to_field = np.asarray(
+                reference_clean.get("homography_image_to_field_3x3") or [],
+                dtype=np.float64,
+            )
             projected_ground_point = self._project_homography_point(
                 field_position,
-                field_projection.homography_image_to_field,
+                homography_image_to_field if homography_image_to_field.shape == (3, 3) else None,
             )
-            frame_shape_original = getattr(field_projection, "frame_shape_original", None)
-            frame_shape_projected = getattr(field_projection, "frame_shape_projected", None)
-            if (
-                projected_ground_point is not None
-                and frame_shape_original is not None
-                and frame_shape_projected is not None
-            ):
-                original_ground_point = self._scale_point(
-                    projected_ground_point,
-                    frame_shape_projected,
-                    frame_shape_original,
-                )
+            frame_shape_original = (
+                int((reference_packet or {}).get("image_height", 0) or 0),
+                int((reference_packet or {}).get("image_width", 0) or 0),
+            )
+            original_ground_point = projected_ground_point
 
         bbox = self._seed_bbox_from_ground_point(original_ground_point, frame_shape_original)
         bbox_size = float(self._bbox_area(bbox)) if bbox is not None else 0.0
