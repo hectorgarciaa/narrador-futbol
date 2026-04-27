@@ -82,7 +82,30 @@ Cuando el color más cercano es el del árbitro, el detector puede proponer una 
 
 Además, cuando ya existen referencias actualizadas para los dos equipos de campo, el detector mantiene una estadística robusta de la distribución de distancias LAB dentro de cada equipo (`Q1`, `mediana`, `Q3`, `IQR`). Con esa referencia, el tracking también puede relabelar `player/referee -> goalkeeper` si la detección es un outlier simultáneo respecto a ambos equipos de campo y, tras la homografía, cae fuera del corredor delimitado por la tercera persona más a la izquierda y la tercera más a la derecha visibles en ese frame, manteniéndose además a más de 3 metros de las bandas laterales.
 
-#### 5. Extracción de región de camiseta
+#### 5. Contrato desacoplado de fase
+Además del método legacy `detect_teams(...)`, `TeamDetector` expone ahora `identify_packet(frame_bgr, filtering_packet, ...)`.
+
+- Entrada: `filtering_packet["clean"]`, ya alineado y filtrado respecto a `REFERENCE_POINTS`.
+- Salida: packet `IDENTIFICATION`.
+- `clean`: conserva el contenido de entrada y añade `class_name_td`, `team`, `shirt_color`, `distances` y `bbox_size`.
+- `trace`: incluye la traza por detección (`sample_decision`, motivo de relabel, gates de referee/goalkeeper) y el estado/eventos de clustering.
+
+Ejemplo:
+
+```python
+identification_packet = td.identify_packet(
+    frame_bgr=frame_bgr,
+    filtering_packet=filtering_packet,
+    field_width_m=68.0,
+    sideline_band_distance_m=3.0,
+)
+
+clean = identification_packet["clean"]
+trace = identification_packet["trace"]
+class_name_td = clean["class_name_td"]
+```
+
+#### 6. Extracción de región de camiseta
 El crop que se analiza es el **50% superior** del bounding box del jugador. Esto excluye el pantalón, las botas y el césped, que introducían ruido en el clustering.
 
 ```python
@@ -112,10 +135,10 @@ team_info_list = td.detect_teams(
     show_plot=False,
 )
 # → lista con un dict por detección:
-# [{"class": "player", "team": "Real Madrid", "distances": {...}, "shirt_color": [L, A, B], "bbox_size": float}, ...]
+# [{"class": "player", "class_name_td": "player", "team": "Real Madrid", "distances": {...}, "shirt_color": [L, A, B], "bbox_size": float}, ...]
 ```
 
-#### 6. Visualización de depuración (`visualize_shirt_clusters`)
+#### 7. Visualización de depuración (`visualize_shirt_clusters`)
 Función standalone disponible en `football_ai.evaluation.cluster_visualizer` que muestra una cuadrícula con hasta 20 jugadores. Cada jugador ocupa dos columnas: la imagen original del crop y la imagen segmentada por KMeans coloreada con los centroides. Útil para depurar el comportamiento del clustering.
 
 ```python
