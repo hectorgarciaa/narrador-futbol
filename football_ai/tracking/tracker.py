@@ -5,24 +5,18 @@ import numpy as np
 
 from football_ai.bytetrack import ByteTrackPhase
 from football_ai.canonicaltrack import CanonicalTrackPhase
-from football_ai.detection import Detector
-from football_ai.filtering import filter_reference_points
-from football_ai.identification import TeamDetector
+from football_ai.detection import DetectionPhase
+from football_ai.filtering import FilteringPhase
+from football_ai.identification import IdentificationPhase
+from football_ai.positions import PositionInferingPhase
 from football_ai.posession import PosessionPhase
 from football_ai.reference_points import (
     PnLCalibFieldProjector,
-    build_reference_points_packet_without_homography,
+    ProjectionPhase,
 )
 
 
 class Tracker:
-    @staticmethod
-    def _measure_phase_execution(fn, *args, **kwargs):
-        start = perf_counter()
-        result = fn(*args, **kwargs)
-        elapsed_ms = (perf_counter() - start) * 1000.0
-        return result, elapsed_ms
-
     @staticmethod
     def _print_frame_phase_profile(phase_rows):
         total_ms = sum(float(row[1]) for row in phase_rows)
@@ -49,23 +43,20 @@ class Tracker:
         tracker_conf,
         projector_conf,
         project_root,
+        *,
+        config=None,
+        video_path=None,
+        logger=None,
+        expected_roles_by_team_override=None,
+        lineup_matcher=None,
     ):
         print("*" * 100, model_path)
 
-        self.model = Detector(model_path, **detector_conf)
-        self.team_detector = TeamDetector(**team_detector_conf)
-
         bytetracker_runtime_conf = dict(bytetracker_conf or {})
         bytetracker_runtime_conf.pop("max_tracks_per_class", None)
-        self.bytetrack_phase = ByteTrackPhase(**bytetracker_runtime_conf)
-        self.canonical_phase = CanonicalTrackPhase(
-            max_tracks_per_class=bytetracker_conf["max_tracks_per_class"],
-            tracker_conf=tracker_conf,
-            projector_conf=projector_conf,
-            ball_conf=ball_conf,
-        )
 
-        self.max_tracks_per_class = dict(bytetracker_conf["max_tracks_per_class"])
+        self.detection_phase = DetectionPhase(model_path, detector_conf)
+        self.model = self.detection_phase.detector
 
         self.referee_field_width_m = float(
             projector_conf.get("constructor", {}).get("field_width_m", 68.0)
@@ -80,105 +71,38 @@ class Tracker:
                 project_root=project_root,
                 **projector_conf["constructor"],
             )
+        self.projection_phase = ProjectionPhase(self.field_projector)
+        self.filtering_phase = FilteringPhase()
+        self.identification_phase = IdentificationPhase(
+            team_detector_conf,
+            referee_field_width_m=self.referee_field_width_m,
+            referee_sideline_band_distance_m=self.referee_sideline_band_distance_m,
+        )
+        self.team_detector = self.identification_phase.team_detector
+
+        self.bytetrack_phase = ByteTrackPhase(**bytetracker_runtime_conf)
+        self.canonical_phase = CanonicalTrackPhase(
+            max_tracks_per_class=bytetracker_conf["max_tracks_per_class"],
+            tracker_conf=tracker_conf,
+            projector_conf=projector_conf,
+            ball_conf=ball_conf,
+        )
+
+        self.max_tracks_per_class = dict(bytetracker_conf["max_tracks_per_class"])
 
         self.visualization_debug_frames = []
         self.posession_phase = PosessionPhase(tracker_conf.get("possession"))
-
-    def _phase_prepare_frame_inputs(self, frame_bgr, detector_packet, collect_visual_debug):
-        subphase_rows = []
-
-        t0 = perf_counter()
-        raw_detections = self._get_raw_detections(
-            detector_packet["trace"],
-            collect_visual_debug,
+        self.position_infering_phase = (
+            PositionInferingPhase(
+                config,
+                video_path,
+                logger,
+                expected_roles_by_team_override=expected_roles_by_team_override,
+                lineup_matcher=lineup_matcher,
+            )
+            if config is not None and video_path is not None and logger is not None
+            else None
         )
-        subphase_rows.append(("Extraer detecciones RAW", (perf_counter() - t0) * 1000.0))
-
-        t0 = perf_counter()
-        reference_packet = (
-            self.field_projector.project_frame(frame_bgr, detector_packet)
-            if self.field_projector is not None
-            else build_reference_points_packet_without_homography(detector_packet)
-        )
-        subphase_rows.append(("Proyección de campo (PnLCalib)", (perf_counter() - t0) * 1000.0))
-
-        t0 = perf_counter()
-        filtering_packet = filter_reference_points(
-            reference_packet,
-            active_track_boxes_xyxy=self.bytetrack_phase.active_track_boxes_xyxy(),
-            geometry=getattr(self.field_projector, "geometry", None)
-        )
-        filtered_det_ids = {
-            int(det_id)
-            for det_id in np.asarray(
-                filtering_packet["clean"]["det_id"],
-                dtype=np.int32,
-            ).reshape(-1)
-        }
-        if raw_detections:
-            raw_detections = [
-                det
-                for det in raw_detections
-                if int(det["raw_det_idx"]) in filtered_det_ids
-            ]
-        subphase_rows.append(
-            ("Filtrar detecciones fuera del campo proyectado", (perf_counter() - t0) * 1000.0)
-        )
-
-        return {
-            "payload": (raw_detections, filtering_packet),
-            "subphase_rows": subphase_rows,
-        }
-
-    def _phase_assign_team_and_enrich_metadata(
-        self,
-        frame_bgr,
-        raw_detections,
-        filtering_packet,
-        show_kmeans,
-    ):
-        subphase_rows = []
-
-        t0 = perf_counter()
-        identification_packet = self.team_detector.identify_packet(
-            frame_bgr,
-            filtering_packet,
-            self.referee_field_width_m,
-            self.referee_sideline_band_distance_m,
-            show_kmeans,
-        )
-        identification_clean = identification_packet["clean"]
-        subphase_rows.append(("TeamDetector.detect_teams", (perf_counter() - t0) * 1000.0))
-
-        t0 = perf_counter()
-        if raw_detections:
-            yolo_class_labels = list(identification_clean["class_name"])
-            class_labels = list(identification_clean["class_name_td"])
-            for raw_idx, raw_detection in enumerate(raw_detections):
-                raw_detection["class_yolo"] = (
-                    str(yolo_class_labels[raw_idx])
-                    if raw_idx < len(yolo_class_labels)
-                    else raw_detection.get("class_yolo")
-                )
-                class_relabel_value = (
-                    str(class_labels[raw_idx]) if raw_idx < len(class_labels) else None
-                )
-                raw_detection["class_name_td"] = class_relabel_value
-                raw_detection["class_relabel"] = class_relabel_value
-                raw_detection["class_team_detector"] = class_relabel_value
-                if raw_idx < int(identification_clean["num_detections"]):
-                    raw_detection["referee_reassign_gate"] = identification_clean[
-                        "referee_reassign_gate"
-                    ][raw_idx]
-                    raw_detection["goalkeeper_reassign_gate"] = identification_clean[
-                        "goalkeeper_reassign_gate"
-                    ][raw_idx]
-        subphase_rows.append(("Construir arrays de labels", (perf_counter() - t0) * 1000.0))
-
-        return {
-            "payload": identification_packet,
-            "subphase_rows": subphase_rows,
-        }
 
     @staticmethod
     def _phase_build_visual_debug_frame(
@@ -236,6 +160,120 @@ class Tracker:
             }
         )
 
+    @staticmethod
+    def _filter_raw_detections_by_packet(raw_detections, filtering_packet):
+        if not raw_detections:
+            return []
+        filtered_det_ids = {
+            int(det_id)
+            for det_id in np.asarray(
+                filtering_packet["clean"]["det_id"],
+                dtype=np.int32,
+            ).reshape(-1)
+        }
+        return [
+            det
+            for det in raw_detections
+            if int(det["raw_det_idx"]) in filtered_det_ids
+        ]
+
+    @staticmethod
+    def _enrich_raw_detections_with_identification(
+        raw_detections,
+        identification_packet,
+    ):
+        if not raw_detections:
+            return
+        identification_clean = identification_packet["clean"]
+        yolo_class_labels = list(identification_clean["class_name"])
+        class_labels = list(identification_clean["class_name_td"])
+        num_detections = int(identification_clean["num_detections"])
+        for raw_idx, raw_detection in enumerate(raw_detections):
+            raw_detection["class_yolo"] = (
+                str(yolo_class_labels[raw_idx])
+                if raw_idx < len(yolo_class_labels)
+                else raw_detection.get("class_yolo")
+            )
+            class_relabel_value = (
+                str(class_labels[raw_idx]) if raw_idx < len(class_labels) else None
+            )
+            raw_detection["class_name_td"] = class_relabel_value
+            raw_detection["class_relabel"] = class_relabel_value
+            raw_detection["class_team_detector"] = class_relabel_value
+            if raw_idx < num_detections:
+                raw_detection["referee_reassign_gate"] = identification_clean[
+                    "referee_reassign_gate"
+                ][raw_idx]
+                raw_detection["goalkeeper_reassign_gate"] = identification_clean[
+                    "goalkeeper_reassign_gate"
+                ][raw_idx]
+
+    @staticmethod
+    def _merge_parallel_phase_packets(
+        canonical_packet,
+        posession_packet,
+        position_packet,
+    ):
+        canonical_tracks_frame = canonical_packet["clean"]["tracks_frame"]
+        posession_tracks_frame = posession_packet["clean"]["tracks_frame"]
+        position_tracks_frame = (
+            position_packet["clean"]["tracks_frame"] if position_packet is not None else {}
+        )
+
+        merged_tracks_frame = {}
+        for class_name in ("player", "goalkeeper", "referee", "ball"):
+            merged_tracks_frame[class_name] = {}
+            track_ids = set(canonical_tracks_frame.get(class_name, {}).keys())
+            track_ids.update(posession_tracks_frame.get(class_name, {}).keys())
+            track_ids.update(position_tracks_frame.get(class_name, {}).keys())
+            for track_id in track_ids:
+                merged_payload = {}
+                for source in (
+                    canonical_tracks_frame.get(class_name, {}),
+                    posession_tracks_frame.get(class_name, {}),
+                    position_tracks_frame.get(class_name, {}),
+                ):
+                    payload = source.get(track_id)
+                    if isinstance(payload, dict):
+                        merged_payload.update(payload)
+                merged_tracks_frame[class_name][track_id] = merged_payload
+
+        clean_out = dict(canonical_packet["clean"])
+        clean_out["tracks_frame"] = merged_tracks_frame
+        clean_out["possession"] = dict(posession_packet["clean"]["possession"])
+
+        summary = dict(clean_out.get("summary", {}))
+        posession_summary = dict(posession_packet["clean"].get("summary", {}))
+        summary.update(posession_summary)
+        if position_packet is not None:
+            position_summary = dict(position_packet["clean"].get("position_infering", {}))
+            if position_summary:
+                summary["position_infering_frame_predictions"] = int(
+                    position_summary.get("frame_predictions", 0)
+                )
+                summary["position_infering_player_predictions"] = int(
+                    position_summary.get("player_predictions", 0)
+                )
+            clean_out["position_infering"] = position_summary
+        clean_out["summary"] = summary
+
+        trace_out = dict(canonical_packet["trace"])
+        trace_out["possession"] = dict(posession_packet["trace"].get("possession", {}))
+        if position_packet is not None:
+            trace_out["position_infering"] = dict(
+                position_packet["trace"].get("position_infering", {})
+            )
+
+        return {
+            "phase_name": "TRACKING_OUTPUT",
+            "frame_index": canonical_packet["frame_index"],
+            "frame_time_ms": canonical_packet["frame_time_ms"],
+            "image_width": canonical_packet["image_width"],
+            "image_height": canonical_packet["image_height"],
+            "clean": clean_out,
+            "trace": trace_out,
+        }
+
     def get_tracks(
         self,
         video,
@@ -244,6 +282,8 @@ class Tracker:
         collect_visual_debug=False,
         profile_phases=False,
     ):
+        if self.position_infering_phase is not None:
+            self.position_infering_phase.reset()
         self.bytetrack_phase.reset()
         self.canonical_phase.reset()
         self.posession_phase.reset()
@@ -263,74 +303,92 @@ class Tracker:
                     break
 
                 frame_phase_rows = []
-                detector_packet = self.model.predict_frame(
+                detector_packet, elapsed_ms = self.detection_phase.process(
                     frame_bgr,
                     frame_index=n_frame,
                     frame_time_ms=n_frame * frame_interval_ms,
                 )
+                frame_phase_rows.append(("Detección (YOLO)", elapsed_ms))
 
-                prepare_phase_result, elapsed_ms = self._measure_phase_execution(
-                    self._phase_prepare_frame_inputs,
-                    frame_bgr,
-                    detector_packet,
+                raw_detections = self._get_raw_detections(
+                    detector_packet["trace"],
                     collect_visual_debug,
                 )
-                raw_detections, filtering_packet = prepare_phase_result["payload"]
+
+                reference_packet, elapsed_ms = self.projection_phase.process(
+                    frame_bgr,
+                    detector_packet,
+                )
                 frame_phase_rows.append(
-                    (
-                        "Preparar detecciones y proyección",
-                        elapsed_ms,
-                        prepare_phase_result.get("subphase_rows"),
-                    )
+                    ("Proyección de campo (PnLCalib)", elapsed_ms)
                 )
 
-                assign_phase_result, elapsed_ms = self._measure_phase_execution(
-                    self._phase_assign_team_and_enrich_metadata,
-                    frame_bgr,
+                filtering_packet, elapsed_ms = self.filtering_phase.process(
+                    reference_packet,
+                    active_track_boxes_xyxy=self.bytetrack_phase.active_track_boxes_xyxy(),
+                    geometry=self.projection_phase.geometry,
+                )
+                frame_phase_rows.append(
+                    ("Filtrar detecciones fuera del campo proyectado", elapsed_ms)
+                )
+                raw_detections = self._filter_raw_detections_by_packet(
                     raw_detections,
                     filtering_packet,
-                    show_kmeans,
-                )
-                identification_packet = assign_phase_result["payload"]
-                frame_phase_rows.append(
-                    (
-                        "Asignar equipo y enriquecer metadata",
-                        elapsed_ms,
-                        assign_phase_result.get("subphase_rows"),
-                    )
                 )
 
-                bytetrack_packet, elapsed_ms = self._measure_phase_execution(
-                    self.bytetrack_phase.track_packet,
+                identification_packet, elapsed_ms = self.identification_phase.process(
+                    frame_bgr,
+                    filtering_packet,
+                    show_kmeans=show_kmeans,
+                )
+                frame_phase_rows.append(("Asignar equipo e identificar clase", elapsed_ms))
+                self._enrich_raw_detections_with_identification(
+                    raw_detections,
+                    identification_packet,
+                )
+
+                bytetrack_packet, elapsed_ms = self.bytetrack_phase.process(
                     identification_packet,
                     collect_visual_debug=collect_visual_debug,
                 )
                 frame_phase_rows.append(("Asociación ByteTrack", elapsed_ms))
 
-                canonical_packet, elapsed_ms = self._measure_phase_execution(
-                    self.canonical_phase.canonicalize_packet,
+                canonical_packet, elapsed_ms = self.canonical_phase.process(
                     bytetrack_packet,
                     collect_visual_debug=collect_visual_debug,
                 )
                 frame_phase_rows.append(("Canonización (CanonicalTrack)", elapsed_ms))
 
-                posession_packet, elapsed_ms = self._measure_phase_execution(
-                    self.posession_phase.process_packet,
+                posession_packet, elapsed_ms = self.posession_phase.process(
                     canonical_packet,
                 )
                 frame_phase_rows.append(("Posesión (Posession)", elapsed_ms))
 
-                tracks_frame = posession_packet["clean"]["tracks_frame"]
+                position_packet = None
+                if self.position_infering_phase is not None:
+                    position_packet, elapsed_ms = self.position_infering_phase.process(
+                        canonical_packet,
+                    )
+                    frame_phase_rows.append(
+                        ("Posiciones (PositionInfering)", elapsed_ms)
+                    )
+
+                tracking_packet = self._merge_parallel_phase_packets(
+                    canonical_packet,
+                    posession_packet,
+                    position_packet,
+                )
+
+                tracks_frame = tracking_packet["clean"]["tracks_frame"]
                 tracks["player"].append(dict(tracks_frame["player"]))
                 tracks["goalkeeper"].append(dict(tracks_frame["goalkeeper"]))
                 tracks["referee"].append(dict(tracks_frame["referee"]))
                 tracks["ball"].append(dict(tracks_frame["ball"]))
-                tracks["possession"].append(dict(posession_packet["clean"]["possession"]))
+                tracks["possession"].append(dict(tracking_packet["clean"]["possession"]))
 
                 if collect_visual_debug:
-                    canonical_trace = canonical_packet["trace"]
-                    _, elapsed_ms = self._measure_phase_execution(
-                        self._phase_build_visual_debug_frame,
+                    canonical_trace = tracking_packet["trace"]
+                    self._phase_build_visual_debug_frame(
                         n_frame,
                         raw_detections,
                         {int(raw_idx) for raw_idx in canonical_trace["accepted_raw_detection_indexes"]},
@@ -350,14 +408,9 @@ class Tracker:
                         canonical_trace["unconfirmed_association_debug"],
                         visual_debug_frames,
                     )
-                    frame_phase_rows.append(("Construir debug visual del frame", elapsed_ms))
 
-                hook_elapsed_ms = 0.0
                 if callable(frame_hook):
-                    t0 = perf_counter()
                     frame_hook(tracks, n_frame)
-                    hook_elapsed_ms = (perf_counter() - t0) * 1000.0
-                frame_phase_rows.append(("Ejecutar frame hook", hook_elapsed_ms))
 
                 if profile_phases:
                     self._print_frame_phase_profile(frame_phase_rows)

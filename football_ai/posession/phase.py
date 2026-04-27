@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from football_ai.core import PHASE_POSESSION, make_phase_packet
+from football_ai.core import PHASE_POSESSION, Phase, make_phase_packet
 
 from .estimator import PossessionConfig, TeamPossessionEstimator
 
 
-class PosessionPhase:
+class PosessionPhase(Phase):
     def __init__(self, config_mapping: dict[str, Any] | None = None):
         self.config = PossessionConfig.from_mapping(config_mapping)
         self.reset()
@@ -47,7 +47,7 @@ class PosessionPhase:
                 payload["possession_nearest_track_id"] = possession_info["nearest_track_id"]
                 payload["possession_nearest_team_id"] = possession_info["nearest_team_id"]
 
-    def process_packet(self, canonical_packet):
+    def execute(self, canonical_packet):
         tracks_frame_in = canonical_packet["clean"]["tracks_frame"]
         tracks_frame = {
             "player": {
@@ -95,6 +95,9 @@ class PosessionPhase:
             clean=clean_out,
             trace=trace_out,
         )
+
+    def process_packet(self, canonical_packet):
+        return self.execute(canonical_packet)
 
 
 __all__ = ["PosessionPhase"]

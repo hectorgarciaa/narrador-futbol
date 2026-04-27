@@ -4,6 +4,7 @@ Core module - Configuration, logging, and shared utilities.
 
 from .config import Config, get_config
 from .logger import Logger, get_logger
+from .phase import Phase
 from .phase_packets import (
     IDENTITY_HOMOGRAPHY_3X3,
     PHASE_BYTETRACK,
@@ -12,6 +13,8 @@ from .phase_packets import (
     PHASE_FILTERING,
     PHASE_IDENTIFICATION,
     PHASE_POSESSION,
+    PHASE_POSITION_INFERING,
+    PHASE_PROJECTION,
     PHASE_REFERENCE_POINTS,
     REJECT_CODE_HOMOGRAPHY_NOT_USABLE,
     REJECT_CODE_INVALID_FIELD_POSITION,
@@ -27,6 +30,7 @@ from .serialization import convert_to_serializable
 __all__ = [
     "Config",
     "Logger",
+    "Phase",
     "IDENTITY_HOMOGRAPHY_3X3",
     "PHASE_BYTETRACK",
     "PHASE_CANONICALTRACK",
@@ -34,6 +38,8 @@ __all__ = [
     "PHASE_FILTERING",
     "PHASE_IDENTIFICATION",
     "PHASE_POSESSION",
+    "PHASE_POSITION_INFERING",
+    "PHASE_PROJECTION",
     "PHASE_REFERENCE_POINTS",
     "REJECT_CODE_HOMOGRAPHY_NOT_USABLE",
     "REJECT_CODE_INVALID_FIELD_POSITION",

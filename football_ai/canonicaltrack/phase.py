@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from football_ai.core import PHASE_CANONICALTRACK, make_phase_packet
+from football_ai.core import PHASE_CANONICALTRACK, Phase, make_phase_packet
 
 from .assignment_commit import CanonicalAssignmentCommitMixin
 from .assignment_ingest import CanonicalAssignmentIngestMixin
@@ -31,6 +31,7 @@ class CanonicalTrackPhase(
     CanonicalAssignmentProcessMixin,
     CanonicalAssignmentCommitMixin,
     CanonicalAssignmentIngestMixin,
+    Phase,
 ):
     def __init__(
         self,
@@ -304,7 +305,7 @@ class CanonicalTrackPhase(
         )
         return updated_state, selected_ball
 
-    def canonicalize_packet(self, bytetrack_packet, collect_visual_debug=False):
+    def execute(self, bytetrack_packet, collect_visual_debug=False):
         n_frame = int(bytetrack_packet["frame_index"])
         self._ensure_frame_slot(n_frame)
 
@@ -547,6 +548,12 @@ class CanonicalTrackPhase(
             image_height=bytetrack_packet["image_height"],
             clean=clean_out,
             trace=trace,
+        )
+
+    def canonicalize_packet(self, bytetrack_packet, collect_visual_debug=False):
+        return self.execute(
+            bytetrack_packet,
+            collect_visual_debug=collect_visual_debug,
         )
 
 

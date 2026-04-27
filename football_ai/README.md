@@ -29,7 +29,7 @@ football_ai/
 | [`core`](core/README.md) | Carga de `config.yaml`, logging, conversión a JSON | `Config`, `Logger`, `convert_to_serializable` |
 | [`actions`](actions/README.md) | Adaptación de `tracks.json` a datasets de acciones y puente con PathCRF | `PathCRFTracksAdapter` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
-| [`positions`](positions/README.md) | Inferencia online de roles, estabilización táctica y exportes/plots de posiciones | `OnlineSpecialSeedRoleAssigner` |
+| [`positions`](positions/README.md) | Inferencia online de roles, estabilización táctica y exportes/plots de posiciones | `PositionInferingPhase`, `OnlineSpecialSeedRoleAssigner` |
 | [`report`](report/README.md) | Informes tecnicos, benchmarkings y decisiones documentadas | Documentacion Markdown |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
 | [`bytetrack`](bytetrack/README.md) | Asociación multi-objeto desacoplada: `IDENTIFICATION.clean` → `BYTETRACK` | `ByteTrackPhase`, `ByteTrack` |
@@ -63,8 +63,12 @@ football_ai.bytetrack    → packet BYTETRACK [clean trackeado, trace matching/d
    ▼
 football_ai.canonicaltrack → packet CANONICALTRACK [clean tracks_frame, trace canonical debug]
    │
+   ├──▶ football_ai.posession → packet POSESSION [clean posesión + tracks_frame enriquecido, trace]
+   │
+   ├──▶ football_ai.positions → packet POSITION_INFERING [clean roles + tracks_frame enriquecido, trace]
+   │
    ▼
-football_ai.posession    → packet POSESSION [clean posesión + tracks_frame enriquecido, trace]
+Merge Tracker             → packet final enriquecido por posesión + posiciones
    │
    ▼
 tracks dict              → {"player": [{id: {bbox, field_position_m, team, ...}}], ...}

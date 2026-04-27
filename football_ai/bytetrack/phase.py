@@ -5,7 +5,7 @@ from collections.abc import Mapping
 import numpy as np
 import supervision as sv
 
-from football_ai.core import PHASE_BYTETRACK, make_phase_packet
+from football_ai.core import PHASE_BYTETRACK, Phase, make_phase_packet
 
 from .byte_tracker import ByteTrack
 
@@ -22,7 +22,7 @@ def _serialize_value(value):
     return value
 
 
-class ByteTrackPhase:
+class ByteTrackPhase(Phase):
     def __init__(self, **bytetracker_conf):
         self.tracker = ByteTrack(**bytetracker_conf)
 
@@ -39,7 +39,7 @@ class ByteTrackPhase:
                 boxes.append(tlbr[:4])
         return boxes
 
-    def track_packet(self, identification_packet, *, collect_visual_debug=False):
+    def execute(self, identification_packet, *, collect_visual_debug=False):
         clean_in = identification_packet["clean"]
         detections = self._build_detections(clean_in)
         setattr(self.tracker, "collect_internal_matching_debug", bool(collect_visual_debug))
@@ -50,6 +50,12 @@ class ByteTrackPhase:
             yolo_class_labels=np.asarray(clean_in["class_name"], dtype=object),
         )
         return self._build_packet(identification_packet, tracked)
+
+    def track_packet(self, identification_packet, *, collect_visual_debug=False):
+        return self.execute(
+            identification_packet,
+            collect_visual_debug=collect_visual_debug,
+        )
 
     @staticmethod
     def _build_detections(clean):

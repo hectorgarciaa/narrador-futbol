@@ -1622,6 +1622,24 @@ def apply_special_seed_role_team_assignment(
     return enriched_tracks, role_result
 
 
+class _SingleFrameTrackList:
+    def __init__(self, frame_id, frame_tracks):
+        self.frame_id = int(frame_id)
+        self.frame_tracks = frame_tracks if isinstance(frame_tracks, dict) else {}
+
+    def __len__(self):
+        return self.frame_id + 1
+
+    def __getitem__(self, index):
+        if not isinstance(index, int):
+            raise TypeError("Single frame track view only supports integer indexes.")
+        if index < 0 or index > self.frame_id:
+            raise IndexError(index)
+        if index == self.frame_id:
+            return self.frame_tracks
+        return {}
+
+
 class OnlineSpecialSeedRoleAssigner:
     def __init__(
         self,
@@ -1771,25 +1789,7 @@ class OnlineSpecialSeedRoleAssigner:
                 DEFAULT_ROLE_SWAP_ROLE_CHANGE_MIN_CONFIDENCE,
             )
         )
-        self.last_team_by_special_id = {}
-        self.prev_positions = {}
-        self.identity_state_by_track_id = {}
-        self.role_state_by_track_id = {}
-        self.role_stabilization_snapshot_done = False
-        self.raw_frame_prediction_rows = []
-        self.greedy_diagnostic_rows = []
-        self.stats = {
-            "processed_frames": 0,
-            "frames_with_role_predictions": 0,
-            "position_role_frame_predictions": 0,
-            "position_role_player_predictions": 0,
-            "special_seed_assigned_frames": 0,
-            "special_seed_carry_frames": 0,
-            "special_seed_unassigned_frames": 0,
-            "stable_role_tracks_frozen": 0,
-            "identity_segment_resets": 0,
-            "special_ids": [int(track_id) for track_id in self.special_ids],
-        }
+        self._reset_runtime_state()
         self.role_session = None
         if not self.enabled:
             return
@@ -1841,6 +1841,30 @@ class OnlineSpecialSeedRoleAssigner:
                 exc,
             )
             self.enabled = False
+
+    def _reset_runtime_state(self):
+        self.last_team_by_special_id = {}
+        self.prev_positions = {}
+        self.identity_state_by_track_id = {}
+        self.role_state_by_track_id = {}
+        self.role_stabilization_snapshot_done = False
+        self.raw_frame_prediction_rows = []
+        self.greedy_diagnostic_rows = []
+        self.stats = {
+            "processed_frames": 0,
+            "frames_with_role_predictions": 0,
+            "position_role_frame_predictions": 0,
+            "position_role_player_predictions": 0,
+            "special_seed_assigned_frames": 0,
+            "special_seed_carry_frames": 0,
+            "special_seed_unassigned_frames": 0,
+            "stable_role_tracks_frozen": 0,
+            "identity_segment_resets": 0,
+            "special_ids": [int(track_id) for track_id in self.special_ids],
+        }
+
+    def reset(self):
+        self._reset_runtime_state()
 
     def _build_empty_segment_state(self, track_id, segment_id, frame_id):
         return {
@@ -3578,15 +3602,31 @@ class OnlineSpecialSeedRoleAssigner:
                     track_data["stable_role_assignment_method"] = "manual_special_goalkeeper"
                     self._apply_lineup_assignment_to_track(track_data, state=None)
 
-    def on_frame(self, tracks, frame_id):
+    @staticmethod
+    def _single_frame_tracks_view(tracks_frame, frame_id):
+        return {
+            "player": _SingleFrameTrackList(frame_id, tracks_frame.get("player", {})),
+            "goalkeeper": _SingleFrameTrackList(
+                frame_id, tracks_frame.get("goalkeeper", {})
+            ),
+            "referee": _SingleFrameTrackList(frame_id, tracks_frame.get("referee", {})),
+            "ball": _SingleFrameTrackList(frame_id, tracks_frame.get("ball", {})),
+        }
+
+    def process_tracks_frame(self, tracks_frame, frame_id):
         self.stats["processed_frames"] += 1
         if not self.enabled or self.role_session is None:
-            return
+            return {
+                "frame_predictions": 0,
+                "player_predictions": 0,
+                "roles_applied": False,
+            }
 
+        tracks_view = self._single_frame_tracks_view(tracks_frame, frame_id)
         previous_positions_snapshot = dict(self.prev_positions)
 
         regular_observations, regular_positions = self._build_frame_observations(
-            tracks,
+            tracks_view,
             frame_id,
             include_special_ids=False,
             previous_positions=previous_positions_snapshot,
@@ -3603,7 +3643,7 @@ class OnlineSpecialSeedRoleAssigner:
             self._record_raw_frame_predictions(regular_frame_predictions_df)
 
         self._assign_special_seed_frame_teams(
-            tracks,
+            tracks_view,
             frame_id,
             regular_frame_predictions_df,
         )
@@ -3626,28 +3666,49 @@ class OnlineSpecialSeedRoleAssigner:
                 visible_mask
             ].copy()
 
-        self.stats["position_role_frame_predictions"] += int(
-            len(visible_frame_predictions_df)
-        )
-        self.stats["position_role_player_predictions"] += int(
-            visible_frame_predictions_df[
-                ["team_id", "player_id"]
-            ].drop_duplicates().shape[0]
+        frame_predictions = int(len(visible_frame_predictions_df))
+        player_predictions = int(
+            visible_frame_predictions_df[["team_id", "player_id"]]
+            .drop_duplicates()
+            .shape[0]
             if not visible_frame_predictions_df.empty
             else 0
         )
+        self.stats["position_role_frame_predictions"] += frame_predictions
+        self.stats["position_role_player_predictions"] += player_predictions
+        roles_applied = False
         if not visible_frame_predictions_df.empty:
             self.stats["frames_with_role_predictions"] += 1
             self._annotate_frame_with_roles(
-                tracks,
+                tracks_view,
                 frame_id,
                 visible_frame_predictions_df,
             )
+            roles_applied = True
 
-        self._annotate_special_goalkeeper_roles(tracks, frame_id)
+        self._annotate_special_goalkeeper_roles(tracks_view, frame_id)
 
         for key, value in regular_positions.items():
             self.prev_positions[key] = value
+
+        return {
+            "frame_predictions": frame_predictions,
+            "player_predictions": player_predictions,
+            "roles_applied": bool(roles_applied),
+        }
+
+    def on_frame(self, tracks, frame_id):
+        frame_tracks = {}
+        for class_name in ("player", "goalkeeper", "referee", "ball"):
+            class_frames = tracks.get(class_name, [])
+            if frame_id >= len(class_frames):
+                frame_tracks[class_name] = {}
+                continue
+            frame_payload = class_frames[frame_id]
+            frame_tracks[class_name] = (
+                frame_payload if isinstance(frame_payload, dict) else {}
+            )
+        self.process_tracks_frame(frame_tracks, frame_id)
 
     def summary(self):
         return dict(self.stats)

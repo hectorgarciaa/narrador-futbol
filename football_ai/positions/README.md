@@ -12,7 +12,7 @@ Incluye:
 - validación de `lineup_spec.json`
 - matching `equipo + slot estable -> nombre de jugador`
 
-El punto de entrada principal es `OnlineSpecialSeedRoleAssigner` en [tracking_roles.py](tracking_roles.py).
+El punto de entrada principal dentro del pipeline de tracking es `PositionInferingPhase` en [phase.py](phase.py). La lógica stateful que reutiliza esa fase sigue viviendo en `OnlineSpecialSeedRoleAssigner` en [tracking_roles.py](tracking_roles.py).
 
 ## `lineup_spec.py`
 

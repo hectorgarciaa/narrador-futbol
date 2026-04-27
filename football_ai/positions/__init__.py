@@ -2,6 +2,7 @@
 Positional role helpers and online assignment logic.
 """
 
+from .phase import PositionInferingPhase
 from .lineup_spec import (
     LineupSlotMatcher,
     LineupSpecError,
@@ -28,6 +29,7 @@ __all__ = [
     "LineupSlotMatcher",
     "LineupSpecError",
     "OnlineSpecialSeedRoleAssigner",
+    "PositionInferingPhase",
     "apply_special_seed_role_team_assignment",
     "base_role_token",
     "build_role_artifacts_output_dir",

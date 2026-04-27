@@ -1,10 +1,12 @@
 PHASE_DETECTOR = "DETECTOR"
 PHASE_REFERENCE_POINTS = "REFERENCE_POINTS"
+PHASE_PROJECTION = PHASE_REFERENCE_POINTS
 PHASE_FILTERING = "FILTERING"
 PHASE_IDENTIFICATION = "IDENTIFICATION"
 PHASE_BYTETRACK = "BYTETRACK"
 PHASE_CANONICALTRACK = "CANONICALTRACK"
 PHASE_POSESSION = "POSESSION"
+PHASE_POSITION_INFERING = "POSITION_INFERING"
 
 REJECT_CODE_KEPT = 0
 REJECT_CODE_OUTSIDE_FIELD = 1
@@ -36,7 +38,17 @@ IDENTITY_HOMOGRAPHY_3X3 = [
 def default_render_color_bgr(class_name):
     return list(DETECTOR_RENDER_COLORS_BGR.get(str(class_name), [255, 255, 255]))
 
-def make_phase_packet(*, phase_name, frame_index, frame_time_ms, image_width, image_height, clean, trace):
+def make_phase_packet(
+    *,
+    phase_name,
+    frame_index,
+    frame_time_ms,
+    image_width,
+    image_height,
+    clean,
+    trace,
+    elapsed_ms=None,
+):
     return {
         "phase_name": phase_name,
         "frame_index": int(frame_index),
@@ -45,16 +57,19 @@ def make_phase_packet(*, phase_name, frame_index, frame_time_ms, image_width, im
         "image_height": int(image_height),
         "clean": clean,
         "trace": trace,
+        "elapsed_ms": None if elapsed_ms is None else float(elapsed_ms),
     }
 
 __all__ = [
     "PHASE_DETECTOR",
     "PHASE_REFERENCE_POINTS",
+    "PHASE_PROJECTION",
     "PHASE_FILTERING",
     "PHASE_IDENTIFICATION",
     "PHASE_BYTETRACK",
     "PHASE_CANONICALTRACK",
     "PHASE_POSESSION",
+    "PHASE_POSITION_INFERING",
     "REJECT_CODE_KEPT",
     "REJECT_CODE_OUTSIDE_FIELD",
     "REJECT_CODE_HOMOGRAPHY_NOT_USABLE",

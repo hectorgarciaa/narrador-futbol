@@ -10,7 +10,6 @@ from football_ai.core import Logger, get_config, get_logger
 from football_ai.evaluation import Evaluator
 from football_ai.positions import (
     LineupSlotMatcher,
-    OnlineSpecialSeedRoleAssigner,
     build_role_artifacts_output_dir,
     build_expected_roles_by_team,
     build_role_predictions_output_paths,
@@ -197,6 +196,17 @@ def _resolve_frame_hook_device(frame_hook):
     runtime_device = getattr(role_session, "device", "cpu")
     return _resolve_runtime_device_label(runtime_device)
 
+
+def _resolve_position_infering_device(tracker):
+    position_phase = getattr(tracker, "position_infering_phase", None)
+    if position_phase is None:
+        return "cpu (position infering disabled)"
+    role_session = getattr(position_phase, "role_session", None)
+    if role_session is None:
+        return "cpu (position infering sin backend torch)"
+    runtime_device = getattr(role_session, "device", "cpu")
+    return _resolve_runtime_device_label(runtime_device)
+
 def resolve_lineup_spec(args, config):
     lineup_spec = getattr(args, "lineup_spec", None)
     lineup_matcher = None
@@ -330,13 +340,18 @@ def run_tracking_pipeline(args):
         logger.info(f"Team detector configuration: {team_detector_conf}")
 
         # Run tracking
-        tracker = Tracker(model_path, detector_conf, team_detector_conf, bytetracker_conf,
-                          ball_conf, tracker_conf, projector_conf, config.project_root)
-        
-        online_special_seed_role_assigner = OnlineSpecialSeedRoleAssigner(
-            config,
-            video_path,
-            logger,
+        tracker = Tracker(
+            model_path,
+            detector_conf,
+            team_detector_conf,
+            bytetracker_conf,
+            ball_conf,
+            tracker_conf,
+            projector_conf,
+            config.project_root,
+            config=config,
+            video_path=video_path,
+            logger=logger,
             expected_roles_by_team_override=lineup_expected_roles_by_team,
             lineup_matcher=lineup_matcher,
         )
@@ -344,13 +359,16 @@ def run_tracking_pipeline(args):
         if online_commentary_bridge is not None:
             logger.info("PathCRF live commentary bridge activado para esta ejecución.")
         frame_hook = compose_frame_hooks(
-            online_special_seed_role_assigner.on_frame,
             (online_commentary_bridge.on_frame if online_commentary_bridge is not None else None),
         )
 
         if bool(tracker_conf.get("print_runtime_devices", True)):
             print(
                 f"[runtime] pnlcalib: {_resolve_pnlcalib_device(tracker)}",
+                flush=True,
+            )
+            print(
+                f"[runtime] position_infering: {_resolve_position_infering_device(tracker)}",
                 flush=True,
             )
             print(
@@ -377,7 +395,12 @@ def run_tracking_pipeline(args):
             debug_frames_path = build_debug_frames_output_path(config, video_path)
             save_debug_frames(tracker.visualization_debug_frames, debug_frames_path, logger)
         
-        role_postprocess_result = online_special_seed_role_assigner.summary() if online_special_seed_role_assigner.enabled else None
+        position_phase = tracker.position_infering_phase
+        role_postprocess_result = (
+            position_phase.summary()
+            if position_phase is not None and position_phase.enabled
+            else None
+        )
         if role_postprocess_result is not None:
             logger.info(
                 "Online position-role assignment applied: %s player predictions, %s frame predictions",
@@ -425,8 +448,10 @@ def run_tracking_pipeline(args):
                 online_commentary_bridge.finalize(output_path_named)
             except Exception:
                 logger.exception("Fallo en el flush final del bridge PathCRF live.")
-        if online_special_seed_role_assigner.enabled:
-            role_frame_df, role_player_df, role_greedy_df = online_special_seed_role_assigner.build_role_export_dataframes(tracks)
+        if position_phase is not None and position_phase.enabled:
+            role_frame_df, role_player_df, role_greedy_df = (
+                position_phase.build_role_export_dataframes(tracks)
+            )
             save_dataframe_csv(role_frame_df, role_frame_csv_path, logger, "Frame role predictions CSV")
             copy_output_artifact(role_frame_csv_path, role_frame_csv_path_legacy, logger, "Frame role predictions CSV")
             save_dataframe_csv(role_player_df, role_player_csv_path, logger, "Player role summary CSV")
@@ -439,11 +464,11 @@ def run_tracking_pipeline(args):
                 config=config,
                 video_path=video_path,
                 output_dir=role_artifacts_dir,
-                expected_roles_by_team=online_special_seed_role_assigner.expected_roles_by_team,
-                assignment_method=online_special_seed_role_assigner.role_stabilization_expected_roles_assignment,
-                min_count=online_special_seed_role_assigner.role_stabilization_expected_roles_min_count,
-                min_cumulative_ratio=online_special_seed_role_assigner.role_stabilization_expected_roles_min_ratio,
-                min_final_ratio=online_special_seed_role_assigner.role_stabilization_expected_roles_min_final_ratio,
+                expected_roles_by_team=position_phase.expected_roles_by_team,
+                assignment_method=position_phase.role_stabilization_expected_roles_assignment,
+                min_count=position_phase.role_stabilization_expected_roles_min_count,
+                min_cumulative_ratio=position_phase.role_stabilization_expected_roles_min_ratio,
+                min_final_ratio=position_phase.role_stabilization_expected_roles_min_final_ratio,
                 logger=logger,
                 legacy_output_dir=Path(role_frame_csv_path_legacy).parent,
             )
