@@ -12,7 +12,6 @@ from football_ai.core import (
     REJECT_CODE_RESCUED_BY_TRACK_OVERLAP,
     make_phase_packet,
 )
-from football_ai.reference_points.common import PitchGeometry
 from football_ai.reference_points.geometry import project_image_points, points_inside_field_mask
 
 
@@ -42,25 +41,17 @@ def _tlbr_iou(box_a, box_b):
 
 def filter_reference_points(
     reference_packet,
-    *,
     active_track_boxes_xyxy=None,
     sideline_margin_m=0.75,
     geometry=None,
-    field_length_m=None,
-    field_width_m=None,
 ):
     clean_in = reference_packet["clean"]
     num_detections = int(clean_in["num_detections"])
     homography_valid = bool(clean_in["homography_valid"])
     field_positions_usable = bool(clean_in["field_positions_usable_for_tracking"])
 
-    if geometry is None:
-        geometry = PitchGeometry(
-            field_length_m=106.0 if field_length_m is None else float(field_length_m),
-            field_width_m=68.0 if field_width_m is None else float(field_width_m),
-        )
-    field_length_m = float(geometry.field_length_m if field_length_m is None else field_length_m)
-    field_width_m = float(geometry.field_width_m if field_width_m is None else field_width_m)
+    field_length_m = float(geometry.field_length_m)
+    field_width_m = float(geometry.field_width_m)
 
     ground_points = np.asarray(
         clean_in["ground_points_image_original"],
