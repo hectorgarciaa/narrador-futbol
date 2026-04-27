@@ -8,11 +8,11 @@ from football_ai.canonicaltrack import CanonicalTrackPhase
 from football_ai.detection import Detector
 from football_ai.filtering import filter_reference_points
 from football_ai.identification import TeamDetector
+from football_ai.posession import PosessionPhase
 from football_ai.reference_points import (
     PnLCalibFieldProjector,
     build_reference_points_packet_without_homography,
 )
-from football_ai.tracking.possession import PossessionConfig, TeamPossessionEstimator
 
 
 class Tracker:
@@ -66,6 +66,7 @@ class Tracker:
         )
 
         self.max_tracks_per_class = dict(bytetracker_conf["max_tracks_per_class"])
+
         self.referee_field_width_m = float(
             projector_conf.get("constructor", {}).get("field_width_m", 68.0)
         )
@@ -81,15 +82,13 @@ class Tracker:
             )
 
         self.visualization_debug_frames = []
-        self.possession_config = PossessionConfig.from_mapping(tracker_conf.get("possession"))
-        self.possession_estimator = TeamPossessionEstimator(self.possession_config)
+        self.posession_phase = PosessionPhase(tracker_conf.get("possession"))
 
     def _phase_prepare_frame_inputs(self, frame_bgr, detector_packet, collect_visual_debug):
         subphase_rows = []
 
         t0 = perf_counter()
         raw_detections = self._get_raw_detections(
-            detector_packet["clean"],
             detector_packet["trace"],
             collect_visual_debug,
         )
@@ -181,16 +180,6 @@ class Tracker:
             "subphase_rows": subphase_rows,
         }
 
-    def _phase_update_possession(self, tracks, n_frame):
-        frame_tracks_for_possession = {
-            "player": tracks["player"][n_frame],
-            "goalkeeper": tracks["goalkeeper"][n_frame],
-            "referee": tracks["referee"][n_frame],
-            "ball": tracks["ball"][n_frame],
-        }
-        possession_info = self.possession_estimator.update_frame(n_frame, frame_tracks_for_possession)
-        self._attach_possession_metadata(tracks, n_frame, possession_info)
-
     @staticmethod
     def _phase_build_visual_debug_frame(
         frame_num,
@@ -247,63 +236,6 @@ class Tracker:
             }
         )
 
-    @staticmethod
-    def _normalize_track_identifier(track_id):
-        if track_id is None:
-            return None
-        try:
-            return int(track_id)
-        except (TypeError, ValueError):
-            return str(track_id)
-
-    @classmethod
-    def _track_id_matches(cls, left_track_id, right_track_id):
-        if left_track_id is None or right_track_id is None:
-            return False
-        return cls._normalize_track_identifier(left_track_id) == cls._normalize_track_identifier(right_track_id)
-
-    def _attach_possession_metadata(self, tracks, frame_id, possession_info):
-        owning_team_id = possession_info.get("team_id")
-        owning_player_id = possession_info.get("player_id")
-        possession_reason = possession_info.get("reason")
-        possession_ball_detected = bool(possession_info.get("ball_detected", False))
-        possession_nearest_track_id = possession_info.get("nearest_track_id")
-        possession_nearest_team_id = possession_info.get("nearest_team_id")
-
-        for class_name in ("player", "goalkeeper", "referee", "ball"):
-            class_frames = tracks.get(class_name)
-            if not isinstance(class_frames, list) or frame_id >= len(class_frames):
-                continue
-            frame_map = class_frames[frame_id]
-            if not isinstance(frame_map, dict):
-                continue
-            for track_id, payload in frame_map.items():
-                if not isinstance(payload, dict):
-                    continue
-                is_possession_player = (
-                    class_name in {"player", "goalkeeper"}
-                    and self._track_id_matches(track_id, owning_player_id)
-                )
-                payload["is_possession_player"] = bool(is_possession_player)
-                payload["ball_owning_team_id"] = owning_team_id
-                payload["ball_owning_player_id"] = owning_player_id
-                payload["player_id"] = owning_player_id
-                payload["possession_reason"] = possession_reason
-                payload["possession_ball_detected"] = possession_ball_detected
-                payload["possession_nearest_track_id"] = possession_nearest_track_id
-                payload["possession_nearest_team_id"] = possession_nearest_team_id
-
-        possession_frames = tracks.get("possession")
-        if isinstance(possession_frames, list) and frame_id < len(possession_frames):
-            possession_frames[frame_id] = {
-                "team_id": owning_team_id,
-                "player_id": owning_player_id,
-                "reason": possession_reason,
-                "ball_detected": possession_ball_detected,
-                "nearest_track_id": possession_nearest_track_id,
-                "nearest_team_id": possession_nearest_team_id,
-            }
-
     def get_tracks(
         self,
         video,
@@ -312,9 +244,9 @@ class Tracker:
         collect_visual_debug=False,
         profile_phases=False,
     ):
-        self.possession_estimator = TeamPossessionEstimator(self.possession_config)
         self.bytetrack_phase.reset()
         self.canonical_phase.reset()
+        self.posession_phase.reset()
 
         tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [], "possession": []}
         visual_debug_frames = [] if collect_visual_debug else None
@@ -382,19 +314,18 @@ class Tracker:
                 )
                 frame_phase_rows.append(("Canonización (CanonicalTrack)", elapsed_ms))
 
-                tracks_frame = canonical_packet["clean"]["tracks_frame"]
+                posession_packet, elapsed_ms = self._measure_phase_execution(
+                    self.posession_phase.process_packet,
+                    canonical_packet,
+                )
+                frame_phase_rows.append(("Posesión (Posession)", elapsed_ms))
+
+                tracks_frame = posession_packet["clean"]["tracks_frame"]
                 tracks["player"].append(dict(tracks_frame["player"]))
                 tracks["goalkeeper"].append(dict(tracks_frame["goalkeeper"]))
                 tracks["referee"].append(dict(tracks_frame["referee"]))
                 tracks["ball"].append(dict(tracks_frame["ball"]))
-                tracks["possession"].append({})
-
-                _, elapsed_ms = self._measure_phase_execution(
-                    self._phase_update_possession,
-                    tracks,
-                    n_frame,
-                )
-                frame_phase_rows.append(("Actualizar posesión del frame", elapsed_ms))
+                tracks["possession"].append(dict(posession_packet["clean"]["possession"]))
 
                 if collect_visual_debug:
                     canonical_trace = canonical_packet["trace"]
@@ -438,7 +369,7 @@ class Tracker:
         return tracks
 
     @staticmethod
-    def _get_raw_detections(detector_clean, detector_trace, collect_visual_debug):
+    def _get_raw_detections(detector_trace, collect_visual_debug):
         if not collect_visual_debug:
             return []
 

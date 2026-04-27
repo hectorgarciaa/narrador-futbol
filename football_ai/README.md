@@ -9,12 +9,14 @@ football_ai/
 ├── __init__.py
 ├── actions/        # Adaptadores y utilidades para datasets de acciones (PathCRF)
 ├── bytetrack/      # Fase desacoplada de asociacion multi-objeto basada en ByteTrack
+├── canonicaltrack/ # Fase desacoplada de canonización de IDs y tracks por frame
 ├── core/           # Configuración global, logging centralizado, serialización
 ├── detection/      # Inferencia YOLO (jugadores, árbitros, balón)
 ├── positions/      # Roles posicionales online, estabilización y artefactos CSV/PNG
 ├── report/         # Informes tecnicos y decisiones de arquitectura
 ├── reference_points/ # Calibración del campo y proyección a coordenadas 2D reales
-├── tracking/       # Capa canónica de tracking, posesión y artefactos finales
+├── posession/      # Fase desacoplada de estimación heurística de posesión
+├── tracking/       # Orquestación del pipeline y artefactos finales
 ├── identification/ # Identificación de equipo por color de camiseta (KMeans)
 ├── evaluation/     # Cálculo de métricas por track y comparación de experimentos
 └── visualization/  # Generación de video anotado con bounding boxes
@@ -31,7 +33,9 @@ football_ai/
 | [`report`](report/README.md) | Informes tecnicos, benchmarkings y decisiones documentadas | Documentacion Markdown |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
 | [`bytetrack`](bytetrack/README.md) | Asociación multi-objeto desacoplada: `IDENTIFICATION.clean` → `BYTETRACK` | `ByteTrackPhase`, `ByteTrack` |
-| [`tracking`](tracking/README.md) | Capa de tracking canónico y orquestación posterior a `BYTETRACK` | `Tracker` |
+| [`canonicaltrack`](canonicaltrack/) | Canonización desacoplada: `BYTETRACK.clean` → `CANONICALTRACK` | `CanonicalTrackPhase` |
+| [`posession`](posession/) | Estimación desacoplada de posesión: `CANONICALTRACK.clean` → `POSESSION` | `PosessionPhase` |
+| [`tracking`](tracking/README.md) | Orquestación de fases y consolidación de artefactos finales | `Tracker` |
 | [`identification`](identification/README.md) | Extracción de color de camiseta y asignación de equipo | `ShirtDetector`, `TeamDetector` |
 | [`evaluation`](evaluation/README.md) | Métricas cuantitativas por track y experimento | `Evaluator`, `ExperimentVisualizer`, ... |
 | [`visualization`](visualization/README.md) | Dibujado de bounding boxes y exportación de video | `Drawer` |
@@ -55,6 +59,12 @@ TeamDetector (KMeans)    → packet IDENTIFICATION [clean enriquecido, trace clu
    │
    ▼
 football_ai.bytetrack    → packet BYTETRACK [clean trackeado, trace matching/debug]
+   │
+   ▼
+football_ai.canonicaltrack → packet CANONICALTRACK [clean tracks_frame, trace canonical debug]
+   │
+   ▼
+football_ai.posession    → packet POSESSION [clean posesión + tracks_frame enriquecido, trace]
    │
    ▼
 tracks dict              → {"player": [{id: {bbox, field_position_m, team, ...}}], ...}

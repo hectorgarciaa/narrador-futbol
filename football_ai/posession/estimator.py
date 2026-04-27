@@ -28,17 +28,17 @@ class PossessionConfig:
     def from_mapping(cls, raw_config: Mapping[str, Any] | None) -> "PossessionConfig":
         if not isinstance(raw_config, Mapping):
             return cls()
-        payload = {}
-        for field_name in cls.__dataclass_fields__.keys():
-            if field_name in raw_config:
-                payload[field_name] = raw_config[field_name]
+        payload = {
+            field_name: raw_config[field_name]
+            for field_name in cls.__dataclass_fields__
+            if field_name in raw_config
+        }
         return cls(**payload)
 
 
 @dataclass(frozen=True)
 class Candidate:
     track_id: Any
-    class_name: str
     team_id: str | None
     distance_px: float
     player_height_px: float
@@ -46,8 +46,8 @@ class Candidate:
 
 
 class TeamPossessionEstimator:
-    def __init__(self, config: PossessionConfig | None = None):
-        self.config = config or PossessionConfig()
+    def __init__(self, config: PossessionConfig):
+        self.config = config
         self.current_team: str | None = None
         self.current_player: Any | None = None
         self.last_touch_frame = -10_000
@@ -61,30 +61,21 @@ class TeamPossessionEstimator:
         self.previous_ball_vector: tuple[float, float] | None = None
 
     @staticmethod
-    def _ball_center(frame_ball_tracks: Mapping[str, Any]) -> tuple[float, float] | None:
-        if not isinstance(frame_ball_tracks, Mapping) or not frame_ball_tracks:
+    def _ball_center(frame_ball_tracks: Mapping[Any, Mapping[str, Any]]) -> tuple[float, float] | None:
+        if not frame_ball_tracks:
             return None
-        _, data = next(iter(frame_ball_tracks.items()))
-        bbox = data.get("bbox")
-        if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
-            return None
-        x1, y1, x2, y2 = [float(v) for v in bbox[:4]]
-        return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        first_payload = next(iter(frame_ball_tracks.values()))
+        x1, y1, x2, y2 = [float(v) for v in first_payload["bbox"][:4]]
+        return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
     @staticmethod
-    def _player_footpoint(track_data: Mapping[str, Any]) -> tuple[float, float] | None:
-        bbox = track_data.get("bbox")
-        if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
-            return None
-        x1, _, x2, y2 = [float(v) for v in bbox[:4]]
-        return (x1 + x2) / 2.0, y2
+    def _player_footpoint(track_data: Mapping[str, Any]) -> tuple[float, float]:
+        x1, _, x2, y2 = [float(v) for v in track_data["bbox"][:4]]
+        return ((x1 + x2) / 2.0, y2)
 
     @staticmethod
-    def _player_height_px(track_data: Mapping[str, Any]) -> float | None:
-        bbox = track_data.get("bbox")
-        if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
-            return None
-        y1, y2 = float(bbox[1]), float(bbox[3])
+    def _player_height_px(track_data: Mapping[str, Any]) -> float:
+        y1, y2 = float(track_data["bbox"][1]), float(track_data["bbox"][3])
         return max(1.0, y2 - y1)
 
     @staticmethod
@@ -92,40 +83,30 @@ class TeamPossessionEstimator:
         ball_center: tuple[float, float],
         track_data: Mapping[str, Any],
     ) -> bool:
-        bbox = track_data.get("bbox")
-        if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
-            return False
-        x1, y1, x2, y2 = [float(v) for v in bbox[:4]]
+        x1, y1, x2, y2 = [float(v) for v in track_data["bbox"][:4]]
         bx, by = ball_center
         return (x1 - 8.0) <= bx <= (x2 + 8.0) and (y1 - 8.0) <= by <= (y2 + 16.0)
 
     def _frame_candidates(
         self,
-        frame_tracks: Mapping[str, Mapping[Any, Any]],
+        frame_tracks: Mapping[str, Mapping[Any, Mapping[str, Any]]],
         ball_center: tuple[float, float] | None,
     ) -> list[Candidate]:
         if ball_center is None:
             return []
         candidates: list[Candidate] = []
         for class_name in ("player", "goalkeeper"):
-            class_map = frame_tracks.get(class_name, {})
-            if not isinstance(class_map, Mapping):
-                continue
-            for track_id, track_data in class_map.items():
-                if not isinstance(track_data, Mapping):
+            for track_id, track_data in frame_tracks.get(class_name, {}).items():
+                team_id = track_data.get("team")
+                if not team_id:
                     continue
-                footpoint = self._player_footpoint(track_data)
-                player_height = self._player_height_px(track_data)
-                if footpoint is None or player_height is None:
-                    continue
-                distance = math.dist(ball_center, footpoint)
+                distance = math.dist(ball_center, self._player_footpoint(track_data))
                 candidates.append(
                     Candidate(
                         track_id=track_id,
-                        class_name=class_name,
-                        team_id=track_data.get("team"),
+                        team_id=team_id,
                         distance_px=float(distance),
-                        player_height_px=float(player_height),
+                        player_height_px=self._player_height_px(track_data),
                         inside_bbox=self._ball_inside_expanded_bbox(ball_center, track_data),
                     )
                 )
@@ -159,7 +140,7 @@ class TeamPossessionEstimator:
     def update_frame(
         self,
         frame_id: int,
-        frame_tracks: Mapping[str, Mapping[Any, Any]],
+        frame_tracks: Mapping[str, Mapping[Any, Mapping[str, Any]]],
     ) -> dict[str, Any]:
         if not self.config.enabled:
             return {
@@ -167,6 +148,8 @@ class TeamPossessionEstimator:
                 "player_id": None,
                 "reason": "disabled",
                 "ball_detected": False,
+                "nearest_track_id": None,
+                "nearest_team_id": None,
             }
 
         ball_center = self._ball_center(frame_tracks.get("ball", {}))
@@ -181,10 +164,8 @@ class TeamPossessionEstimator:
                 ball_center[1] - self.previous_ball_center[1],
             )
             ball_speed = math.hypot(*current_ball_vector)
-        direction_change = self._direction_change_deg(
-            self.previous_ball_vector,
-            current_ball_vector,
-        )
+
+        direction_change = self._direction_change_deg(self.previous_ball_vector, current_ball_vector)
         speed_drop = (
             self.previous_ball_speed - ball_speed
             if self.previous_ball_speed is not None and ball_speed is not None
@@ -193,17 +174,15 @@ class TeamPossessionEstimator:
 
         if (
             self.pending_switch_team is not None
-            and (frame_id - self.pending_switch_last_frame) > self.config.opponent_switch_window_frames
+            and frame_id - self.pending_switch_last_frame > self.config.opponent_switch_window_frames
         ):
             self.pending_switch_team = None
             self.pending_switch_player = None
             self.pending_switch_count = 0
 
         candidates = self._frame_candidates(frame_tracks, ball_center)
-        team_candidates = [candidate for candidate in candidates if candidate.team_id]
-        best = team_candidates[0] if team_candidates else None
-        second = team_candidates[1] if len(team_candidates) > 1 else None
-
+        best = candidates[0] if candidates else None
+        second = candidates[1] if len(candidates) > 1 else None
         touch_candidate: Candidate | None = None
         touch_reason: str | None = None
         possession_reason = "last_touch_hold" if self.current_team is not None else "unknown"
@@ -219,9 +198,7 @@ class TeamPossessionEstimator:
             )
             strict_contact = best.distance_px <= strict_threshold
             loose_contact = best.distance_px <= loose_threshold
-            separation = (
-                second.distance_px - best.distance_px if second is not None else float("inf")
-            )
+            separation = second.distance_px - best.distance_px if second is not None else float("inf")
             motion_touch = (
                 (ball_speed is not None and ball_speed <= self.config.slow_ball_speed_px)
                 or (speed_drop is not None and speed_drop >= self.config.speed_drop_threshold_px)
@@ -230,9 +207,7 @@ class TeamPossessionEstimator:
                     and direction_change >= self.config.direction_change_threshold_deg
                 )
             )
-            start_touch = self.current_team is None and strict_contact and (
-                motion_touch or best.inside_bbox
-            )
+            start_touch = self.current_team is None and strict_contact and (motion_touch or best.inside_bbox)
             same_player_control = (
                 self.current_player == best.track_id
                 and loose_contact
@@ -257,8 +232,7 @@ class TeamPossessionEstimator:
             if opponent_takeover_candidate and not immediate_opponent_switch:
                 same_pending_team = (
                     self.pending_switch_team == best.team_id
-                    and (frame_id - self.pending_switch_last_frame)
-                    <= self.config.opponent_switch_window_frames
+                    and frame_id - self.pending_switch_last_frame <= self.config.opponent_switch_window_frames
                 )
                 if same_pending_team:
                     self.pending_switch_count += 1
@@ -302,19 +276,14 @@ class TeamPossessionEstimator:
             self.pending_switch_team = None
             self.pending_switch_player = None
             self.pending_switch_count = 0
-        else:
-            if self.current_team is not None:
-                if (
-                    frame_id - self.last_touch_frame > self.config.touch_timeout_frames
-                    or frame_id - self.last_ball_frame > self.config.ball_missing_release_frames
-                ):
-                    self.current_team = None
-                    self.current_player = None
-                    possession_reason = "timeout_release"
-                else:
-                    possession_reason = "last_touch_hold"
-            else:
-                possession_reason = "unknown"
+        elif self.current_team is not None:
+            if (
+                frame_id - self.last_touch_frame > self.config.touch_timeout_frames
+                or frame_id - self.last_ball_frame > self.config.ball_missing_release_frames
+            ):
+                self.current_team = None
+                self.current_player = None
+                possession_reason = "timeout_release"
 
         self.previous_ball_vector = current_ball_vector
         self.previous_ball_speed = ball_speed

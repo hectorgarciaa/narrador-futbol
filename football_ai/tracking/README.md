@@ -1,15 +1,15 @@
 # tracking
 
-Pipeline completo de tracking canónico para un partido de fútbol. Consume la fase ByteTrack ya desacoplada y la transforma en tracks finales estables por ID canónico, junto con la lógica de posesión y roles online.
+Pipeline completo de tracking canónico para un partido de fútbol. Consume fases desacopladas y las transforma en tracks finales estables por ID canónico, junto con roles online.
 
-Nota de desacoplo: la lógica de canonización (matching canónico, seeds, balón y gates de continuidad) ya no vive en `football_ai/tracking`; reside en `football_ai/canonicaltrack` (incluido `logic_mixin.py`). `tracking` se mantiene como orquestador del pipeline + posesión.
+Nota de desacoplo: la lógica de canonización (matching canónico, seeds, balón y gates de continuidad) vive en `football_ai/canonicaltrack`, y la posesión vive en `football_ai/posession`. `tracking` se mantiene como orquestador del pipeline.
 
 ---
 
 ## `tracker.py` — `Tracker`
 
 ### Objetivo
-Orquestar el pipeline de tracking desacoplado (`DETECTOR -> REFERENCE_POINTS -> FILTERING -> IDENTIFICATION -> BYTETRACK -> CANONICALTRACK`) y devolver un diccionario de tracks con información completa por cada objeto detectado en cada frame.
+Orquestar el pipeline de tracking desacoplado (`DETECTOR -> REFERENCE_POINTS -> FILTERING -> IDENTIFICATION -> BYTETRACK -> CANONICALTRACK -> POSESSION`) y devolver un diccionario de tracks con información completa por cada objeto detectado en cada frame.
 
 ### Inicialización
 
@@ -87,7 +87,10 @@ Por cada frame del vídeo:
    - no cambie de tamaño de forma abrupta entre frames;
    - y, si hay varias candidatas plausibles, se prioriza la más coherente con la posición esperada y la confianza.
    Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Cuando la trayectoria prevista saca el balón fuera de la imagen, la búsqueda queda anclada al borde por el que salió; no se aceptan reapariciones “hacia atrás” dentro de la pantalla. Solo tras `tracking.ball.max_reassign_lost_frames` frames perdidos se permite una redetección libre por máxima confianza.
-11. **Estimación de posesión online**: tras cerrar el frame, se ejecuta una heurística temporal de posesión (`TeamPossessionEstimator`) que decide `equipo + jugador` en control del balón usando distancia balón-pie, contacto estricto/flexible y señales de movimiento del balón (cambio de dirección, caída de velocidad, continuidad del portador y cambios de equipo). El resultado se inyecta en el propio `tracks` de ese frame para consumo posterior (PathCRF, visualización, análisis).
+11. **POSESSION** (`football_ai.posession.PosessionPhase.process_packet`): consume `CANONICALTRACK`, estima posesión con heurísticas temporales (distancia balón-pie, contacto estricto/flexible y señales de movimiento), y emite un packet con `clean`+`trace`.
+   - `clean` conserva toda la salida previa de `CANONICALTRACK`, añade `possession` y enriquece `tracks_frame` con metadatos de posesión por track.
+   - `trace` conserva la traza de `CANONICALTRACK` y añade el bloque `possession`.
+   - `Tracker` reconstruye el `tracks` final desde `POSESSION.clean.tracks_frame` y `POSESSION.clean.possession`.
 
 Si `profile_phases=True`, el tracker imprime por frame los tiempos de cada fase y el total, sin modificar la lógica ni el resultado del pipeline.
 
@@ -161,7 +164,7 @@ Y para `tracks["possession"][frame_id]`:
 
 ## ByteTrack desacoplado
 
-La implementación base de ByteTrack ya no vive en este módulo, sino en [`football_ai/bytetrack`](../bytetrack/README.md). `tracking` consume su salida `BYTETRACK` y se centra en la capa canónica, la posesión y los artefactos finales.
+La implementación base de ByteTrack ya no vive en este módulo, sino en [`football_ai/bytetrack`](../bytetrack/README.md). `tracking` consume su salida `BYTETRACK` y se centra en orquestar fases desacopladas + artefactos finales.
 
 ## `football_ai/bytetrack/byte_tracker.py` — `ByteTrack`
 
