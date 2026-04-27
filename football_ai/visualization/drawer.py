@@ -278,6 +278,7 @@ class Drawer:
         possession_player_id=None,
         compact=False,
         show_identity_segment=False,
+        print_equipos=True,
     ):
         if data.get("synthetic_seed"):
             return
@@ -392,7 +393,7 @@ class Drawer:
         label = f"{class_name} #{track_id}"
         distances = data.get("distances")
         team = data.get("team")
-        if distances is not None and team is not None:
+        if print_equipos and distances is not None and team is not None:
             d_str = ", ".join(f"{t}: {d:.1f}" for t, d in distances.items())
             label += f" [{team}] ({d_str})"
 
@@ -481,6 +482,7 @@ class Drawer:
         frame_id,
         possession_player_id=None,
         compact=False,
+        print_equipos=True,
     ):
         frame_data = class_tracks[frame_id]
         color = self.colors.get(class_name, self.DEFAULT_COLOR)
@@ -493,6 +495,7 @@ class Drawer:
                 track_id,
                 possession_player_id=possession_player_id,
                 compact=compact,
+                print_equipos=print_equipos,
             )
 
     def _extract_frame_tracks(self, tracks, frame_id):
@@ -583,13 +586,24 @@ class Drawer:
                     merged[key] = value
         return merged
 
-    def _draw_possession_banner(self, frame, possession_info, compact=False, top_margin_px=6):
+    def _draw_possession_banner(
+        self,
+        frame,
+        possession_info,
+        compact=False,
+        top_margin_px=6,
+        print_equipos=True,
+    ):
         if not isinstance(possession_info, dict):
             return
         team_id = possession_info.get("team_id")
         player_id = possession_info.get("player_id")
 
-        if team_id is None and player_id is None:
+        if not print_equipos:
+            if player_id is None:
+                return
+            label = f"POS: ID {player_id}"
+        elif team_id is None and player_id is None:
             label = "POS: unknown"
         else:
             label = f"POS: {team_id if team_id is not None else 'unknown'}"
@@ -620,13 +634,21 @@ class Drawer:
             cv2.LINE_AA,
         )
 
-    def _draw_tracks_frame(self, frame, frame_tracks, compact=False, possession_info=None):
+    def _draw_tracks_frame(
+        self,
+        frame,
+        frame_tracks,
+        compact=False,
+        possession_info=None,
+        print_equipos=True,
+    ):
         return self._draw_tracks_frame_with_options(
             frame,
             frame_tracks,
             compact=compact,
             possession_info=possession_info,
             show_identity_segment=False,
+            print_equipos=print_equipos,
         )
 
     def _draw_tracks_frame_with_options(
@@ -637,6 +659,7 @@ class Drawer:
         compact=False,
         possession_info=None,
         show_identity_segment=False,
+        print_equipos=True,
     ):
         resolved_possession = (
             possession_info
@@ -661,6 +684,7 @@ class Drawer:
                     possession_player_id=possession_player_id,
                     compact=compact,
                     show_identity_segment=show_identity_segment,
+                    print_equipos=print_equipos,
                 )
         return frame
 
@@ -749,7 +773,14 @@ class Drawer:
         radius = max(6, int(min(w, h) * 0.08))
         cv2.circle(panel, center, radius, (230, 230, 230), 1)
 
-    def _draw_pitch_panel(self, frame_tracks, frame_shape_hw, panel_shape_hw, possession_info=None):
+    def _draw_pitch_panel(
+        self,
+        frame_tracks,
+        frame_shape_hw,
+        panel_shape_hw,
+        possession_info=None,
+        print_equipos=True,
+    ):
         panel_h, panel_w = panel_shape_hw
         panel = np.zeros((panel_h, panel_w, 3), dtype=np.uint8)
         self._draw_pitch_background(panel)
@@ -811,7 +842,13 @@ class Drawer:
                         1,
                         cv2.LINE_AA,
                     )
-        self._draw_possession_banner(panel, resolved_possession, compact=True, top_margin_px=20)
+        self._draw_possession_banner(
+            panel,
+            resolved_possession,
+            compact=True,
+            top_margin_px=20,
+            print_equipos=print_equipos,
+        )
         return panel
 
     def _draw_discarded_panel(self, base_frame, debug_frame):
@@ -939,6 +976,7 @@ class Drawer:
         debug_frames,
         carry_state,
         expected_counts,
+        print_equipos=True,
     ):
         h, w = frame.shape[:2]
         frame_tracks = self._extract_frame_tracks(tracks, frame_id)
@@ -951,12 +989,14 @@ class Drawer:
             frame_tracks,
             compact=True,
             possession_info=possession_info,
+            print_equipos=print_equipos,
         )
         panel_b = self._draw_pitch_panel(
             frame_tracks,
             (h, w),
             (h, w),
             possession_info=possession_info,
+            print_equipos=print_equipos,
         )
         debug_frame = debug_frames[frame_id] if debug_frames and frame_id < len(debug_frames) else None
         panel_c = self._draw_discarded_panel(frame.copy(), debug_frame)
@@ -967,15 +1007,34 @@ class Drawer:
             compact=True,
             possession_info=possession_info,
             show_identity_segment=True,
+            print_equipos=print_equipos,
         )
 
         self._draw_panel_title(panel_a, "A) Tracking compact")
         self._draw_panel_title(panel_b, "B) Campo + IDs + rol")
         self._draw_panel_title(panel_c, "C) YOLO descartadas")
         self._draw_panel_title(panel_d, "D) Tracking con continuidad")
-        self._draw_possession_banner(panel_a, possession_info, compact=True, top_margin_px=24)
-        self._draw_possession_banner(panel_c, possession_info, compact=True, top_margin_px=24)
-        self._draw_possession_banner(panel_d, possession_info, compact=True, top_margin_px=24)
+        self._draw_possession_banner(
+            panel_a,
+            possession_info,
+            compact=True,
+            top_margin_px=24,
+            print_equipos=print_equipos,
+        )
+        self._draw_possession_banner(
+            panel_c,
+            possession_info,
+            compact=True,
+            top_margin_px=24,
+            print_equipos=print_equipos,
+        )
+        self._draw_possession_banner(
+            panel_d,
+            possession_info,
+            compact=True,
+            top_margin_px=24,
+            print_equipos=print_equipos,
+        )
 
         canvas = np.zeros((h * 2, w * 2, 3), dtype=np.uint8)
         canvas[0:h, 0:w] = panel_a
@@ -994,6 +1053,7 @@ class Drawer:
         four_panel=False,
         debug_frames=None,
         expected_counts=None,
+        print_equipos=True,
     ):
         cap = None
         out = None
@@ -1032,6 +1092,7 @@ class Drawer:
                         debug_frames,
                         carry_state,
                         expected_counts,
+                        print_equipos=print_equipos,
                     )
                 else:
                     output_frame = frame
@@ -1045,12 +1106,14 @@ class Drawer:
                         frame_tracks,
                         compact=False,
                         possession_info=possession_info,
+                        print_equipos=print_equipos,
                     )
                     self._draw_possession_banner(
                         output_frame,
                         possession_info,
                         compact=False,
                         top_margin_px=8,
+                        print_equipos=print_equipos,
                     )
 
                 out.write(output_frame)

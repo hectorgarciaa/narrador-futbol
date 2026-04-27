@@ -28,6 +28,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker solo cuando la homografía del frame supera una validación explícita basada en `geometry_fit`, `support_quality` y `coverage_quality`. El proyector puede relajar thresholds para rescatar el frame, compara todos los intentos por score y solo conserva la homografía si queda clasificada como `good`; si no, el pipeline cae a bbox y no usa `field_position_m` para decisiones de tracking/canonización.
 - Tras proyectar con `PnLCalib`, el tracking descarta cualquier detección cuya posición métrica válida quede fuera del terreno, pero mantiene una tolerancia extra de 1 metro solo sobre las bandas laterales para no perder a los linieres. Además, si una detección proyectada fuera del campo solapa con un track activo de ByteTrack, tampoco se filtra en ese frame.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
+- Inferencia online de roles futbolísticos con Set Transformer. El modelo operativo actual se carga desde `models/positions/20260427_002133/best_model.pt` y trabaja con 11 roles tras fusionar carrileros con laterales (`CI -> LI`, `CD -> LD`); en alineaciones y `expected_roles_by_team` ya deben usarse directamente `LI` y `LD`.
 - Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
 - Anti-solape de ByteTrack limitado al nacimiento de tracks nuevos: los `unconfirmed` ya nacidos siguen el matching normal y el filtro duro de solape solo se aplica antes de crear un track nuevo frente a activos, `unconfirmed` previos y otros candidatos del mismo frame, con thresholds independientes para cada comparación.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
@@ -835,9 +836,9 @@ tracking:
   special_seed_role_team_assignment_enabled: true
   # La capa canónica preserva el mismo ID si ByteTrack mantiene el mismo
   # raw_tracker_id y la continuidad geométrica básica sigue siendo válida.
-  special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
+  special_seed_role_model_path: "models/positions/20260427_002133/best_model.pt"
   special_seed_canonical_ids: [1, 2]
-  special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
+  special_seed_defender_roles: ["LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   expected_roles_by_team:
     Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]

@@ -7,9 +7,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from football_ai.tracking_cli import run_tracking_pipeline
-
-
 def parse_args():
     """Parse CLI arguments for the tracking script."""
     parser = argparse.ArgumentParser(
@@ -52,11 +49,50 @@ def parse_args():
             "No altera resultados, solo añade trazas de rendimiento."
         ),
     )
+    parser.add_argument(
+        "--print-equipos",
+        dest="print_equipos",
+        action="store_true",
+        default=True,
+        help="Muestra nombres de equipos y distancias en el video anotado.",
+    )
+    parser.add_argument(
+        "--no-print-equipos",
+        dest="print_equipos",
+        action="store_false",
+        help="Oculta nombres de equipos y distancias en el video anotado.",
+    )
+    parser.add_argument(
+        "--four-panel",
+        dest="four_panel",
+        action="store_true",
+        default=None,
+        help="Fuerza la salida en mosaico 2x2 de depuracion.",
+    )
+    parser.add_argument(
+        "--no-four-panel",
+        dest="four_panel",
+        action="store_false",
+        help="Fuerza la salida normal de un solo panel aunque config.yaml active four_panel_enabled.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Directorio donde guardar el MP4 anotado. Por defecto usa paths.output.prueba_tracker.",
+    )
+    parser.add_argument(
+        "--output-name",
+        default=None,
+        help="Nombre del MP4 anotado. Si no incluye extension, se añade .mp4.",
+    )
     return parser.parse_args()
 
 
 def main():
-    return run_tracking_pipeline(parse_args())
+    args = parse_args()
+    from football_ai.tracking_cli import run_tracking_pipeline
+
+    return run_tracking_pipeline(args)
 
 
 if __name__ == "__main__":

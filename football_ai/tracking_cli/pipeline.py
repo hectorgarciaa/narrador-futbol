@@ -239,8 +239,15 @@ def run_tracking_pipeline(args):
             else None
         )
         video_path, video_source = resolve_video_path(config, effective_video_shortcut)
+        if not Path(video_path).is_file():
+            raise FileNotFoundError(f"{video_path} does not exist")
         
-        output = build_output_video_path(config, video_path)
+        output = build_output_video_path(
+            config,
+            video_path,
+            output_dir=getattr(args, "output_dir", None),
+            output_name=getattr(args, "output_name", None),
+        )
         output_path_named, output_path_legacy = build_tracks_output_paths(config, video_path)
         summary_path, metrics_dataset_path = build_tracking_metrics_output_paths(config, video_path)
         
@@ -252,7 +259,13 @@ def run_tracking_pipeline(args):
         visualization_conf = config.visualization
         show_kmeans = config.get("visualization", "show_kmeans")
         show_output = config.get("visualization", "show_output")
-        four_panel_enabled = bool(visualization_conf.get("four_panel_enabled", False))
+        four_panel_override = getattr(args, "four_panel", None)
+        four_panel_enabled = (
+            bool(visualization_conf.get("four_panel_enabled", False))
+            if four_panel_override is None
+            else bool(four_panel_override)
+        )
+        print_equipos = bool(getattr(args, "print_equipos", True))
 
         # Tracking configuration
         detector_conf = config.detection
@@ -307,6 +320,7 @@ def run_tracking_pipeline(args):
         logger.info(f"Tracking configuration: {tracker_conf}")
         logger.info(f"Field tracking configuration: {projector_conf}")
         logger.info(f"Team detector configuration: {team_detector_conf}")
+        logger.info("Print team labels in visualization: %s", print_equipos)
 
         # Run tracking
         tracker = Tracker(model_path, detector_conf, team_detector_conf, bytetracker_conf,
@@ -376,6 +390,7 @@ def run_tracking_pipeline(args):
             four_panel=four_panel_enabled,
             debug_frames=(tracker.visualization_debug_frames if four_panel_enabled else None),
             expected_counts=tracker.max_tracks_per_class,
+            print_equipos=print_equipos,
         )
         logger.info(f"Video with tracks saved to: {output}")
 

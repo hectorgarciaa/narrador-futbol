@@ -60,7 +60,8 @@ except ImportError:  # pragma: no cover - soporte ejecución directa del archivo
 
 DEFAULT_BASE_TABLE_PATH = POSITIONS_COMMON_DIR / "base_table.csv"
 DEFAULT_MAX_TEAMMATES = 10
-DEFAULT_MODEL_DIR = Path("models/positions/set_transformer")
+DEFAULT_MODEL_DIR = Path("models/positions")
+DEFAULT_SELECTED_MODEL_PATH = Path("models/positions/20260427_002133/best_model.pt")
 DEFAULT_PREDICTIONS_DIR = Path("output/predictions/positions")
 
 
@@ -72,18 +73,23 @@ class TrainingConfig:
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
     dropout: float = 0.10
+    label_smoothing: float = 0.0
     teammate_embed_dim: int = 64
     objective_hidden_dim: int = 128
+    objective_num_layers: int = 1
     set_hidden_dim: int = 128
     fusion_hidden_dim: int = 128
     num_heads: int = 4
     num_set_blocks: int = 2
+    ff_expansion: int = 2
     patience: int = 5
+    overfit_patience: int = 0
     max_teammates: int = DEFAULT_MAX_TEAMMATES
     train_size_per_group_split: float = 0.75
     val_size_per_group_split: float = 0.125
     test_size_per_group_split: float = 0.125
     num_workers: int = 0
+    experiment_group: str = "default"
 
 
 @dataclass(frozen=True)
@@ -438,8 +444,9 @@ class MLP(nn.Module):
 
 
 class SetAttentionBlock(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, dropout: float) -> None:
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float, ff_expansion: int = 2) -> None:
         super().__init__()
+        ff_dim = int(embed_dim) * int(ff_expansion)
         self.attn = nn.MultiheadAttention(
             embed_dim=int(embed_dim),
             num_heads=int(num_heads),
@@ -449,10 +456,10 @@ class SetAttentionBlock(nn.Module):
         self.norm1 = nn.LayerNorm(int(embed_dim))
         self.norm2 = nn.LayerNorm(int(embed_dim))
         self.ff = nn.Sequential(
-            nn.Linear(int(embed_dim), int(embed_dim) * 2),
+            nn.Linear(int(embed_dim), ff_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(embed_dim) * 2, int(embed_dim)),
+            nn.Linear(ff_dim, int(embed_dim)),
             nn.Dropout(float(dropout)),
         )
 
@@ -470,8 +477,9 @@ class SetAttentionBlock(nn.Module):
 
 
 class PoolingMultiheadAttention(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, dropout: float) -> None:
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float, ff_expansion: int = 2) -> None:
         super().__init__()
+        ff_dim = int(embed_dim) * int(ff_expansion)
         self.seed = nn.Parameter(torch.randn(1, 1, int(embed_dim)))
         self.attn = nn.MultiheadAttention(
             embed_dim=int(embed_dim),
@@ -482,10 +490,10 @@ class PoolingMultiheadAttention(nn.Module):
         self.norm1 = nn.LayerNorm(int(embed_dim))
         self.norm2 = nn.LayerNorm(int(embed_dim))
         self.ff = nn.Sequential(
-            nn.Linear(int(embed_dim), int(embed_dim) * 2),
+            nn.Linear(int(embed_dim), ff_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(embed_dim) * 2, int(embed_dim)),
+            nn.Linear(ff_dim, int(embed_dim)),
             nn.Dropout(float(dropout)),
         )
 
@@ -512,9 +520,23 @@ class RoleSetTransformer(nn.Module):
         config: TrainingConfig,
     ) -> None:
         super().__init__()
+        if int(config.set_hidden_dim) % int(config.num_heads) != 0:
+            raise ValueError(
+                "set_hidden_dim debe ser divisible entre num_heads "
+                f"({config.set_hidden_dim=} {config.num_heads=})."
+            )
+        if int(config.objective_num_layers) < 1:
+            raise ValueError("objective_num_layers debe ser >= 1.")
+        if int(config.ff_expansion) < 1:
+            raise ValueError("ff_expansion debe ser >= 1.")
+
+        objective_hidden_dims = tuple(
+            int(config.objective_hidden_dim)
+            for _ in range(int(config.objective_num_layers))
+        )
         self.objective_encoder = MLP(
             input_dim=int(objective_dim),
-            hidden_dims=(int(config.objective_hidden_dim),),
+            hidden_dims=objective_hidden_dims,
             output_dim=int(config.set_hidden_dim),
             dropout=float(config.dropout),
         )
@@ -530,6 +552,7 @@ class RoleSetTransformer(nn.Module):
                     embed_dim=int(config.set_hidden_dim),
                     num_heads=int(config.num_heads),
                     dropout=float(config.dropout),
+                    ff_expansion=int(config.ff_expansion),
                 )
                 for _ in range(int(config.num_set_blocks))
             ]
@@ -538,6 +561,7 @@ class RoleSetTransformer(nn.Module):
             embed_dim=int(config.set_hidden_dim),
             num_heads=int(config.num_heads),
             dropout=float(config.dropout),
+            ff_expansion=int(config.ff_expansion),
         )
         self.classifier = nn.Sequential(
             nn.Linear(int(config.set_hidden_dim) * 2, int(config.fusion_hidden_dim)),
@@ -834,7 +858,8 @@ def train_position_model(
         y=labels_idx[used_indices["train_idx"]],
     )
     criterion = nn.CrossEntropyLoss(
-        weight=torch.as_tensor(class_weights, dtype=torch.float32, device=device)
+        weight=torch.as_tensor(class_weights, dtype=torch.float32, device=device),
+        label_smoothing=float(config.label_smoothing),
     )
 
     model = RoleSetTransformer(
@@ -851,9 +876,12 @@ def train_position_model(
 
     history_rows: list[dict[str, Any]] = []
     best_val_macro_f1 = -np.inf
+    best_val_loss = math.inf
     best_state: dict[str, Any] | None = None
     best_epoch = -1
     no_improve = 0
+    overfit_count = 0
+    stop_reason = "max_epochs"
 
     for epoch in range(1, int(config.epochs) + 1):
         train_epoch = _run_epoch(
@@ -882,17 +910,26 @@ def train_position_model(
             label_names=dataset.label_names,
         )
 
+        train_loss = float(train_epoch["loss"])
+        val_loss = float(val_epoch["loss"])
         history_rows.append(
             {
                 "epoch": int(epoch),
-                "train_loss": float(train_epoch["loss"]),
+                "train_loss": train_loss,
                 "train_accuracy": float(train_metrics["accuracy"]),
                 "train_macro_f1": float(train_metrics["macro_f1"]),
-                "val_loss": float(val_epoch["loss"]),
+                "val_loss": val_loss,
                 "val_accuracy": float(val_metrics["accuracy"]),
                 "val_macro_f1": float(val_metrics["macro_f1"]),
+                "generalization_gap_loss": float(val_loss - train_loss),
             }
         )
+
+        if val_loss < best_val_loss - 1e-6:
+            best_val_loss = val_loss
+            overfit_count = 0
+        else:
+            overfit_count += 1
 
         if float(val_metrics["macro_f1"]) > float(best_val_macro_f1):
             best_val_macro_f1 = float(val_metrics["macro_f1"])
@@ -902,7 +939,12 @@ def train_position_model(
         else:
             no_improve += 1
             if no_improve >= int(config.patience):
+                stop_reason = f"early_stopping_macro_f1_patience_{int(config.patience)}"
                 break
+
+        if int(config.overfit_patience) > 0 and overfit_count >= int(config.overfit_patience):
+            stop_reason = f"early_stopping_val_loss_patience_{int(config.overfit_patience)}"
+            break
 
     if best_state is None:
         raise RuntimeError("El entrenamiento no produjo ningún checkpoint válido.")
@@ -964,6 +1006,9 @@ def train_position_model(
         "created_at": datetime.now().isoformat(),
         "device": str(device),
         "best_epoch": int(best_epoch),
+        "stop_reason": stop_reason,
+        "best_val_macro_f1_during_training": float(best_val_macro_f1),
+        "best_val_loss_during_training": float(best_val_loss),
         "num_classes_trained": int(len(dataset.label_names)),
         "trained_labels": list(dataset.label_names),
         "missing_known_labels": [
@@ -1348,8 +1393,8 @@ ROLE_SLOT_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 LATERAL_ROLE_FAMILIES: dict[str, tuple[str, ...]] = {
-    "LEFT": ("CI", "LI", "MI", "EI"),
-    "RIGHT": ("CD", "LD", "MD", "ED"),
+    "LEFT": ("LI", "MI", "EI"),
+    "RIGHT": ("LD", "MD", "ED"),
 }
 
 ROLE_TO_LATERAL_FAMILY: dict[str, str] = {
@@ -1359,13 +1404,11 @@ ROLE_TO_LATERAL_FAMILY: dict[str, str] = {
 }
 
 ROLE_SLOT_ANCHORS: dict[str, tuple[float, float]] = {
-    "CI": (0.40, 0.12),
     "LI": (0.26, 0.12),
     "DFC_IZQ": (0.18, 0.34),
     "DFC_CENT": (0.16, 0.50),
     "DFC_DER": (0.18, 0.66),
     "LD": (0.26, 0.88),
-    "CD": (0.40, 0.88),
     "MC": (0.52, 0.50),
     "MI": (0.60, 0.22),
     "MD": (0.60, 0.78),
@@ -2228,8 +2271,20 @@ def _build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--batch-size", type=int, default=TrainingConfig.batch_size)
     train_parser.add_argument("--learning-rate", type=float, default=TrainingConfig.learning_rate)
     train_parser.add_argument("--weight-decay", type=float, default=TrainingConfig.weight_decay)
+    train_parser.add_argument("--dropout", type=float, default=TrainingConfig.dropout)
+    train_parser.add_argument("--label-smoothing", type=float, default=TrainingConfig.label_smoothing)
+    train_parser.add_argument("--teammate-embed-dim", type=int, default=TrainingConfig.teammate_embed_dim)
+    train_parser.add_argument("--objective-hidden-dim", type=int, default=TrainingConfig.objective_hidden_dim)
+    train_parser.add_argument("--objective-num-layers", type=int, default=TrainingConfig.objective_num_layers)
+    train_parser.add_argument("--set-hidden-dim", type=int, default=TrainingConfig.set_hidden_dim)
+    train_parser.add_argument("--fusion-hidden-dim", type=int, default=TrainingConfig.fusion_hidden_dim)
+    train_parser.add_argument("--num-heads", type=int, default=TrainingConfig.num_heads)
+    train_parser.add_argument("--num-set-blocks", type=int, default=TrainingConfig.num_set_blocks)
+    train_parser.add_argument("--ff-expansion", type=int, default=TrainingConfig.ff_expansion)
     train_parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
     train_parser.add_argument("--patience", type=int, default=TrainingConfig.patience)
+    train_parser.add_argument("--overfit-patience", type=int, default=TrainingConfig.overfit_patience)
+    train_parser.add_argument("--max-teammates", type=int, default=TrainingConfig.max_teammates)
     train_parser.add_argument("--max-train-samples", type=int, default=None)
     train_parser.add_argument("--max-val-samples", type=int, default=None)
     train_parser.add_argument("--max-test-samples", type=int, default=None)
@@ -2267,7 +2322,19 @@ def _training_config_from_args(args: argparse.Namespace) -> TrainingConfig:
         batch_size=int(args.batch_size),
         learning_rate=float(args.learning_rate),
         weight_decay=float(args.weight_decay),
+        dropout=float(args.dropout),
+        label_smoothing=float(args.label_smoothing),
+        teammate_embed_dim=int(args.teammate_embed_dim),
+        objective_hidden_dim=int(args.objective_hidden_dim),
+        objective_num_layers=int(args.objective_num_layers),
+        set_hidden_dim=int(args.set_hidden_dim),
+        fusion_hidden_dim=int(args.fusion_hidden_dim),
+        num_heads=int(args.num_heads),
+        num_set_blocks=int(args.num_set_blocks),
+        ff_expansion=int(args.ff_expansion),
         patience=int(args.patience),
+        overfit_patience=int(args.overfit_patience),
+        max_teammates=int(args.max_teammates),
     )
 
 

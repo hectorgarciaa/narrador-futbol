@@ -35,14 +35,30 @@ def resolve_video_path(config, video_shortcut):
     return str(config.get_path("paths", "data", default_key)), default_key
 
 
-def build_output_video_path(config, video_path):
+def build_output_video_path(config, video_path, output_dir=None, output_name=None):
     """Build output path using the input video filename."""
-    output_dir = config.get_path(
-        "paths", "output", "prueba_tracker", create_if_missing=True
-    )
-    input_stem = Path(video_path).stem or "video"
-    output_name = f"{input_stem}_tracking.mp4"
-    return str(output_dir / output_name)
+    if output_dir is None:
+        output_base = config.get_path(
+            "paths", "output", "prueba_tracker", create_if_missing=True
+        )
+    else:
+        output_base = Path(output_dir).expanduser()
+        if not output_base.is_absolute():
+            output_base = (config.project_root / output_base).resolve()
+        output_base.mkdir(parents=True, exist_ok=True)
+
+    if output_name:
+        output_path = Path(output_name).expanduser()
+        if not output_path.is_absolute():
+            output_path = output_base / output_path
+    else:
+        input_stem = Path(video_path).stem or "video"
+        output_path = output_base / f"{input_stem}_tracking.mp4"
+
+    if output_path.suffix == "":
+        output_path = output_path.with_suffix(".mp4")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return str(output_path)
 
 
 def sanitize_video_stem(raw_stem):

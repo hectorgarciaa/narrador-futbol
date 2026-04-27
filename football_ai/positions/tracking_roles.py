@@ -23,8 +23,6 @@ from .lineup_spec import LineupSlotMatcher
 
 DEFAULT_SPECIAL_SEED_CANONICAL_IDS = (1, 2)
 DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = (
-    "CD",
-    "CI",
     "LD",
     "LI",
     "DFC_DER",
@@ -32,7 +30,7 @@ DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = (
     "DFC_CENT",
 )
 DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH = (
-    "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
+    "models/positions/20260427_002133/best_model.pt"
 )
 DEFAULT_ROLE_CONTEXT_INTERPOLATION_MAX_GAP_FRAMES = 15
 DEFAULT_ROLE_RECENT_POSITION_WINDOW = 10
@@ -74,12 +72,10 @@ DEFAULT_EXPECTED_ROLES_BY_TEAM = {
 ROLE_PLOT_ORDER = (
     "POR",
     "LI",
-    "CI",
     "DFC_IZQ",
     "DFC_CENT",
     "DFC_DER",
     "LD",
-    "CD",
     "MC",
     "MC_IZQ",
     "MC_DCHO",
@@ -95,12 +91,10 @@ ROLE_PLOT_ORDER = (
 ROLE_PLOT_COLORS = {
     "POR": "#6c757d",
     "LI": "#2a9d8f",
-    "CI": "#2f9e44",
     "DFC_IZQ": "#3a86ff",
     "DFC_CENT": "#4361ee",
     "DFC_DER": "#4895ef",
     "LD": "#4cc9f0",
-    "CD": "#72efdd",
     "MC": "#f4a261",
     "MC_IZQ": "#f4a261",
     "MC_DCHO": "#f4a261",

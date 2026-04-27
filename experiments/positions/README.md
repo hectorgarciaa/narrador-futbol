@@ -76,6 +76,90 @@ Salida adicional:
 Nota:
 - El dataset común actual no contiene ejemplos etiquetados de `goalkeeper`, así que la inferencia asigna `POR` por heurística cuando `class_name == goalkeeper`.
 
+## Grid search experimental del Set Transformer
+
+El grid search está aislado en `experiments/positions/set_transformer_grid_search.py` y no modifica el pipeline productivo de `football_ai/positions`.
+Prueba combinaciones de:
+
+- número de capas ocultas del MLP del jugador objetivo: `1`, `2`, `3`
+- expansión del feed-forward interno de los bloques de atención: `x2`, `x4`
+- número de bloques de Set Transformer: `2`, `3`, `4`
+- dropout: `0.10`, `0.15`, `0.20`
+
+Ejecución:
+
+```bash
+cd /home/cmantill/narrador-futbol
+python -m experiments.positions.set_transformer_grid_search \
+  --project-root /home/cmantill/narrador-futbol
+```
+
+Salidas:
+
+- carpeta por búsqueda en `experiments/positions/grid_search_outputs/<timestamp>/`
+- subcarpeta por configuración en `runs/`
+- `training_history.csv`, `metrics.json`, `config.json`, matrices de confusión y curvas de entrenamiento por configuración
+- `grid_search_summary.csv` y `grid_search_summary.json` con todas las pruebas ordenables
+- `best_hyperparameters.json` y `best_model.pt` con el mejor modelo según `val_macro_f1`
+
+Para hacer una prueba rápida sin entrenar sobre todo el dataset:
+
+```bash
+python -m experiments.positions.set_transformer_grid_search \
+  --project-root /Users/carloscole/narrador-futbol \
+  --epochs 3 \
+  --max-train-samples 2048 \
+  --max-val-samples 512 \
+  --max-test-samples 512
+```
+
+Tras el primer barrido, puede lanzarse el preset ampliado:
+
+```bash
+cd /home/cmantill/narrador-futbol
+./.venv/bin/python -m experiments.positions.set_transformer_grid_search \
+  --project-root /home/cmantill/narrador-futbol \
+  --grid-preset full
+```
+
+Este preset explora 480 configuraciones combinando perfiles de anchura del modelo, regularización más fuerte, 3--5 bloques de atención, FF `x2/x4`, 1--2 capas en el MLP del jugador objetivo y dos tasas de aprendizaje.
+
+Si se quiere evaluar la fusión de carrileros con laterales, puede activarse:
+
+```bash
+./.venv/bin/python -m experiments.positions.set_transformer_grid_search \
+  --project-root /home/cmantill/narrador-futbol \
+  --grid-preset best-run \
+  --merge-wingbacks
+```
+
+Con `--merge-wingbacks`, las etiquetas `CI` y `CD` se remapean antes del split y del entrenamiento:
+
+- `CI -> LI`
+- `CD -> LD`
+
+El preset `best-run` reentrena únicamente la mejor configuración encontrada en el grid ampliado anterior. Es útil para comparar rápidamente las métricas con y sin carrileros como clases independientes.
+
+Para afinar los tres mejores modelos del grid corregido, puede usarse:
+
+```bash
+./.venv/bin/python -m experiments.positions.set_transformer_grid_search \
+  --project-root /home/cmantill/narrador-futbol \
+  --grid-preset refine-top3 \
+  --merge-wingbacks \
+  --rebuild-from-base-table
+```
+
+Este preset ejecuta tres subgrids secuenciales, uno por cada familia de modelo. En cada familia se conserva la arquitectura y se prueban valores nuevos de `learning_rate`, `weight_decay`, `dropout` y `label_smoothing`.
+
+Resumen del barrido:
+
+- `refine_run120_top_val`: 36 pruebas alrededor del mejor modelo por validación.
+- `refine_run342_second_val`: 36 pruebas alrededor del segundo mejor modelo por validación.
+- `refine_run290_third_val_best_balance`: 36 pruebas alrededor del modelo con mejor equilibrio validación/test.
+
+En total se ejecutan 108 entrenamientos y se guardan en la misma estructura de `grid_search_outputs`.
+
 ## Uso recomendado en `.py` (sin depender del notebook)
 
 ### 1) Preparar schedule + JSON de etiquetas
