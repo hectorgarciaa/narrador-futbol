@@ -6,15 +6,31 @@ import numpy as np
 
 from football_ai.core import PHASE_CANONICALTRACK, make_phase_packet
 
-from .assignment import CanonicalAssignmentMixin
-from .logic_mixin import TrackerLogicMixin
+from .assignment_commit import CanonicalAssignmentCommitMixin
+from .assignment_ingest import CanonicalAssignmentIngestMixin
+from .assignment_process import CanonicalAssignmentProcessMixin
+from .logic.ball import CanonicalBallMixin
+from .logic.common import CanonicalCommonMixin
+from .logic.forced_absorption import CanonicalForcedAbsorptionMixin
+from .logic.motion import CanonicalMotionMixin
+from .logic.pending import CanonicalPendingAssignmentMixin
+from .logic.referee import CanonicalRefereeMixin
+from .logic.seeds import CanonicalSeedMixin
 from .state import CanonicalTrackState
 from .utils import serialize_for_trace
 
 
 class CanonicalTrackPhase(
-    TrackerLogicMixin,
-    CanonicalAssignmentMixin,
+    CanonicalPendingAssignmentMixin,
+    CanonicalBallMixin,
+    CanonicalMotionMixin,
+    CanonicalSeedMixin,
+    CanonicalForcedAbsorptionMixin,
+    CanonicalRefereeMixin,
+    CanonicalCommonMixin,
+    CanonicalAssignmentProcessMixin,
+    CanonicalAssignmentCommitMixin,
+    CanonicalAssignmentIngestMixin,
 ):
     def __init__(
         self,
@@ -76,11 +92,6 @@ class CanonicalTrackPhase(
         if not self.special_seed_canonical_ids:
             self.special_seed_canonical_ids = (1, 2)
 
-        self.referee_recovery_max_lost_frames = tracker_conf[
-            "referee_recovery_max_lost_frames"
-        ]
-        self.referee_recovery_max_distance = tracker_conf["referee_recovery_max_distance"]
-
         configured_referee_ids = tracker_conf.get("referee_canonical_ids", [23, 24, 25])
         self.referee_canonical_ids = tuple(
             sorted(
@@ -97,16 +108,12 @@ class CanonicalTrackPhase(
         self.referee_sideline_band_distance_m = float(
             tracker_conf.get("referee_sideline_band_distance_m", 3.0)
         )
-        self.referee_field_length_m = float(
-            projector_conf.get("constructor", {}).get("field_length_m", 106.0)
-        )
         self.referee_field_width_m = float(
             projector_conf.get("constructor", {}).get("field_width_m", 68.0)
         )
 
         self.use_field_positions = projector_conf["enabled"]
         self.field_position_classes = projector_conf["classes"]
-        self.reassign_min_field_distance_m = projector_conf["reassign_min_field_distance_m"]
         self.field_distance_gate_m = projector_conf["match_distance_gate_m"]
         self.field_distance_gate_max_lost_frames = projector_conf[
             "match_distance_max_lost_frames"
@@ -142,9 +149,6 @@ class CanonicalTrackPhase(
             self.field_distance_decay_per_frame = 0.0
 
         self.strict_person_class_separation = tracker_conf["strict_person_class_separation"]
-        self.require_field_position_for_reassign = tracker_conf[
-            "require_field_position_for_reassign"
-        ]
         self.max_reassign_lost_frames = tracker_conf["max_reassign_lost_frames"]
 
         raw_max_reassign_lost_frames_by_class = tracker_conf[
@@ -238,9 +242,6 @@ class CanonicalTrackPhase(
         ground_points_projected,
         ball_candidates,
     ):
-        if len(detection_bbox_xyxy) <= 0:
-            return
-
         for raw_idx, (bbox, score, class_name, det_id) in enumerate(
             zip(
                 detection_bbox_xyxy,
@@ -261,16 +262,8 @@ class CanonicalTrackPhase(
                         "distances": None,
                         "shirt_color": None,
                         "bbox_size": float((x2 - x1) * (y2 - y1)),
-                        "field_position": (
-                            field_positions[raw_idx]
-                            if raw_idx < len(field_positions)
-                            else None
-                        ),
-                        "ground_point_image": (
-                            ground_points_projected[raw_idx]
-                            if raw_idx < len(ground_points_projected)
-                            else None
-                        ),
+                        "field_position": field_positions[raw_idx],
+                        "ground_point_image": ground_points_projected[raw_idx],
                     },
                     "source": "raw",
                     "raw_det_idx": int(det_id),
@@ -334,8 +327,10 @@ class CanonicalTrackPhase(
             collect_visual_debug,
         )
 
-        bytetrack_not_tracked_reason_by_raw_idx = self._bytetrack_debug_map_from_packet(
-            bytetrack_packet
+        bytetrack_not_tracked_reason_by_raw_idx = (
+            self._bytetrack_debug_map_from_packet(bytetrack_packet)
+            if collect_visual_debug
+            else {}
         )
 
         used_canonical_ids_in_frame = set()
