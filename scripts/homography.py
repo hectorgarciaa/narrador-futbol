@@ -2,14 +2,14 @@ import json
 import sys
 from pathlib import Path
 
-from football_ai.detection.detector import Detector
+from football_ai.tracking.phases.detection import Detector
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from football_ai.core import config, convert_to_serializable
-from football_ai.filtering import filter_reference_points
-from football_ai.reference_points import PnLCalibFieldProjector
+from football_ai.tracking.phases.filtering import filter_reference_points
+from football_ai.tracking.phases.reference_points import PnLCalibFieldProjector
 from football_ai.visualization.simple_drawer import FieldPanel, VideoOutput, VideoPanel
 
 from scripts.utils import (

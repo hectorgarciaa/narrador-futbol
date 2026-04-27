@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from football_ai.core import get_config
-from football_ai.detection import Detector
+from football_ai.tracking.phases.detection import Detector
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

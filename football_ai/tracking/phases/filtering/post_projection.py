@@ -12,7 +12,7 @@ from football_ai.core import (
     REJECT_CODE_RESCUED_BY_TRACK_OVERLAP,
     make_phase_packet,
 )
-from football_ai.reference_points.geometry import project_image_points, points_inside_field_mask
+from football_ai.tracking.phases.reference_points.geometry import project_image_points, points_inside_field_mask
 
 
 def _tlbr_iou(box_a, box_b):
