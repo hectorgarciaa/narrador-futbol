@@ -42,10 +42,6 @@ class TrackerLogicMixin:
             return None
         return (float(color[0]), float(color[1]), float(color[2]))
 
-    @staticmethod
-    def _is_person_like_class(class_name):
-        return class_name in {"player", "goalkeeper", "referee"}
-
     def _ordered_detection_class_candidates(self, detection_class, detection_class_candidates):
         ordered = []
         for candidate_class in [detection_class, *(detection_class_candidates or [])]:
@@ -693,23 +689,6 @@ class TrackerLogicMixin:
         )
 
     @staticmethod
-    def _scale_point(point_xy, source_shape_hw, target_shape_hw):
-        if point_xy is None:
-            return None
-        source_height, source_width = source_shape_hw
-        target_height, target_width = target_shape_hw
-        if (
-            source_height <= 0
-            or source_width <= 0
-            or target_height <= 0
-            or target_width <= 0
-        ):
-            return None
-        scale_x = float(target_width) / float(source_width)
-        scale_y = float(target_height) / float(source_height)
-        return (float(point_xy[0]) * scale_x, float(point_xy[1]) * scale_y)
-
-    @staticmethod
     def _seed_bbox_from_ground_point(image_point_original, frame_shape_original):
         if image_point_original is None or frame_shape_original is None:
             return None
@@ -770,6 +749,12 @@ class TrackerLogicMixin:
             "shirt_color": None,
             "bbox_size": bbox_size,
             "class_tracker": "goalkeeper",
+            "class_name_td": "goalkeeper",
+            "class_yolo": "goalkeeper",
+            "source_raw_tracker_id": None,
+            "canonical_assignment_mode": "reserved_seed",
+            "canonical_relinked": False,
+            "forced_absorption": False,
             "field_position_m": list(field_position) if field_position is not None else None,
             "ground_point_image": (
                 [float(projected_ground_point[0]), float(projected_ground_point[1])]
@@ -997,7 +982,7 @@ class TrackerLogicMixin:
 
         return step_distance <= max_allowed_jump
 
-    def _resolve_raw_tracker_continuity_for_detection(
+    def _resolve_candidate_class_for_detection(
         self,
         candidate_canonical_id,
         candidate_state,
@@ -1007,7 +992,8 @@ class TrackerLogicMixin:
         detection_field_position,
         current_frame,
         detection_class_candidates=None,
-        detection_shirt_color=None,
+        *,
+        apply_statistical_gate,
     ):
         candidate_class = candidate_state.get("class_name")
         if candidate_class is None:
@@ -1031,7 +1017,7 @@ class TrackerLogicMixin:
                 current_frame,
                 class_name=candidate_class,
                 new_field_position=detection_field_position,
-                apply_statistical_gate=False,
+                apply_statistical_gate=apply_statistical_gate,
             ):
                 return None
             return candidate_class
@@ -1047,7 +1033,7 @@ class TrackerLogicMixin:
                 current_frame,
                 class_name=detection_class,
                 new_field_position=detection_field_position,
-                apply_statistical_gate=False,
+                apply_statistical_gate=apply_statistical_gate,
             ):
                 return None
             return detection_class
@@ -1074,7 +1060,7 @@ class TrackerLogicMixin:
                 current_frame,
                 class_name=candidate_class,
                 new_field_position=detection_field_position,
-                apply_statistical_gate=False,
+                apply_statistical_gate=apply_statistical_gate,
             ):
                 return None
 
@@ -1092,7 +1078,6 @@ class TrackerLogicMixin:
         detection_field_position,
         current_frame,
         detection_class_candidates=None,
-        detection_shirt_color=None,
     ):
         resolved_class = self._resolve_raw_tracker_continuity_for_detection(
             candidate_canonical_id,
@@ -1103,7 +1088,6 @@ class TrackerLogicMixin:
             detection_field_position,
             current_frame,
             detection_class_candidates=detection_class_candidates,
-            detection_shirt_color=detection_shirt_color,
         )
         if resolved_class is not None:
             return resolved_class, None
@@ -1336,7 +1320,14 @@ class TrackerLogicMixin:
             "team": metadata.get("team"),
             "distances": metadata.get("distances"),
             "shirt_color": metadata.get("shirt_color"),
+            "class_tracker": "ball",
+            "class_name_td": "ball",
+            "class_yolo": "ball",
             "bbox_size": metadata.get("bbox_size"),
+            "source_raw_tracker_id": None,
+            "canonical_assignment_mode": "ball_selection",
+            "canonical_relinked": False,
+            "forced_absorption": False,
             "field_position_m": list(field_position) if field_position is not None else None,
             "ground_point_image": (
                 metadata.get("ground_point_image").tolist()
@@ -1521,7 +1512,7 @@ class TrackerLogicMixin:
 
         return None
 
-    def _resolve_candidate_class_for_detection(
+    def _resolve_raw_tracker_continuity_for_detection(
         self,
         candidate_canonical_id,
         candidate_state,
@@ -1531,165 +1522,18 @@ class TrackerLogicMixin:
         detection_field_position,
         current_frame,
         detection_class_candidates=None,
-        detection_shirt_color=None,
     ):
-        candidate_class = candidate_state.get("class_name")
-        if candidate_class is None:
-            return None
-        detection_class = self._select_detection_class_for_candidate(
+        return self._resolve_candidate_class_for_detection(
+            candidate_canonical_id,
             candidate_state,
             detection_class,
+            detection_team,
+            detection_bbox,
+            detection_field_position,
+            current_frame,
             detection_class_candidates=detection_class_candidates,
+            apply_statistical_gate=False,
         )
-        if detection_class is None:
-            return None
-
-        if (
-            candidate_state.get("special_penalty_seed")
-            and candidate_class in {"player", "goalkeeper"}
-            and detection_class == "goalkeeper"
-        ):
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=candidate_class,
-                new_field_position=detection_field_position,
-            ):
-                return None
-            return candidate_class
-
-        if (
-            candidate_state.get("reserved_seed")
-            and candidate_class == "goalkeeper"
-            and detection_class == "goalkeeper"
-        ):
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=detection_class,
-                new_field_position=detection_field_position,
-            ):
-                return None
-            return detection_class
-
-        if candidate_class == "referee":
-            return self._resolve_referee_candidate_class_for_detection(
-                candidate_canonical_id,
-                candidate_state,
-                detection_class,
-                detection_team,
-                detection_field_position,
-            )
-
-        if self._is_compatible_class(candidate_class, detection_class):
-            if not self._is_team_compatible(
-                candidate_state.get("team"),
-                detection_team,
-                candidate_class,
-            ):
-                return None
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=candidate_class,
-                new_field_position=detection_field_position,
-            ):
-                return None
-            return candidate_class
-
-        return None
-
-    def _resolve_candidate_class_for_detection_debug(
-        self,
-        candidate_canonical_id,
-        candidate_state,
-        detection_class,
-        detection_team,
-        detection_bbox,
-        detection_field_position,
-        current_frame,
-        detection_class_candidates=None,
-        detection_shirt_color=None,
-    ):
-        """
-        Debug helper for canonical reassignment decisions.
-
-        Returns:
-            (resolved_class_name, reason)
-            - resolved_class_name: same value that `_resolve_candidate_class_for_detection` would return.
-            - reason: None when resolved_class_name is not None, otherwise a short reason code.
-        """
-        candidate_class = candidate_state.get("class_name")
-        if candidate_class is None:
-            return None, "candidate_class_missing"
-        detection_class = self._select_detection_class_for_candidate(
-            candidate_state,
-            detection_class,
-            detection_class_candidates=detection_class_candidates,
-        )
-        if detection_class is None:
-            return None, "detection_class_missing"
-
-        if (
-            candidate_state.get("special_penalty_seed")
-            and candidate_class in {"player", "goalkeeper"}
-            and detection_class == "goalkeeper"
-        ):
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=candidate_class,
-                new_field_position=detection_field_position,
-            ):
-                return None, "motion_incompatible_special_seed"
-            return candidate_class, None
-
-        if (
-            candidate_state.get("reserved_seed")
-            and candidate_class == "goalkeeper"
-            and detection_class == "goalkeeper"
-        ):
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=detection_class,
-                new_field_position=detection_field_position,
-            ):
-                return None, "motion_incompatible_reserved_seed"
-            return detection_class, None
-
-        if candidate_class == "referee":
-            return self._resolve_referee_candidate_class_for_detection_debug(
-                candidate_state,
-                detection_class,
-                detection_team,
-                detection_field_position,
-            )
-
-        if self._is_compatible_class(candidate_class, detection_class):
-            if not self._is_team_compatible(
-                candidate_state.get("team"),
-                detection_team,
-                candidate_class,
-            ):
-                return None, "team_incompatible"
-            if not self._is_motion_compatible(
-                candidate_state,
-                detection_bbox,
-                current_frame,
-                class_name=candidate_class,
-                new_field_position=detection_field_position,
-            ):
-                return None, "motion_incompatible"
-
-            return candidate_class, None
-
-        return None, "class_incompatible"
 
     def _assign_pending_by_lost_order(
         self,
@@ -1732,7 +1576,7 @@ class TrackerLogicMixin:
                     pending.get("field_position"),
                     current_frame,
                     detection_class_candidates=pending.get("detection_class_candidates"),
-                    detection_shirt_color=pending.get("shirt_color"),
+                    apply_statistical_gate=True,
                 )
                 if output_class_name is None:
                     continue
@@ -1757,98 +1601,6 @@ class TrackerLogicMixin:
 
         return assignments
 
-    @staticmethod
-    def _priority_tuple(class_name, lost_frames, distance_sq):
-        if class_name == "referee":
-            # Para árbitros priorizamos cercanía espacial para evitar swaps lejanos.
-            return (distance_sq, lost_frames)
-        return (lost_frames, distance_sq)
-
-    def _candidate_priority(
-        self,
-        bbox,
-        candidate_state,
-        current_frame,
-        class_name=None,
-        field_position=None,
-    ):
-        prev_bbox = candidate_state.get("bbox")
-        prev_field_position = candidate_state.get("field_position")
-        if prev_bbox is None and prev_field_position is None:
-            return None
-        effective_class = class_name or candidate_state.get("class_name")
-        distance = self._bbox_distance_sq(
-            bbox,
-            prev_bbox,
-            class_name=effective_class,
-            field_position_a=field_position,
-            field_position_b=prev_field_position,
-        )
-        if distance is None:
-            return None
-        last_frame = int(candidate_state.get("last_frame", current_frame))
-        lost_frames = max(0, current_frame - last_frame)
-        return self._priority_tuple(effective_class, lost_frames, distance)
-
-    def _nearest_recent_referee_id(
-        self,
-        bbox,
-        candidate_ids,
-        canonical_state,
-        current_frame,
-        field_position=None,
-    ):
-        best_id = None
-        best_priority = None
-        max_distance_sq = self.referee_recovery_max_distance ** 2
-
-        for canonical_id in candidate_ids:
-            state = canonical_state[canonical_id]
-            if state.get("class_name") != "referee":
-                continue
-            last_frame = int(state.get("last_frame", current_frame))
-            lost_frames = max(0, current_frame - last_frame)
-            if lost_frames > self.referee_recovery_max_lost_frames:
-                continue
-            if not self._is_motion_compatible(
-                state,
-                bbox,
-                current_frame,
-                class_name="referee",
-                new_field_position=field_position,
-            ):
-                continue
-
-            priority = self._candidate_priority(
-                bbox,
-                state,
-                current_frame,
-                class_name="referee",
-                field_position=field_position,
-            )
-            if priority is None:
-                continue
-            prev_bbox = state.get("bbox")
-            if prev_bbox is None:
-                continue
-            distance_sq = self._bbox_distance_sq(
-                bbox,
-                prev_bbox,
-                class_name="referee",
-                field_position_a=field_position,
-                field_position_b=state.get("field_position"),
-            )
-            if distance_sq is None:
-                continue
-            if distance_sq > max_distance_sq:
-                continue
-
-            if best_priority is None or priority < best_priority:
-                best_priority = priority
-                best_id = canonical_id
-
-        return best_id, best_priority
-
     def _count_ids_for_class(self, canonical_state, class_name, current_frame=None):
         max_lost_frames = self._max_lost_frames_for_class(class_name)
         return sum(
@@ -1872,132 +1624,6 @@ class TrackerLogicMixin:
             )
         )
 
-    def _nearest_id_same_class(
-        self,
-        bbox,
-        candidate_ids,
-        canonical_state,
-        class_name,
-        current_frame,
-        require_motion=True,
-        max_distance=None,
-        field_position=None,
-    ):
-        best_id = None
-        best_priority = None
-        max_distance_sq = None
-        if max_distance is not None:
-            max_distance_sq = float(max_distance) ** 2
-
-        for canonical_id in candidate_ids:
-            state = canonical_state[canonical_id]
-            if state.get("class_name") != class_name:
-                continue
-            if require_motion and not self._is_motion_compatible(
-                state,
-                bbox,
-                current_frame,
-                class_name=class_name,
-                new_field_position=field_position,
-            ):
-                continue
-
-            priority = self._candidate_priority(
-                bbox,
-                state,
-                current_frame,
-                class_name=class_name,
-                field_position=field_position,
-            )
-            if priority is None:
-                continue
-            if max_distance_sq is not None:
-                prev_bbox = state.get("bbox")
-                distance_sq = self._bbox_distance_sq(
-                    bbox,
-                    prev_bbox,
-                    class_name=class_name,
-                    field_position_a=field_position,
-                    field_position_b=state.get("field_position"),
-                )
-                if distance_sq is None:
-                    continue
-                if distance_sq > max_distance_sq:
-                    continue
-            if best_priority is None or priority < best_priority:
-                best_priority = priority
-                best_id = canonical_id
-
-        return best_id, best_priority
-
-    def _nearest_available_canonical_id(
-        self,
-        bbox,
-        candidate_ids,
-        canonical_state,
-        class_name,
-        team_name,
-        current_frame,
-        field_position=None,
-    ):
-        if not candidate_ids:
-            return None
-
-        class_compatible_ids = [
-            canonical_id
-            for canonical_id in candidate_ids
-            if self._is_compatible_class(
-                canonical_state[canonical_id]["class_name"], class_name
-            )
-        ]
-        if not class_compatible_ids:
-            return None
-
-        team_compatible_ids = [
-            canonical_id
-            for canonical_id in class_compatible_ids
-            if self._is_team_compatible(
-                canonical_state[canonical_id].get("team"),
-                team_name,
-                class_name,
-            )
-        ]
-        if not team_compatible_ids:
-            return None
-
-        motion_compatible_ids = [
-            canonical_id
-            for canonical_id in team_compatible_ids
-            if self._is_motion_compatible(
-                canonical_state[canonical_id],
-                bbox,
-                current_frame,
-                class_name=class_name,
-                new_field_position=field_position,
-            )
-        ]
-        if not motion_compatible_ids:
-            return None
-
-        best_id = None
-        best_priority = None
-        for canonical_id in motion_compatible_ids:
-            priority = self._candidate_priority(
-                bbox,
-                canonical_state[canonical_id],
-                current_frame,
-                class_name=class_name,
-                field_position=field_position,
-            )
-            if priority is None:
-                continue
-            priority = (*priority, canonical_id)
-            if best_priority is None or priority < best_priority:
-                best_priority = priority
-                best_id = canonical_id
-
-        return best_id
-
     def _best_special_penalty_seed_id(
         self,
         bbox,
@@ -2008,7 +1634,6 @@ class TrackerLogicMixin:
         current_frame,
         field_position=None,
         detection_class_candidates=None,
-        detection_shirt_color=None,
     ):
         best_id = None
         best_output_class = None
@@ -2031,7 +1656,7 @@ class TrackerLogicMixin:
                 field_position,
                 current_frame,
                 detection_class_candidates=detection_class_candidates,
-                detection_shirt_color=detection_shirt_color,
+                apply_statistical_gate=True,
             )
             if output_class_name is None:
                 continue

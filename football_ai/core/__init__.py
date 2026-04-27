@@ -7,6 +7,7 @@ from .logger import Logger, get_logger
 from .phase_packets import (
     IDENTITY_HOMOGRAPHY_3X3,
     PHASE_BYTETRACK,
+    PHASE_CANONICALTRACK,
     PHASE_DETECTOR,
     PHASE_FILTERING,
     PHASE_IDENTIFICATION,
@@ -27,6 +28,7 @@ __all__ = [
     "Logger",
     "IDENTITY_HOMOGRAPHY_3X3",
     "PHASE_BYTETRACK",
+    "PHASE_CANONICALTRACK",
     "PHASE_DETECTOR",
     "PHASE_FILTERING",
     "PHASE_IDENTIFICATION",
