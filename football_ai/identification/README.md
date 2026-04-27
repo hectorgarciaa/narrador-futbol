@@ -87,7 +87,7 @@ Además del método legacy `detect_teams(...)`, `TeamDetector` expone ahora `ide
 
 - Entrada: `filtering_packet["clean"]`, ya alineado y filtrado respecto a `REFERENCE_POINTS`.
 - Salida: packet `IDENTIFICATION`.
-- `clean`: conserva el contenido de entrada y añade `class_name_td`, `team`, `shirt_color`, `distances` y `bbox_size`.
+- `clean`: conserva el contenido de entrada y añade `class_name_td`, `team`, `shirt_color`, `distances`, `bbox_size`, `referee_reassign_gate` y `goalkeeper_reassign_gate`.
 - `trace`: incluye la traza por detección (`sample_decision`, motivo de relabel, gates de referee/goalkeeper) y el estado/eventos de clustering.
 
 Ejemplo:

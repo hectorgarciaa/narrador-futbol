@@ -73,6 +73,8 @@ class TeamDetector:
             "shirt_color": [entry["shirt_color"] for entry in entries],
             "distances": [entry["distances"] for entry in entries],
             "bbox_size": [entry["bbox_size"] for entry in entries],
+            "referee_reassign_gate": [entry["referee_reassign_gate"] for entry in entries],
+            "goalkeeper_reassign_gate": [entry["goalkeeper_reassign_gate"] for entry in entries],
         }
         return make_phase_packet(
             phase_name=PHASE_IDENTIFICATION,
