@@ -1,41 +1,31 @@
-#!/usr/bin/env python3
-
-import itertools
 import json
 import sys
 from pathlib import Path
 
-import cv2
+from football_ai.detection.detector import Detector
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from football_ai.core import convert_to_serializable
-from football_ai.detection import Detector
-from football_ai.visualization.simple_drawer import VideoOutput, VideoPanel, panel_color
+from football_ai.visualization.simple_drawer import VideoOutput, VideoPanel
 
-from scripts._cli_common import (
-    build_timestamp,
+from scripts.utils import (
     build_video_model_parser,
+    iter_video_frames,
     load_config,
-    resolve_video_and_model_paths,
-    slugify_model_name,
+    prepare_context,
 )
 
 
-def _result_to_detections(result):
-    detections = []
-    names = getattr(result, "names", {})
-    for box in result.boxes:
-        class_id = int(box.cls)
-        detections.append(
-            {
-                "class": names.get(class_id, str(class_id)),
-                "confidence": float(box.conf),
-                "bbox": [int(value) for value in box.xyxy[0].tolist()],
-            }
-        )
-    return detections
+def _video_item(trace_detection):
+    return {
+        "bbox": trace_detection["bbox_xyxy"],
+        "color": trace_detection["render_color_bgr"],
+        "class_name": trace_detection["class_name"],
+        "confidence": trace_detection["confidence"],
+        "extra_lines": [],
+    }
 
 
 def main():
@@ -43,43 +33,28 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
-    video_path, model_path = resolve_video_and_model_paths(args, config)
-
-    timestamp = build_timestamp()
-    output_dir = PROJECT_ROOT / "output" / "detect" / slugify_model_name(model_path) / timestamp
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    detector = Detector(str(model_path), **config.detection)
-    cap = cv2.VideoCapture(str(video_path))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    cap.release()
+    fps, width, height, total_frames, output_dir, video_path, model_path = prepare_context(args, config, "detect")
 
     writer = VideoOutput(
         output_dir / "detections.mp4",
         fps,
         [[VideoPanel((height, width))]],
     )
+    
+    detector = Detector(str(model_path), **config.detection)
 
     frames = {}
-    results = detector.detect(str(video_path), stream=True)
-    if args.max_frames is not None:
-        results = itertools.islice(results, args.max_frames)
-    for frame_index, result in enumerate(results):
-        detections = _result_to_detections(result)
-        panel_items = [
-            {
-                "bbox": detection["bbox"],
-                "color": panel_color(detection["class"]),
-                "class_name": detection["class"],
-                "confidence": detection["confidence"],
-            }
-            for detection in detections
-        ]
-        writer.write_frame([[{"frame": result.orig_img.copy(), "items": panel_items}]])
-        frames[str(frame_index)] = {"detections": detections}
+    for frame_index, frame_time_ms, frame_bgr in iter_video_frames(video_path, args.max_frames):
+        detector_packet = detector.predict_frame(
+            frame_bgr,
+            frame_index=frame_index,
+            frame_time_ms=frame_time_ms,
+        )
+        trace_detections = detector_packet["trace"]["detections"]
+        writer.write_frame(
+            [[{"frame": frame_bgr.copy(), "items": [_video_item(item) for item in trace_detections]}]]
+        )
+        frames[str(frame_index)] = detector_packet
 
     writer.close()
 

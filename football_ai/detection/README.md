@@ -21,22 +21,30 @@ El sistema detecta cuatro clases, definidas en el dataset de fine-tuning de Robo
 
 **Implementación:**
 - Instancia un modelo YOLO en `__init__` con la ruta y el umbral de confianza.
-- `detect(video, stream=True)` llama a `model.predict()` y devuelve un **generador** de objetos `Results` de Ultralytics, uno por frame. El modo `stream=True` evita cargar todos los frames en memoria a la vez, lo que es crítico para vídeos de partido completos.
-- Antes de devolver cada `Results`, normaliza `result.names` a las cuatro clases canónicas del proyecto: `player`, `goalkeeper`, `referee`, `ball`. Ahí se colapsan aliases como `person`, `gk`, `goalie`, `ref`, `sports ball` o variantes en plural.
+- `predict_frame(frame_bgr, frame_index, frame_time_ms)` procesa un único frame y devuelve un `PhaseFramePacket` de fase `DETECTOR`.
+- El paquete filtra desde el primer momento a las clases soportadas del proyecto (`player`, `goalkeeper`, `referee`, `ball`) y solo esas entran en `clean` y `trace`.
+- La salida se divide en:
+  - `clean`: arrays paralelos estables para encadenar pipeline.
+  - `trace`: objetos serializables pensados para JSON y render/debug.
 
 ```python
 from football_ai.detection import Detector
+import cv2
 
 detector = Detector(
     model_path="models/yolo/v11/yolov11m.pt",
     conf=0.1
 )
 
-for frame_result in detector.detect("partido.mp4", stream=True):
-    # frame_result es un objeto Results de Ultralytics
-    boxes = frame_result.boxes          # coordenadas, confianza, clase
-    image = frame_result.orig_img       # frame BGR (NumPy)
-    names = frame_result.names          # {0: 'player', 1: 'goalkeeper', ...}
+cap = cv2.VideoCapture("partido.mp4")
+ok, frame_bgr = cap.read()
+if ok:
+    packet = detector.predict_frame(frame_bgr, frame_index=0, frame_time_ms=0.0)
+    clean = packet["clean"]
+    trace = packet["trace"]
+    print(clean["num_detections"])
+    print(trace["summary"])
+cap.release()
 ```
 
 **¿Por qué un wrapper?** Desacopla el resto del código de Ultralytics: si se cambiase la librería de detección, solo habría que modificar esta clase.

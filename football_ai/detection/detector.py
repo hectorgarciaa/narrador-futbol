@@ -1,33 +1,13 @@
+from __future__ import annotations
+
 from ultralytics import YOLO
 
-def normalize_detection_class_name(class_name):
-    token = class_name.strip().lower()
-    aliases = {
-        "person": "player",
-        "persons": "player",
-        "people": "player",
-        "human": "player",
-        "player": "player",
-        "players": "player",
-        "goalkeeper": "goalkeeper",
-        "goalkeepers": "goalkeeper",
-        "gk": "goalkeeper",
-        "keeper": "goalkeeper",
-        "goalie": "goalkeeper",
-        "referee": "referee",
-        "referees": "referee",
-        "ref": "referee",
-        "refs": "referee",
-        "arbitro": "referee",
-        "arbitros": "referee",
-        "árbitro": "referee",
-        "árbitros": "referee",
-        "ball": "ball",
-        "balls": "ball",
-        "sports ball": "ball",
-        "sports balls": "ball",
-    }
-    return aliases.get(token, None)
+from .utils import normalize_detection_class_name
+from football_ai.core import (
+    PHASE_DETECTOR,
+    default_render_color_bgr,
+    make_phase_packet,
+)
 
 
 class Detector:
@@ -36,35 +16,82 @@ class Detector:
         self.conf = conf
         self.verbose = verbose
 
-    @staticmethod
-    def _normalize_result(result):
-        normalized_names = {}
-        kept_class_ids = set()
+    def predict_frame(self, frame_bgr, frame_index=0, frame_time_ms=0.0):
+        result = self.model.predict(
+            frame_bgr,
+            stream=False,
+            conf=self.conf,
+            verbose=self.verbose,
+        )[0]
 
-        for class_id, class_name in result.names.items():
-            normalized = normalize_detection_class_name(class_name)
-            if normalized is not None:
-                normalized_names[class_id] = normalized
-                kept_class_ids.add(int(class_id))
+        names = result.names
+        boxes = result.boxes
 
-        result.names = normalized_names
+        bbox_xyxy = []
+        confidence = []
+        class_id = []
+        class_name = []
+        class_name_raw = []
+        trace_detections = []
+        total_raw = 0
 
-        if result.boxes is None or len(result.boxes) == 0:
-            return result
+        if boxes is not None and len(boxes) > 0:
+            raw_xyxy = boxes.xyxy.cpu().numpy()
+            raw_conf = boxes.conf.cpu().numpy()
+            raw_cls = boxes.cls.cpu().numpy().astype(int)
+            total_raw = len(raw_cls)
+            for bbox, score, cid in zip(raw_xyxy, raw_conf, raw_cls):
+                raw_name = str(names.get(int(cid), cid))
+                normalized_name = normalize_detection_class_name(raw_name)
+                if not normalized_name:
+                    continue
+                det_id = len(bbox_xyxy)
+                color = default_render_color_bgr(normalized_name)
+                serialized_bbox = [float(value) for value in bbox.tolist()[:4]]
 
-        keep_indices = [
-            idx
-            for idx, class_id in enumerate(result.boxes.cls.tolist())
-            if int(class_id) in kept_class_ids
-        ]
+                bbox_xyxy.append(serialized_bbox)
+                confidence.append(float(score))
+                class_id.append(int(cid))
+                class_name.append(normalized_name)
+                class_name_raw.append(raw_name)
+                trace_detections.append(
+                    {
+                        "det_id": int(det_id),
+                        "bbox_xyxy": serialized_bbox,
+                        "confidence": float(score),
+                        "class_id": int(cid),
+                        "class_name": normalized_name,
+                        "class_name_raw": raw_name,
+                        "render_color_bgr": color[:3],
+                    }
+                )
 
-        if len(keep_indices) != len(result.boxes):
-            result.boxes = result.boxes[keep_indices]
-        
-        return result
+        clean = {
+            "num_detections": len(bbox_xyxy),
+            "det_id": list(range(len(bbox_xyxy))),
+            "bbox_xyxy": bbox_xyxy,
+            "confidence": confidence,
+            "class_id": class_id,
+            "class_name": class_name,
+            "class_name_raw": class_name_raw,
+        }
+        trace = {
+            "detections": trace_detections,
+            "summary": {
+                "total_raw": total_raw,
+                "total_supported": len(bbox_xyxy),
+                "total_discarded": total_raw - len(bbox_xyxy),
+            },
+        }
+        return make_phase_packet(
+            phase_name=PHASE_DETECTOR,
+            frame_index=frame_index,
+            frame_time_ms=frame_time_ms,
+            image_width=int(frame_bgr.shape[1]),
+            image_height=int(frame_bgr.shape[0]),
+            clean=clean,
+            trace=trace,
+        )
 
-    def detect(self, video, stream=True):
-        results = self.model.predict(video, stream=stream, conf=self.conf, verbose=self.verbose)
-        if stream:
-            return (self._normalize_result(result) for result in results)
-        return [self._normalize_result(result) for result in results]
+
+__all__ = ["Detector"]
