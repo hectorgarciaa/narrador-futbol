@@ -34,6 +34,16 @@ from .helpers import (
 from .lineup_spec import LineupSlotMatcher, base_role_token, normalize_slot_token
 
 
+def _coalesce_slot_value(*values):
+    for value in values:
+        if value is None or pd.isna(value):
+            continue
+        token = str(value).strip()
+        if token:
+            return token
+    return None
+
+
 class OnlineSpecialSeedRoleAssigner:
     def __init__(self, config, video_path, logger, *, expected_roles_by_team_override=None, lineup_matcher=None):
         self.config = config
@@ -328,7 +338,11 @@ class OnlineSpecialSeedRoleAssigner:
     def _assign_special_seed_frame_teams(self, tracks_frame, visible_player_df):
         defender_candidates = []
         for row in visible_player_df.itertuples(index=False):
-            slot_name = normalize_slot_token(getattr(row, "expected_role_slot", None) or getattr(row, "predicted_role", None))
+            raw_slot = _coalesce_slot_value(
+                getattr(row, "expected_role_slot", None),
+                getattr(row, "predicted_role", None),
+            )
+            slot_name = normalize_slot_token(raw_slot)
             if base_role_token(slot_name) not in self.defender_roles and slot_name not in self.defender_roles:
                 continue
             x_m = pd.to_numeric(getattr(row, "x_m", np.nan), errors="coerce")
@@ -423,7 +437,11 @@ class OnlineSpecialSeedRoleAssigner:
             class_name, _, track_data = first_existing_track_payload(tracks_frame, track_id)
             if track_data is None:
                 continue
-            frame_slot = normalize_slot_token(getattr(row, "expected_role_slot", None) or getattr(row, "predicted_role", None))
+            raw_slot = _coalesce_slot_value(
+                getattr(row, "expected_role_slot", None),
+                getattr(row, "predicted_role", None),
+            )
+            frame_slot = normalize_slot_token(raw_slot)
             frame_conf = float(pd.to_numeric(getattr(row, "predicted_role_confidence", np.nan), errors="coerce"))
             if not np.isfinite(frame_conf):
                 frame_conf = 0.0

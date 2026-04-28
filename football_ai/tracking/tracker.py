@@ -53,6 +53,8 @@ class Tracker:
                 project_root=project_root,
                 **projector_conf["constructor"],
             )
+        # Guardamos referencia explícita para métricas/runtime introspection.
+        self.field_projector = field_projector
         self.projection_phase = ProjectionPhase(field_projector)
 
         # ── subfase 3: filtrado post-proyección ──────────────────────────

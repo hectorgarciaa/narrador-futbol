@@ -10,13 +10,13 @@ from .core import (
     find_project_root,
     get_video_fps,
     get_video_frame,
-    infer_attack_direction_by_team,
     list_position_videos,
     load_tracks_json,
     render_frame_with_player_ids,
     resolve_tracks_path_for_video,
     sanitize_video_stem,
 )
+from .samples import build_role_samples, infer_attack_direction_by_team
 from .label_templates import (
     apply_periodic_role_labels,
     apply_periodic_role_labels_propagated,
@@ -27,7 +27,6 @@ from .label_templates import (
     upsert_role_labels_in_template_json,
     validate_periodic_role_labels,
 )
-from .samples import build_role_samples
 
 __all__ = [
     "FeatureSpec",
