@@ -40,6 +40,10 @@ class TeamColorModel:
             "player": deque(maxlen=self.max_samples_per_class),
             "referee": deque(maxlen=self.max_samples_per_class),
         }
+        self._last_cluster_update_frame = {
+            "player": -1,
+            "referee": -1,
+        }
         self.outfield_team_distance_stats = {}
 
     def trace_snapshot(self, cluster_events):
@@ -113,12 +117,16 @@ class TeamColorModel:
         trace["sample_count_after_append"] = len(self.class_samples[sample_bucket])
         if len(self.class_samples[sample_bucket]) <= self.min_samples[sample_bucket] or frame_index % 5 != 0:
             return trace, None
+        if self._last_cluster_update_frame[sample_bucket] == frame_index:
+            trace["cluster_update_skipped"] = "already_updated_this_frame"
+            return trace, None
 
         updated, cluster_event = (
             self._update_player_colors()
             if sample_bucket == "player"
             else self._update_referee_color()
         )
+        self._last_cluster_update_frame[sample_bucket] = frame_index
         self.updated[sample_bucket] = updated
         if cluster_event is not None:
             trace["cluster_update"] = {
