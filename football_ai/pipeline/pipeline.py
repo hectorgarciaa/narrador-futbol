@@ -17,7 +17,6 @@ from football_ai.positions import (
     copy_output_artifact,
     load_lineup_spec,
     save_dataframe_csv,
-    save_role_visualizations,
 )
 from football_ai.tracking import Tracker
 from football_ai.visualization import Drawer
@@ -528,20 +527,6 @@ def run_tracking_pipeline(args):
             copy_output_artifact(role_player_csv_path, role_player_csv_path_legacy, logger, "Player role summary CSV")
             save_dataframe_csv(role_greedy_df, role_greedy_csv_path, logger, "Greedy role diagnostics CSV")
             copy_output_artifact(role_greedy_csv_path, role_greedy_csv_path_legacy, logger, "Greedy role diagnostics CSV")
-            save_role_visualizations(
-                frame_df=role_frame_df,
-                player_df=role_player_df,
-                config=config,
-                video_path=video_path,
-                output_dir=role_artifacts_dir,
-                expected_roles_by_team=position_phase.expected_roles_by_team,
-                assignment_method=position_phase.role_stabilization_expected_roles_assignment,
-                min_count=position_phase.role_stabilization_expected_roles_min_count,
-                min_cumulative_ratio=position_phase.role_stabilization_expected_roles_min_ratio,
-                min_final_ratio=position_phase.role_stabilization_expected_roles_min_final_ratio,
-                logger=logger,
-                legacy_output_dir=Path(role_frame_csv_path_legacy).parent,
-            )
         save_summary(summary, summary_path, logger)
         if not bool(getattr(args, "skip_metrics_dataset", False)):
             upsert_tracking_metrics_dataset(

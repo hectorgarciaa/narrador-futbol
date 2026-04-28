@@ -7,7 +7,6 @@ from .pipeline import (
     LineupSpecError,
     OnlineSpecialSeedRoleAssigner,
     PositionInferingPhase,
-    apply_special_seed_role_team_assignment,
     base_role_token,
     build_expected_roles_by_team,
     build_role_artifacts_output_dir,
@@ -18,7 +17,6 @@ from .pipeline import (
     load_lineup_spec,
     normalize_slot_token,
     save_dataframe_csv,
-    save_role_visualizations,
     sanitize_video_stem,
     validate_lineup_payload,
 )
@@ -28,7 +26,6 @@ __all__ = [
     "LineupSpecError",
     "OnlineSpecialSeedRoleAssigner",
     "PositionInferingPhase",
-    "apply_special_seed_role_team_assignment",
     "base_role_token",
     "build_role_artifacts_output_dir",
     "build_role_predictions_output_paths",
@@ -39,7 +36,6 @@ __all__ = [
     "load_lineup_spec",
     "normalize_slot_token",
     "save_dataframe_csv",
-    "save_role_visualizations",
     "sanitize_video_stem",
     "validate_lineup_payload",
 ]

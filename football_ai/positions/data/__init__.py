@@ -1,4 +1,5 @@
-from .dataset import (
+from .common_dataset import append_run_to_common_dataset, upsert_run_to_common_dataset
+from .core import (
     FeatureSpec,
     POSITIONS_COMMON_DIR,
     POSITIONS_DATASET_DIR,
@@ -6,16 +7,27 @@ from .dataset import (
     ROLE_LABELS_V1,
     add_velocity_features,
     build_observations_from_tracks,
-    build_periodic_label_schedule,
-    build_role_samples,
     find_project_root,
     get_video_fps,
+    get_video_frame,
     infer_attack_direction_by_team,
     list_position_videos,
     load_tracks_json,
+    render_frame_with_player_ids,
     resolve_tracks_path_for_video,
     sanitize_video_stem,
 )
+from .label_templates import (
+    apply_periodic_role_labels,
+    apply_periodic_role_labels_propagated,
+    build_periodic_label_schedule,
+    build_periodic_role_label_template,
+    load_role_label_entries_json,
+    save_role_label_template_json,
+    upsert_role_labels_in_template_json,
+    validate_periodic_role_labels,
+)
+from .samples import build_role_samples
 
 __all__ = [
     "FeatureSpec",
@@ -24,14 +36,25 @@ __all__ = [
     "POSITIONS_LABELS_DIR",
     "ROLE_LABELS_V1",
     "add_velocity_features",
+    "append_run_to_common_dataset",
+    "apply_periodic_role_labels",
+    "apply_periodic_role_labels_propagated",
     "build_observations_from_tracks",
     "build_periodic_label_schedule",
+    "build_periodic_role_label_template",
     "build_role_samples",
     "find_project_root",
     "get_video_fps",
+    "get_video_frame",
     "infer_attack_direction_by_team",
     "list_position_videos",
+    "load_role_label_entries_json",
     "load_tracks_json",
+    "render_frame_with_player_ids",
     "resolve_tracks_path_for_video",
+    "save_role_label_template_json",
     "sanitize_video_stem",
+    "upsert_role_labels_in_template_json",
+    "upsert_run_to_common_dataset",
+    "validate_periodic_role_labels",
 ]

@@ -13,9 +13,8 @@ experiments/
 │   └── team_possession.py            # Heurística de posesión + render anotado
 ├── set_transformer.ipynb             # Entrenamiento + aplicación de Set Transformer para roles
 ├── positions/
-│   ├── position_dataset.py            # Reexport a football_ai.positions.data.dataset
-│   ├── set_transformer_pipeline.py    # Reexport a football_ai.positions.model.train
-│   └── position_role_dataset.ipynb    # Pipeline guiado de etiquetado y exportación del dataset
+│   ├── position_role_dataset.ipynb    # Pipeline guiado de etiquetado y exportación del dataset
+│   └── position_role_workflow.py      # Script equivalente al flujo del notebook
 ├── reference_points/
 │   ├── classical_reference_points.py  # Utilidades para homografía clásica
 │   ├── pnlcalib_reference_points.py   # Wrapper para inferencia con PnLCalib
@@ -111,29 +110,10 @@ Requisitos:
 
 ---
 
-## `positions/position_dataset.py`
-
-**Objetivo:** Wrapper fino hacia `football_ai.positions.data.dataset` para notebooks y scripts experimentales.
-
-Funciones clave:
-- `list_position_videos`: enumera vídeos en `data/partidosPosiciones/`.
-- `resolve_tracks_path_for_video`: busca `output/tracks_json/tracker/<video_sanitizado>_tracks.json` y cae a `tracks.json` legacy.
-- `build_observations_from_tracks`: convierte tracks a tabla tabular por jugador/frame.
-- `add_velocity_features`: añade `vx, vy` por jugador.
-- `choose_label_frame`: selecciona frame recomendado para etiquetado manual.
-- `render_frame_with_player_ids`: renderiza preview con `player_id:team_id`.
-- `validate_role_map` y `apply_role_map`: validación y aplicación del etiquetado manual.
-- `infer_attack_direction_by_team`: estima sentido de ataque por equipo.
-- `build_role_samples`: crea samples y tensores de compañeros + máscara para modelado.
-
-Labels permitidas (v1): `POR, LI, DFC_IZQ, DFC_DER, LD, MC, MI, MD, EI, ED, DC`.
-
----
-
 ## `set_transformer.ipynb`
 
 **Objetivo:** usar un checkpoint ya entrenado de Set Transformer, o reentrenarlo si hace falta, y aplicarlo sobre `data/partidoPrueba/partido_ajustado.mp4`.
-La primera celda recarga explícitamente `experiments.positions.set_transformer_pipeline` para evitar que Jupyter reutilice una versión antigua del módulo tras editar el `.py`.
+La primera celda recarga explícitamente `football_ai.positions.model` para evitar que Jupyter reutilice una versión antigua del módulo tras editar el `.py`.
 
 Pipeline que implementa:
 - reconstruye el dataset de entrenamiento a partir de `data/posiciones_etiquetadas/common/base_table.csv`;

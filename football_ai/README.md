@@ -12,7 +12,7 @@ football_ai/
 ├── canonicaltrack/ # Fase desacoplada de canonización de IDs y tracks por frame
 ├── core/           # Configuración global, logging centralizado, serialización
 ├── detection/      # Inferencia YOLO (jugadores, árbitros, balón)
-├── positions/      # Roles posicionales online, estabilización y artefactos CSV/PNG
+├── positions/      # Roles posicionales online, dataset/modelo modular y artefactos CSV
 ├── report/         # Informes tecnicos y decisiones de arquitectura
 ├── reference_points/ # Calibración del campo y proyección a coordenadas 2D reales
 ├── posession/      # Fase desacoplada de estimación heurística de posesión

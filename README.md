@@ -672,11 +672,11 @@ El repositorio incluye un flujo experimental para crear un dataset supervisado d
 
 Entrada principal:
 - Notebook: `experiments/positions/position_role_dataset.ipynb`
-- Dataset/base features: `football_ai/positions/data/dataset.py`
+- Dataset/base features: `football_ai/positions/data/`
 - Entrenamiento/inferencia sobre dataset común: `experiments/set_transformer.ipynb`
-- Pipeline reusable: `football_ai/positions/model/train.py`
+- API pública reusable: `football_ai/positions/model/`
 
-En producción, `football_ai.positions` está organizado en `data/`, `model/` y `pipeline/`. El tracking online usa `pipeline/assigner.py`, que aplica una doble pasada del algoritmo de Húngaro: primero genera votos limpios por frame y después resuelve el slot definitivo de cada segmento activo.
+En producción, `football_ai.positions` está organizado en `data/`, `model/` y `pipeline/`. `data/` separa observaciones, plantillas de etiquetado y dataset común; `model/` separa arquitectura, carga/splits, entrenamiento, inferencia y render; `pipeline/` concentra el motor online. El tracking usa `pipeline/online.py`, que aplica una doble pasada del algoritmo de Húngaro: primero genera votos limpios por frame y después resuelve el slot definitivo de cada segmento activo.
 
 Salida del notebook (por ejecución):
 - `data/posiciones_etiquetadas/<match_id>_<timestamp>/base_table.csv`
@@ -706,19 +706,19 @@ Antes de construir las features del modelo, cada equipo se lleva a una vista tá
 Entrenamiento por CLI:
 
 ```bash
-python -m experiments.positions.set_transformer_pipeline train
+python -m football_ai.positions.model.cli train
 ```
 
 Si has cambiado la canonización/ingeniería de features y quieres ignorar el cache derivado antiguo:
 
 ```bash
-python -m experiments.positions.set_transformer_pipeline train --rebuild-from-base-table
+python -m football_ai.positions.model.cli train --rebuild-from-base-table
 ```
 
 Aplicación sobre `partido_ajustado`:
 
 ```bash
-python -m experiments.positions.set_transformer_pipeline predict \
+python -m football_ai.positions.model.cli predict \
   --model-path models/positions/set_transformer/<timestamp>/set_transformer_checkpoint.pt \
   --video-path data/partidoPrueba/partido_ajustado.mp4
 ```
@@ -738,7 +738,7 @@ Artefactos generados:
 Para renderizar el MP4 anotado a partir del JSON enriquecido:
 
 ```bash
-python -m experiments.positions.set_transformer_pipeline render-video \
+python -m football_ai.positions.model.cli render-video \
   --video-path data/partidoPrueba/partido_ajustado.mp4 \
   --tracks-path output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json
 ```

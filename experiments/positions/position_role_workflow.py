@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from football_ai.positions.data.dataset import (
+from football_ai.positions.data import (
     POSITIONS_DATASET_DIR,
     POSITIONS_LABELS_DIR,
     ROLE_LABELS_V1,

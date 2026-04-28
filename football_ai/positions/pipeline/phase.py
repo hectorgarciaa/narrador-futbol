@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from football_ai.core import PHASE_POSITION_INFERING, Phase, make_phase_packet
 
-from .assigner import OnlineSpecialSeedRoleAssigner
+from .online import OnlineSpecialSeedRoleAssigner
 
 
 class PositionInferingPhase(Phase):

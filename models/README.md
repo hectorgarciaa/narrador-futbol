@@ -60,7 +60,7 @@ Cada run guarda:
 - `training_history.csv`
 - `split.json`
 
-El checkpoint se usa desde `experiments/positions/set_transformer_pipeline.py`.
+El checkpoint se usa desde `football_ai.positions.model.cli`.
 
 ## Cómo poblar el directorio
 

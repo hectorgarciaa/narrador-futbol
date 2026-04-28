@@ -70,7 +70,7 @@ Datos actuales en el repositorio:
 - 14 vídeos `.mp4` (nombres tipo `test (N).mp4`)
 - Tamaño aproximado total: `~282 MB`
 
-Estos vídeos se consumen desde `experiments/positions/position_dataset.py` mediante `list_position_videos(...)`.
+Estos vídeos se consumen desde `football_ai.positions.data` mediante `list_position_videos(...)`.
 
 ### Relación con tracks
 

@@ -7,7 +7,7 @@ Incluye:
 - inferencia online de roles posicionales durante el tracking
 - asignación dinámica por equipo con doble pasada de Húngaro
 - asignación especial de equipo para los IDs reservados de portero
-- exportación de CSV de roles y PNG diagnósticos
+- exportación de CSV de roles y artefactos de tracking
 - catálogo de formaciones para la interfaz web
 - validación de `lineup_spec.json`
 - matching `equipo + slot estable -> nombre de jugador`
@@ -15,10 +15,18 @@ Incluye:
 ## Estructura
 
 - `data/`: dataset y helpers de observaciones.
+- `data/core.py`: observaciones y acceso a datos base.
+- `data/label_templates.py`: plantillas y aplicación de etiquetas periódicas.
+- `data/common_dataset.py`: mantenimiento del dataset común.
 - `model/`: arquitectura y entrenamiento.
+- `model/data_utils.py`: carga, normalización y splits.
+- `model/training.py`: entrenamiento offline.
+- `model/session.py` / `model/inference.py`: inferencia online y batch.
+- `model/render.py`: render anotado opcional.
 - `pipeline/`: código productivo online usado por el tracking en vivo.
+- `pipeline/config.py` y `pipeline/helpers.py`: configuración y utilidades del motor online.
 
-El punto de entrada principal dentro del pipeline de tracking es `PositionInferingPhase` en [pipeline/phase.py](pipeline/phase.py). La lógica stateful online vive en `OnlineSpecialSeedRoleAssigner` en [pipeline/assigner.py](pipeline/assigner.py).
+El punto de entrada principal dentro del pipeline de tracking es `PositionInferingPhase` en [pipeline/phase.py](pipeline/phase.py). La lógica stateful online vive en `OnlineSpecialSeedRoleAssigner` en [pipeline/online.py](pipeline/online.py).
 
 ## Flujo Online Nuevo
 

@@ -4,10 +4,8 @@ Utilidades y notebook para construir un dataset supervisado de rol nominal de ju
 
 ## Archivos
 
-- `position_dataset.py`: reexporta `football_ai.positions.data.dataset`.
 - `position_role_dataset.ipynb`: flujo end-to-end de creación del dataset.
 - `position_role_workflow.py`: implementación equivalente en script (`.py`) del flujo completo (preparación, etiquetado interactivo en Jupyter y exportación).
-- `set_transformer_pipeline.py`: reexporta `football_ai.positions.model.train`.
 
 ## Set Transformer para inferencia de roles
 
@@ -21,7 +19,7 @@ Entrenamiento:
 
 ```bash
 cd /Users/carloscole/narrador-futbol
-python -m experiments.positions.set_transformer_pipeline train \
+python -m football_ai.positions.model.cli train \
   --project-root /Users/carloscole/narrador-futbol
 ```
 
@@ -35,7 +33,7 @@ Inferencia:
 
 ```bash
 cd /Users/carloscole/narrador-futbol
-python -m experiments.positions.set_transformer_pipeline predict \
+python -m football_ai.positions.model.cli predict \
   --project-root /Users/carloscole/narrador-futbol \
   --model-path models/positions/set_transformer/<timestamp>/set_transformer_checkpoint.pt \
   --video-path data/partidoPrueba/partido_ajustado.mp4
@@ -43,7 +41,7 @@ python -m experiments.positions.set_transformer_pipeline predict \
 
 Si usas el notebook `experiments/set_transformer.ipynb`, puedes pasar además `EXPECTED_ROLES_BY_TEAM` para imponer el once esperado de cada equipo con Hungarian sobre las probabilidades agregadas por jugador.
 Ese mismo formato de listas ya puede definirse también en `config.yaml` bajo `tracking.expected_roles_by_team`.
-El comando `python -m experiments.positions.set_transformer_pipeline predict` lo toma por defecto desde `config.yaml` cuando no inyectas un mapping explícito desde Python/notebook.
+El comando `python -m football_ai.positions.model.cli predict` lo toma por defecto desde `config.yaml` cuando no inyectas un mapping explícito desde Python/notebook.
 En el tracking principal, ese ajuste sí participa en tiempo real: cada frame resuelve primero una asignación Hungarian por equipo y después una segunda asignación sobre la mayoría acumulada de cada segmento activo.
 Para depurar esa diferencia, `track.py` exporta también `output/tracks_json/tracker/<video>_frame_role_predictions.csv` con la predicción cruda frame a frame, `output/tracks_json/tracker/<video>_player_role_summary.csv` con el resumen final por segmento y `output/tracks_json/tracker/<video>_greedy_role_diagnostics.csv` con el estado de asignación segment-level.
 El notebook permite elegir entre reutilizar un checkpoint ya entrenado o reentrenar el modelo antes de inferir.
@@ -64,7 +62,7 @@ Render de vídeo anotado:
 
 ```bash
 cd /Users/carloscole/narrador-futbol
-python -m experiments.positions.set_transformer_pipeline render-video \
+python -m football_ai.positions.model.cli render-video \
   --project-root /Users/carloscole/narrador-futbol \
   --video-path data/partidoPrueba/partido_ajustado.mp4 \
   --tracks-path output/predictions/positions/partido_ajustado_<timestamp>/tracks_with_predicted_roles.json
