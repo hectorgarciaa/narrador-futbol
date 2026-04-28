@@ -109,6 +109,7 @@ team_detector:
 
 # Configuración de tracking (ByteTrack)
 tracking:
+  lineup_spec: "output/interfaz/runs/10246f76b26d/lineup_spec.json"  # Fallback de --lineup-spec (ruta relativa a la raiz del proyecto)
   print_runtime_devices: true  # Si true, imprime el dispositivo efectivo real de PnLCalib y frame hook (cuda/cpu)
   projector:
     enabled: true     # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching

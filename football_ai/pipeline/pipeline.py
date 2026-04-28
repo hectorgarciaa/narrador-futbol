@@ -207,6 +207,8 @@ def _resolve_position_infering_device(position_phase):
 
 def resolve_lineup_spec(args, config):
     lineup_spec = getattr(args, "lineup_spec", None)
+    if not lineup_spec:
+        lineup_spec = config.get("tracking", "lineup_spec", default=None)
     lineup_matcher = None
     lineup_expected_roles_by_team = None
     lineup_team_colors_raw = {}
