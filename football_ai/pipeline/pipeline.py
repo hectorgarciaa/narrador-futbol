@@ -341,7 +341,7 @@ def run_tracking_pipeline(args):
         # Run tracking
         from football_ai.tracking import TrackingPhase
         from football_ai.posession.phase import PosessionPhase
-        from football_ai.positions.phase import PositionInferingPhase
+        from football_ai.positions import PositionInferingPhase
         from scripts.utils import iter_video_frames
 
         tracking_phase = TrackingPhase(

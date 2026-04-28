@@ -15,26 +15,12 @@ import pandas as pd
 from football_ai.core.config import Config
 from football_ai.visualization import Drawer
 
-try:
-    from experiments.positions.position_dataset import (
-        find_project_root,
-        load_tracks_json,
-        resolve_tracks_path_for_video,
-        sanitize_video_stem,
-    )
-except ImportError:  # pragma: no cover - soporte ejecucion directa del archivo.
-    import sys
-
-    project_root = Path(__file__).resolve().parents[2]
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-
-    from experiments.positions.position_dataset import (  # type: ignore
-        find_project_root,
-        load_tracks_json,
-        resolve_tracks_path_for_video,
-        sanitize_video_stem,
-    )
+from football_ai.positions.data import (
+    find_project_root,
+    load_tracks_json,
+    resolve_tracks_path_for_video,
+    sanitize_video_stem,
+)
 
 
 logger = logging.getLogger(__name__)

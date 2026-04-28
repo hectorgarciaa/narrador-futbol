@@ -29,7 +29,7 @@ football_ai/
 | [`core`](core/README.md) | Carga de `config.yaml`, logging, conversión a JSON | `Config`, `Logger`, `convert_to_serializable` |
 | [`actions`](actions/README.md) | Adaptación de `tracks.json` a datasets de acciones y puente con PathCRF | `PathCRFTracksAdapter` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
-| [`positions`](positions/README.md) | Inferencia online de roles, estabilización táctica y exportes/plots de posiciones | `PositionInferingPhase`, `OnlineSpecialSeedRoleAssigner` |
+| [`positions`](positions/README.md) | Dataset, modelo Set Transformer e inferencia online de roles con doble Húngaro | `PositionInferingPhase`, `OnlineSpecialSeedRoleAssigner` |
 | [`report`](report/README.md) | Informes tecnicos, benchmarkings y decisiones documentadas | Documentacion Markdown |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
 | [`bytetrack`](bytetrack/README.md) | Asociación multi-objeto desacoplada: `IDENTIFICATION.clean` → `BYTETRACK` | `ByteTrackPhase`, `ByteTrack` |

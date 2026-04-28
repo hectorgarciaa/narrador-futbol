@@ -4,10 +4,10 @@ Utilidades y notebook para construir un dataset supervisado de rol nominal de ju
 
 ## Archivos
 
-- `position_dataset.py`: funciones para preparar observaciones, validar etiquetas de rol, inferir orientación de ataque y construir samples con features tabulares + tensor de compañeros.
+- `position_dataset.py`: reexporta `football_ai.positions.data.dataset`.
 - `position_role_dataset.ipynb`: flujo end-to-end de creación del dataset.
 - `position_role_workflow.py`: implementación equivalente en script (`.py`) del flujo completo (preparación, etiquetado interactivo en Jupyter y exportación).
-- `set_transformer_pipeline.py`: entrenamiento e inferencia de un clasificador Set Transformer usando `base_table.csv` reconstruido por partido.
+- `set_transformer_pipeline.py`: reexporta `football_ai.positions.model.train`.
 
 ## Set Transformer para inferencia de roles
 
@@ -44,10 +44,10 @@ python -m experiments.positions.set_transformer_pipeline predict \
 Si usas el notebook `experiments/set_transformer.ipynb`, puedes pasar además `EXPECTED_ROLES_BY_TEAM` para imponer el once esperado de cada equipo con Hungarian sobre las probabilidades agregadas por jugador.
 Ese mismo formato de listas ya puede definirse también en `config.yaml` bajo `tracking.expected_roles_by_team`.
 El comando `python -m experiments.positions.set_transformer_pipeline predict` lo toma por defecto desde `config.yaml` cuando no inyectas un mapping explícito desde Python/notebook.
-En el tracking principal, ese ajuste no cambia la etiqueta de cada frame: se usa solo cuando un track alcanza la ventana de estabilización y entonces congela una plaza estable por equipo a partir de la evidencia acumulada del jugador.
-Para depurar esa diferencia, `track.py` exporta también `output/tracks_json/tracker/<video>_frame_role_predictions.csv` con la predicción cruda frame a frame antes del congelado estable, `output/tracks_json/tracker/<video>_player_role_summary.csv` con el resumen estable final y `output/tracks_json/tracker/<video>_greedy_role_diagnostics.csv` con las métricas usadas en cada paso del greedy.
+En el tracking principal, ese ajuste sí participa en tiempo real: cada frame resuelve primero una asignación Hungarian por equipo y después una segunda asignación sobre la mayoría acumulada de cada segmento activo.
+Para depurar esa diferencia, `track.py` exporta también `output/tracks_json/tracker/<video>_frame_role_predictions.csv` con la predicción cruda frame a frame, `output/tracks_json/tracker/<video>_player_role_summary.csv` con el resumen final por segmento y `output/tracks_json/tracker/<video>_greedy_role_diagnostics.csv` con el estado de asignación segment-level.
 El notebook permite elegir entre reutilizar un checkpoint ya entrenado o reentrenar el modelo antes de inferir.
-La celda inicial recarga `set_transformer_pipeline.py`, así que cambios recientes del pipeline no requieren reiniciar el kernel para que se apliquen.
+La celda inicial recarga el módulo de entrenamiento, así que cambios recientes del pipeline no requieren reiniciar el kernel para que se apliquen.
 Además, tras la inferencia, puede renderizar automáticamente el MP4 anotado usando el `tracks_with_predicted_roles.json`.
 
 Salidas:

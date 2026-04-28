@@ -13,8 +13,8 @@ experiments/
 │   └── team_possession.py            # Heurística de posesión + render anotado
 ├── set_transformer.ipynb             # Entrenamiento + aplicación de Set Transformer para roles
 ├── positions/
-│   ├── position_dataset.py            # Construcción de tablas/features para dataset de roles
-│   ├── set_transformer_pipeline.py    # Pipeline reusable de entrenamiento/inferencia
+│   ├── position_dataset.py            # Reexport a football_ai.positions.data.dataset
+│   ├── set_transformer_pipeline.py    # Reexport a football_ai.positions.model.train
 │   └── position_role_dataset.ipynb    # Pipeline guiado de etiquetado y exportación del dataset
 ├── reference_points/
 │   ├── classical_reference_points.py  # Utilidades para homografía clásica
@@ -113,7 +113,7 @@ Requisitos:
 
 ## `positions/position_dataset.py`
 
-**Objetivo:** Librería de utilidades reutilizable para el notebook de roles posicionales.
+**Objetivo:** Wrapper fino hacia `football_ai.positions.data.dataset` para notebooks y scripts experimentales.
 
 Funciones clave:
 - `list_position_videos`: enumera vídeos en `data/partidosPosiciones/`.

@@ -11,62 +11,30 @@ import cv2
 import numpy as np
 import pandas as pd
 
-try:
-    from .position_dataset import (
-        POSITIONS_DATASET_DIR,
-        POSITIONS_LABELS_DIR,
-        ROLE_LABELS_V1,
-        FeatureSpec,
-        add_velocity_features,
-        apply_periodic_role_labels_propagated,
-        build_observations_from_tracks,
-        build_periodic_label_schedule,
-        build_periodic_role_label_template,
-        build_role_samples,
-        find_project_root,
-        get_video_fps,
-        infer_attack_direction_by_team,
-        list_position_videos,
-        load_role_label_entries_json,
-        load_tracks_json,
-        render_frame_with_player_ids,
-        resolve_tracks_path_for_video,
-        save_role_label_template_json,
-        upsert_role_labels_in_template_json,
-        upsert_run_to_common_dataset,
-        validate_periodic_role_labels,
-    )
-except ImportError:  # pragma: no cover - soporte ejecución directa del archivo.
-    import sys
-
-    project_root = Path(__file__).resolve().parents[2]
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-
-    from experiments.positions.position_dataset import (  # type: ignore
-        POSITIONS_DATASET_DIR,
-        POSITIONS_LABELS_DIR,
-        ROLE_LABELS_V1,
-        FeatureSpec,
-        add_velocity_features,
-        apply_periodic_role_labels_propagated,
-        build_observations_from_tracks,
-        build_periodic_label_schedule,
-        build_periodic_role_label_template,
-        build_role_samples,
-        find_project_root,
-        get_video_fps,
-        infer_attack_direction_by_team,
-        list_position_videos,
-        load_role_label_entries_json,
-        load_tracks_json,
-        render_frame_with_player_ids,
-        resolve_tracks_path_for_video,
-        save_role_label_template_json,
-        upsert_role_labels_in_template_json,
-        upsert_run_to_common_dataset,
-        validate_periodic_role_labels,
-    )
+from football_ai.positions.data.dataset import (
+    POSITIONS_DATASET_DIR,
+    POSITIONS_LABELS_DIR,
+    ROLE_LABELS_V1,
+    FeatureSpec,
+    add_velocity_features,
+    apply_periodic_role_labels_propagated,
+    build_observations_from_tracks,
+    build_periodic_label_schedule,
+    build_periodic_role_label_template,
+    build_role_samples,
+    find_project_root,
+    get_video_fps,
+    infer_attack_direction_by_team,
+    list_position_videos,
+    load_role_label_entries_json,
+    load_tracks_json,
+    render_frame_with_player_ids,
+    resolve_tracks_path_for_video,
+    save_role_label_template_json,
+    upsert_role_labels_in_template_json,
+    upsert_run_to_common_dataset,
+    validate_periodic_role_labels,
+)
 
 
 DEFAULT_PLAYER_IDS = tuple(range(1, 27))
