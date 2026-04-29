@@ -1,0 +1,29 @@
+{
+  "original_train_matches": [
+    "A1606b0e6_0_(15)",
+    "A1606b0e6_0_(30)",
+    "A1606b0e6_0_(50)",
+    "B1606b0e6_1_(51)",
+    "B1606b0e6_1_(61)",
+    "B1606b0e6_1_(81)"
+  ],
+  "original_val_matches": [
+    "A1606b0e6_0_(55)"
+  ],
+  "test_matches": [
+    "A1606b0e6_0_(29)"
+  ],
+  "train_val_matches": [
+    "A1606b0e6_0_(15)",
+    "A1606b0e6_0_(30)",
+    "A1606b0e6_0_(50)",
+    "A1606b0e6_0_(55)",
+    "B1606b0e6_1_(51)",
+    "B1606b0e6_1_(61)",
+    "B1606b0e6_1_(81)"
+  ],
+  "num_original_train_samples": 82122,
+  "num_original_val_samples": 13603,
+  "num_train_val_samples": 95725,
+  "num_test_samples": 13794
+}

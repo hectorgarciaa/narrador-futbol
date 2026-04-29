@@ -42,6 +42,8 @@ from football_ai.positions.set_transformer_pipeline import (
 
 
 DEFAULT_OUTPUT_DIR = Path("models/positions/grid_search_outputs")
+DEFAULT_FINAL_TRAIN_VAL_OUTPUT_DIR = Path("models/positions/final_train_val")
+DEFAULT_BEST_HYPERPARAMETERS_PATH = Path("models/positions/20260427_002133/best_hyperparameters.json")
 WINGBACK_TO_FULLBACK_LABEL_MAP = {
     "CI": "LI",
     "CD": "LD",
@@ -383,6 +385,33 @@ def _plot_history(history_df: pd.DataFrame, output_path: Path) -> None:
 
     axes[2].plot(history_df["epoch"], history_df["train_macro_f1"], label="train")
     axes[2].plot(history_df["epoch"], history_df["val_macro_f1"], label="val")
+    axes[2].set_title("Macro F1")
+    axes[2].set_xlabel("epoch")
+    axes[2].grid(alpha=0.25)
+    axes[2].legend()
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def _plot_final_train_val_history(history_df: pd.DataFrame, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
+
+    axes[0].plot(history_df["epoch"], history_df["train_val_loss"], label="train+val")
+    axes[0].set_title("Loss")
+    axes[0].set_xlabel("epoch")
+    axes[0].grid(alpha=0.25)
+    axes[0].legend()
+
+    axes[1].plot(history_df["epoch"], history_df["train_val_accuracy"], label="train+val")
+    axes[1].set_title("Accuracy")
+    axes[1].set_xlabel("epoch")
+    axes[1].grid(alpha=0.25)
+    axes[1].legend()
+
+    axes[2].plot(history_df["epoch"], history_df["train_val_macro_f1"], label="train+val")
     axes[2].set_title("Macro F1")
     axes[2].set_xlabel("epoch")
     axes[2].grid(alpha=0.25)
@@ -796,6 +825,350 @@ def train_single_experiment(
         "history_df": history_df,
         "metrics": metrics_payload,
         "split": split_payload,
+    }
+
+
+def _load_final_training_config(
+    *,
+    best_hyperparameters_path: Path,
+    project_root: Path,
+    final_epochs: int | None,
+) -> tuple[TrainingConfig, dict[str, Any]]:
+    path = best_hyperparameters_path
+    if not path.is_absolute():
+        path = project_root / path
+    if not path.exists():
+        raise FileNotFoundError(f"No existe el fichero de hiperparámetros: {path}")
+
+    with path.open("r", encoding="utf-8") as f:
+        best_payload = json.load(f)
+
+    epochs = int(final_epochs if final_epochs is not None else best_payload["best_epoch"])
+    if epochs < 1:
+        raise ValueError(f"final_epochs debe ser >= 1, recibido: {epochs}")
+
+    config = TrainingConfig(
+        seed=int(best_payload.get("seed", 42)),
+        epochs=epochs,
+        batch_size=int(best_payload.get("batch_size", 512)),
+        learning_rate=float(best_payload["learning_rate"]),
+        weight_decay=float(best_payload["weight_decay"]),
+        dropout=float(best_payload["dropout"]),
+        label_smoothing=float(best_payload.get("label_smoothing", 0.0)),
+        teammate_embed_dim=int(best_payload["teammate_embed_dim"]),
+        objective_hidden_dim=int(best_payload["objective_hidden_dim"]),
+        objective_num_layers=int(best_payload["objective_num_layers"]),
+        set_hidden_dim=int(best_payload["set_hidden_dim"]),
+        fusion_hidden_dim=int(best_payload["fusion_hidden_dim"]),
+        num_heads=int(best_payload.get("num_heads", 4)),
+        num_set_blocks=int(best_payload["num_set_blocks"]),
+        ff_expansion=int(best_payload["ff_expansion"]),
+        patience=0,
+        overfit_patience=0,
+        experiment_group="final_train_val",
+    )
+    return config, {
+        "path": str(path),
+        "payload": best_payload,
+        "selected_epoch_source": "best_epoch" if final_epochs is None else "manual_override",
+    }
+
+
+def train_final_train_val_model(
+    *,
+    project_root: Path | None = None,
+    base_table_path: Path | None = None,
+    output_dir: Path | None = None,
+    best_hyperparameters_path: Path = DEFAULT_BEST_HYPERPARAMETERS_PATH,
+    final_epochs: int | None = None,
+    prefer_cached_common_dataset: bool = True,
+    max_train_samples: int | None = None,
+    max_test_samples: int | None = None,
+) -> dict[str, Any]:
+    project_root = find_project_root(project_root)
+    output_root = project_root / (output_dir or DEFAULT_FINAL_TRAIN_VAL_OUTPUT_DIR)
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = output_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    config, best_hparams_source = _load_final_training_config(
+        best_hyperparameters_path=best_hyperparameters_path,
+        project_root=project_root,
+        final_epochs=final_epochs,
+    )
+    set_global_seed(config.seed)
+    torch.set_num_threads(max(1, min(8, os.cpu_count() or 1)))
+
+    print(f"[final] Preparando dataset desde {base_table_path or DEFAULT_BASE_TABLE_PATH}...")
+    prepared = _prepare_dataset(
+        project_root=project_root,
+        base_table_path=base_table_path,
+        max_teammates=DEFAULT_MAX_TEAMMATES,
+        seed=int(config.seed),
+        prefer_cached_common_dataset=prefer_cached_common_dataset,
+        label_map=WINGBACK_TO_FULLBACK_LABEL_MAP,
+    )
+
+    dataset = prepared["dataset"]
+    split = prepared["split"]
+    labels_idx = prepared["labels_idx"]
+    label_mapping = dict(prepared.get("label_mapping", {"enabled": False, "map": {}}))
+
+    train_val_idx = np.sort(
+        np.concatenate(
+            [
+                np.asarray(split.train_idx, dtype=np.int64),
+                np.asarray(split.val_idx, dtype=np.int64),
+            ]
+        )
+    ).astype(np.int64)
+    train_val_idx = _subset_indices_keep_labels(
+        train_val_idx,
+        max_train_samples,
+        seed=int(config.seed),
+        labels_idx=labels_idx,
+    )
+    test_idx = _subset_indices(
+        split.test_idx,
+        max_test_samples,
+        seed=int(config.seed) + 2,
+    )
+
+    standardizer = FeatureStandardizer.fit(
+        objective=dataset.objective[train_val_idx],
+        teammates=dataset.teammates[train_val_idx],
+        teammate_mask=dataset.teammate_mask[train_val_idx],
+    )
+    objective_scaled, teammates_scaled = standardizer.transform(
+        objective=dataset.objective,
+        teammates=dataset.teammates,
+        teammate_mask=dataset.teammate_mask,
+    )
+
+    train_val_loader = DataLoader(
+        RoleDataset(
+            objective=objective_scaled[train_val_idx],
+            teammates=teammates_scaled[train_val_idx],
+            teammate_mask=dataset.teammate_mask[train_val_idx],
+            labels=labels_idx[train_val_idx],
+        ),
+        batch_size=int(config.batch_size),
+        shuffle=True,
+        num_workers=int(config.num_workers),
+        drop_last=False,
+    )
+    train_val_eval_loader = DataLoader(
+        RoleDataset(
+            objective=objective_scaled[train_val_idx],
+            teammates=teammates_scaled[train_val_idx],
+            teammate_mask=dataset.teammate_mask[train_val_idx],
+            labels=labels_idx[train_val_idx],
+        ),
+        batch_size=int(config.batch_size),
+        shuffle=False,
+        num_workers=int(config.num_workers),
+        drop_last=False,
+    )
+    test_loader = DataLoader(
+        RoleDataset(
+            objective=objective_scaled[test_idx],
+            teammates=teammates_scaled[test_idx],
+            teammate_mask=dataset.teammate_mask[test_idx],
+            labels=labels_idx[test_idx],
+        ),
+        batch_size=int(config.batch_size),
+        shuffle=False,
+        num_workers=int(config.num_workers),
+        drop_last=False,
+    )
+
+    device = _select_device()
+    class_weights = compute_class_weight(
+        class_weight="balanced",
+        classes=np.arange(len(dataset.label_names)),
+        y=labels_idx[train_val_idx],
+    )
+    criterion = nn.CrossEntropyLoss(
+        weight=torch.as_tensor(class_weights, dtype=torch.float32, device=device),
+        label_smoothing=float(config.label_smoothing),
+    )
+    model = RoleSetTransformer(
+        objective_dim=int(dataset.objective.shape[1]),
+        teammate_dim=int(dataset.teammates.shape[2]),
+        num_classes=len(dataset.label_names),
+        config=config,
+    ).to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(config.learning_rate),
+        weight_decay=float(config.weight_decay),
+    )
+
+    print(
+        "[final] Entrenando con train+val "
+        f"({len(train_val_idx)} muestras) durante {config.epochs} epoch(s). "
+        "El test queda reservado para la evaluación final."
+    )
+    history_rows: list[dict[str, Any]] = []
+    for epoch in range(1, int(config.epochs) + 1):
+        train_epoch = _run_epoch(
+            model=model,
+            loader=train_val_loader,
+            criterion=criterion,
+            device=device,
+            optimizer=optimizer,
+        )
+        train_metrics = _classification_metrics(
+            y_true=train_epoch["y_true"],
+            y_pred=train_epoch["y_pred"],
+            label_names=dataset.label_names,
+        )
+        history_rows.append(
+            {
+                "epoch": int(epoch),
+                "train_val_loss": float(train_epoch["loss"]),
+                "train_val_accuracy": float(train_metrics["accuracy"]),
+                "train_val_macro_f1": float(train_metrics["macro_f1"]),
+                "train_val_weighted_f1": float(train_metrics["weighted_f1"]),
+            }
+        )
+        print(
+            "[final] "
+            f"epoch={epoch}/{config.epochs} "
+            f"loss={float(train_epoch['loss']):.4f} "
+            f"acc={float(train_metrics['accuracy']):.4f} "
+            f"macro_f1={float(train_metrics['macro_f1']):.4f}"
+        )
+
+    train_val_final = _run_epoch(
+        model=model,
+        loader=train_val_eval_loader,
+        criterion=criterion,
+        device=device,
+        optimizer=None,
+    )
+    test_final = _run_epoch(
+        model=model,
+        loader=test_loader,
+        criterion=criterion,
+        device=device,
+        optimizer=None,
+    )
+    train_val_metrics = _classification_metrics(
+        y_true=train_val_final["y_true"],
+        y_pred=train_val_final["y_pred"],
+        label_names=dataset.label_names,
+    )
+    test_metrics = _classification_metrics(
+        y_true=test_final["y_true"],
+        y_pred=test_final["y_pred"],
+        label_names=dataset.label_names,
+    )
+
+    checkpoint_path = run_dir / "best_model.pt"
+    checkpoint = {
+        "created_at": datetime.now().isoformat(),
+        "model_state_dict": copy.deepcopy(model.state_dict()),
+        "training_config": asdict(config),
+        "objective_feature_names": list(dataset.feature_spec.objective_feature_names),
+        "teammate_feature_names": list(dataset.feature_spec.teammate_feature_names),
+        "label_names": list(dataset.label_names),
+        "label_to_idx": prepared["label_to_idx"],
+        "idx_to_label": prepared["idx_to_label"],
+        "standardizer": standardizer.to_state(),
+        "best_epoch": int(config.epochs),
+        "used_cached_common_dataset": bool(prefer_cached_common_dataset),
+        "label_mapping": label_mapping,
+        "heuristics": {
+            "goalkeeper_role": "POR",
+        },
+        "training_mode": "final_train_val_fixed_epoch",
+        "experiment_note": (
+            "Checkpoint final entrenado con train+val usando los hiperparámetros "
+            "seleccionados por validación. El conjunto de test solo se usa al final."
+        ),
+    }
+    torch.save(checkpoint, checkpoint_path)
+
+    split_payload = {
+        "original_train_matches": list(split.train_matches),
+        "original_val_matches": list(split.val_matches),
+        "test_matches": list(split.test_matches),
+        "train_val_matches": sorted(set(split.train_matches).union(split.val_matches)),
+        "num_original_train_samples": int(len(split.train_idx)),
+        "num_original_val_samples": int(len(split.val_idx)),
+        "num_train_val_samples": int(len(train_val_idx)),
+        "num_test_samples": int(len(test_idx)),
+    }
+    metrics_payload = {
+        "created_at": datetime.now().isoformat(),
+        "device": str(device),
+        "training_mode": "final_train_val_fixed_epoch",
+        "source_best_hyperparameters": best_hparams_source,
+        "num_classes_trained": int(len(dataset.label_names)),
+        "trained_labels": list(dataset.label_names),
+        "used_cached_common_dataset": bool(prefer_cached_common_dataset),
+        "label_mapping": label_mapping,
+        "train_val": train_val_metrics,
+        "test": test_metrics,
+    }
+    dataset_summary = {
+        "num_samples": int(len(dataset.samples_df)),
+        "objective_dim": int(dataset.objective.shape[1]),
+        "teammate_shape": list(dataset.teammates.shape),
+        "label_names": list(dataset.label_names),
+        "label_counts": {
+            str(label): int(count)
+            for label, count in dataset.samples_df["label"].astype(str).value_counts().sort_index().items()
+        },
+        "label_mapping": label_mapping,
+    }
+
+    history_df = pd.DataFrame(history_rows)
+    history_df.to_csv(run_dir / "training_history.csv", index=False)
+    _save_json(run_dir / "config.json", asdict(config))
+    _save_json(run_dir / "metrics.json", metrics_payload)
+    _save_json(run_dir / "split.json", split_payload)
+    _save_json(run_dir / "dataset_summary.json", dataset_summary)
+    _save_json(run_dir / "source_best_hyperparameters.json", best_hparams_source)
+    _plot_final_train_val_history(history_df, run_dir / "training_curves.png")
+    _plot_confusion_matrix(
+        matrix=train_val_metrics["confusion_matrix"],
+        labels=dataset.label_names,
+        output_path=run_dir / "confusion_matrix_train_val.png",
+        title="Matriz de confusión en train+val",
+    )
+    _plot_confusion_matrix(
+        matrix=test_metrics["confusion_matrix"],
+        labels=dataset.label_names,
+        output_path=run_dir / "confusion_matrix_test.png",
+        title="Matriz de confusión en test",
+    )
+
+    summary = {
+        "run_dir": str(run_dir),
+        "checkpoint_path": str(checkpoint_path),
+        "training_mode": "final_train_val_fixed_epoch",
+        "epochs": int(config.epochs),
+        "train_val_accuracy": float(train_val_metrics["accuracy"]),
+        "train_val_macro_f1": float(train_val_metrics["macro_f1"]),
+        "train_val_weighted_f1": float(train_val_metrics["weighted_f1"]),
+        "test_accuracy": float(test_metrics["accuracy"]),
+        "test_macro_f1": float(test_metrics["macro_f1"]),
+        "test_weighted_f1": float(test_metrics["weighted_f1"]),
+    }
+    _save_json(run_dir / "summary.json", summary)
+    print("\n[final] Resultado final:")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    print(f"[final] Artefactos guardados en: {run_dir}")
+    return {
+        "run_dir": run_dir,
+        "checkpoint_path": checkpoint_path,
+        "config": asdict(config),
+        "history_df": history_df,
+        "metrics": metrics_payload,
+        "split": split_payload,
+        "summary": summary,
     }
 
 
@@ -1362,12 +1735,36 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Grid search para optimizar el Set Transformer de posiciones. "
-            "Por defecto, los resultados se guardan en models/positions/grid_search_outputs."
+            "Por defecto, los resultados se guardan en models/positions/grid_search_outputs. "
+            "Con --final-train-val se entrena el modelo final usando train+val y se evalúa en test."
         )
     )
     parser.add_argument("--project-root", type=Path, default=None)
     parser.add_argument("--base-table-path", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--final-train-val",
+        action="store_true",
+        help=(
+            "Entrena un único modelo final con train+val usando los mejores hiperparámetros "
+            "guardados y evalúa una sola vez en test."
+        ),
+    )
+    parser.add_argument(
+        "--best-hyperparameters-path",
+        type=Path,
+        default=DEFAULT_BEST_HYPERPARAMETERS_PATH,
+        help="JSON con los hiperparámetros seleccionados por validación.",
+    )
+    parser.add_argument(
+        "--final-epochs",
+        type=int,
+        default=None,
+        help=(
+            "Epochs para el entrenamiento final. Si no se indica, usa best_epoch del JSON "
+            "de hiperparámetros."
+        ),
+    )
     parser.add_argument(
         "--grid-preset",
         choices=("simple", "full", "best-run", "refine-top3"),
@@ -1401,6 +1798,24 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+    if bool(args.final_train_val):
+        output_dir = (
+            DEFAULT_FINAL_TRAIN_VAL_OUTPUT_DIR
+            if args.output_dir == DEFAULT_OUTPUT_DIR
+            else args.output_dir
+        )
+        train_final_train_val_model(
+            project_root=args.project_root,
+            base_table_path=args.base_table_path,
+            output_dir=output_dir,
+            best_hyperparameters_path=args.best_hyperparameters_path,
+            final_epochs=args.final_epochs,
+            prefer_cached_common_dataset=not bool(args.rebuild_from_base_table),
+            max_train_samples=args.max_train_samples,
+            max_test_samples=args.max_test_samples,
+        )
+        return 0
+
     run_grid_search(
         project_root=args.project_root,
         base_table_path=args.base_table_path,

@@ -68,6 +68,22 @@ El grid search usado para optimizar este modelo también está disponible como m
 
 Por defecto, ese comando guarda nuevos barridos en `models/positions/grid_search_outputs/`.
 
+Cuando ya se ha elegido una configuración, se puede entrenar el modelo final con
+`train+val` y reservar `test` únicamente para la comprobación final:
+
+```bash
+./.venv/bin/python -m football_ai.positions.set_transformer_grid_search \
+  --project-root /home/cmantill/narrador-futbol \
+  --final-train-val \
+  --rebuild-from-base-table
+```
+
+Este modo toma por defecto los hiperparámetros de
+`models/positions/20260427_002133/best_hyperparameters.json`, usa su
+`best_epoch` como número fijo de epochs y guarda los artefactos en
+`models/positions/final_train_val/`. No utiliza el conjunto de test para early
+stopping ni para seleccionar epochs.
+
 ## `lineup_spec.py`
 
 Este módulo define las formaciones soportadas por la interfaz (`4-3-3`, `5-3-2`, `4-4-2`) y separa dos niveles:

@@ -1,0 +1,12 @@
+{
+  "run_dir": "/home/cmantill/narrador-futbol/models/positions/final_train_val/20260429_114332",
+  "checkpoint_path": "/home/cmantill/narrador-futbol/models/positions/final_train_val/20260429_114332/best_model.pt",
+  "training_mode": "final_train_val_fixed_epoch",
+  "epochs": 2,
+  "train_val_accuracy": 0.8889527291721075,
+  "train_val_macro_f1": 0.8924319322343567,
+  "train_val_weighted_f1": 0.8889788813877285,
+  "test_accuracy": 0.516093953892997,
+  "test_macro_f1": 0.48334000509669434,
+  "test_weighted_f1": 0.5019818328325559
+}
