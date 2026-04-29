@@ -2,16 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from football_ai.core import (
-    PHASE_FILTERING,
-    REJECT_CODE_HOMOGRAPHY_NOT_USABLE,
-    REJECT_CODE_INVALID_FIELD_POSITION,
-    REJECT_CODE_KEPT,
-    REJECT_CODE_LABELS,
-    REJECT_CODE_OUTSIDE_FIELD,
-    REJECT_CODE_RESCUED_BY_TRACK_OVERLAP,
-    make_phase_packet,
-)
+from football_ai.core import PHASE_FILTERING, make_phase_packet
 from football_ai.tracking.phases.reference_points.geometry import project_image_points, points_inside_field_mask
 
 
@@ -98,21 +89,16 @@ def filter_reference_points(
 
         if not homography_valid or not field_positions_usable:
             keep = True
-            reject_code = REJECT_CODE_HOMOGRAPHY_NOT_USABLE
         elif not is_finite:
             keep = False
-            reject_code = REJECT_CODE_INVALID_FIELD_POSITION
         elif inside_field:
             keep = True
-            reject_code = REJECT_CODE_KEPT
         elif max_iou > 0.0:
             keep = True
-            reject_code = REJECT_CODE_RESCUED_BY_TRACK_OVERLAP
             rescued_by_iou = True
             rescued_count += 1
         else:
             keep = False
-            reject_code = REJECT_CODE_OUTSIDE_FIELD
 
         trace_item = {
             "det_id": clean_in["det_id"][index],
@@ -121,8 +107,6 @@ def filter_reference_points(
             "class_name": str(clean_in["class_name"][index]),
             "field_position_m": list(clean_in["field_positions_m"][index]),
             "keep": bool(keep),
-            "reject_code": int(reject_code),
-            "reject_label": REJECT_CODE_LABELS[reject_code],
             "is_finite_field_position": is_finite,
             "inside_field": inside_field,
             "rescued_by_track_overlap": rescued_by_iou,
