@@ -29,7 +29,7 @@ drawer = Drawer(
 ```
 
 Los colores se leen de `config.yaml` vía `config.get_visualization_colors()` en los scripts.
-En modo campo (`four_panel` panel B), el color de relleno por equipo se lee de `visualization.team_colors` (BGR).
+En modo campo (`four_panel` panel B), el color de relleno por equipo usa los `team_colors` activos del `TeamDetector` (LAB OpenCV convertidos a BGR al pintar).
 
 ### Método principal: `draw_tracks`
 
@@ -68,7 +68,7 @@ En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=Tru
 Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
 1. `A) Tracking compact`: video anotado en formato compacto (`p`, `gk`, `ref`, sin distancias de equipo, roles sin prefijo, posición `x, y` sin decimales y texto más pequeño).
    - Bajo cada track compacto se muestran `tr:<cls>` (clase actual del track), `y:<cls>` (YOLO) y `td:<cls>` (TeamDetector).
-   - En `player/gk`, el color de `bbox` se toma del equipo (`visualization.team_colors`) en lugar del color fijo por clase.
+   - En `player/gk`, el color de `bbox` se toma de los `team_colors` activos del `TeamDetector` para el equipo resuelto. Si `team` viene vacío, primero intenta resolverlo por `distances`.
 2. `B) Campo + IDs + rol`: representación 2D del campo con:
    - círculo por track final (relleno por equipo),
    - borde por tipo (`player`, `goalkeeper`, `referee`),
@@ -81,13 +81,14 @@ Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
    - Se separan en dos tipos (colores configurables en `config.yaml/visualization`):
      - `discarded_panel_color_not_tracked`: YOLO no devueltas por ByteTrack.
      - `discarded_panel_color_tracked_no_canonical`: devueltas por ByteTrack pero descartadas en el mapeo a ID canónico.
+   - En `player/gk`, el borde y la etiqueta usan el mismo criterio (equipo resuelto contra `team_colors` activos del `TeamDetector`). Los colores configurables siguen actuando como fallback para `referee/ball`.
    - Ambas etiquetas muestran `tr:<cls>`, `y:<cls>` y `td:<cls>` (track/YOLO/TeamDetector), además de una abreviatura compacta y la confianza.
    - En las detecciones que nunca llegaron a salir de ByteTrack, `tr:-` indica explícitamente que no hubo clase de track disponible.
    - Para las detecciones devueltas por ByteTrack pero descartadas en canónico, el panel incluye también `bt#<id>` (el `tracker_id` devuelto por ByteTrack).
    - Si `visualization.discarded_panel_show_reasons=true`, el panel añade una abreviatura compacta del `discard_reason` en la etiqueta (útil para depurar gates/límites sin desbordar el overlay). El JSON `*_debug_frames.json` sigue guardando el motivo completo.
    - Cuando `four_panel_enabled=true`, el pipeline guarda además un JSON `*_debug_frames.json` junto al `*_tracks.json` con estas listas y motivos, para análisis offline.
 4. `D) Tracking con continuidad`: overlay compacto con relleno de continuidad (usa la última posición conocida por ID cuando falta detección en el frame) y mantiene el resaltado de posesión.
-   - Igual que el panel A, muestra `tr:<cls>`, `y:<cls>` y `td:<cls>` de cada track.
+   - Igual que el panel A, muestra `tr:<cls>`, `y:<cls>` y `td:<cls>` de cada track y colorea `player/gk` con el color de equipo resuelto en `team_colors` del `TeamDetector`.
    - Añade además `seg:<id>` bajo cada track para mostrar el segmento semántico activo del `canonical_id`.
    - Si `visualization.continuity_keep_all_seen_ids=true`, mantiene visibles todos los IDs ya observados en el clip para cada clase (no corta al cupo esperado).
 

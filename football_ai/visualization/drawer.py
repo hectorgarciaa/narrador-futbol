@@ -40,10 +40,13 @@ class Drawer:
             int(self.visualization_conf.get("pitch_marker_radius", 12)),
         )
         configured_team_colors = self.visualization_conf.get("team_colors", {})
+        team_color_space = str(
+            self.visualization_conf.get("team_colors_space", "bgr")
+        ).strip().lower()
         self.team_fill_colors = {}
         if isinstance(configured_team_colors, dict):
             for team_name, color in configured_team_colors.items():
-                parsed = self._parse_bgr_color(color)
+                parsed = self._parse_team_color(color, team_color_space)
                 if parsed is not None:
                     self.team_fill_colors[str(team_name).strip().lower()] = parsed
 
@@ -78,6 +81,23 @@ class Drawer:
         except (TypeError, ValueError):
             return None
         return (int(np.clip(b, 0, 255)), int(np.clip(g, 0, 255)), int(np.clip(r, 0, 255)))
+
+    @classmethod
+    def _parse_team_color(cls, color, color_space):
+        if color_space == "lab_opencv":
+            if not isinstance(color, (list, tuple)) or len(color) < 3:
+                return None
+            try:
+                l_ch = float(color[0])
+                a_ch = float(color[1])
+                b_ch = float(color[2])
+            except (TypeError, ValueError):
+                return None
+            lab_pixel = np.array([[[l_ch, a_ch, b_ch]]], dtype=np.uint8)
+            bgr_pixel = cv2.cvtColor(lab_pixel, cv2.COLOR_LAB2BGR)
+            bgr = bgr_pixel.reshape(-1).tolist()
+            return cls._parse_bgr_color(bgr)
+        return cls._parse_bgr_color(color)
 
     @staticmethod
     def _coerce_int(value, default=0):
@@ -206,8 +226,36 @@ class Drawer:
 
     def _detection_draw_color(self, class_name, data, fallback_color):
         if class_name in {"player", "goalkeeper"}:
-            return self._team_fill_color(data.get("team"))
+            team_color = self._team_fill_color(self._team_name_for_color(data))
+            if team_color is not None:
+                return team_color
         return fallback_color
+
+    @staticmethod
+    def _nearest_outfield_team_from_distances(distances):
+        if not isinstance(distances, dict):
+            return None
+        valid = []
+        for team_name, distance in distances.items():
+            if team_name in {None, "referee"}:
+                continue
+            try:
+                numeric_distance = float(distance)
+            except (TypeError, ValueError):
+                continue
+            valid.append((str(team_name), numeric_distance))
+        if not valid:
+            return None
+        valid.sort(key=lambda item: (item[1], item[0]))
+        return valid[0][0]
+
+    def _team_name_for_color(self, data):
+        if not isinstance(data, dict):
+            return None
+        team_name = data.get("team")
+        if team_name not in {None, ""}:
+            return team_name
+        return self._nearest_outfield_team_from_distances(data.get("distances"))
 
     def create_writer(self, video, output_path, output_size=None):
         if not video:
@@ -554,6 +602,101 @@ class Drawer:
                     merged[key] = value
         return merged
 
+    @staticmethod
+    def _frame_actions_from_tracks(tracks, frame_id):
+        if not isinstance(tracks, dict):
+            return {}
+        actions_frames = tracks.get("actions_incremental")
+        if not isinstance(actions_frames, list) or frame_id >= len(actions_frames):
+            return {}
+        payload = actions_frames[frame_id]
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _safe_track_id(value):
+        if value is None:
+            return None
+        return str(value)
+
+    @staticmethod
+    def _bbox_center_from_payload(payload):
+        if not isinstance(payload, dict):
+            return None
+        bbox = payload.get("bbox")
+        if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+            return None
+        try:
+            x1, y1, x2, y2 = [int(round(float(v))) for v in bbox[:4]]
+        except (TypeError, ValueError):
+            return None
+        return int(round((x1 + x2) * 0.5)), int(round((y1 + y2) * 0.5))
+
+    def _find_track_center(self, frame_tracks, track_id):
+        target = self._safe_track_id(track_id)
+        if target is None:
+            return None
+        for class_name in ("player", "goalkeeper", "referee"):
+            frame_map = frame_tracks.get(class_name, {})
+            if not isinstance(frame_map, dict):
+                continue
+            for candidate_id, payload in frame_map.items():
+                if self._safe_track_id(candidate_id) != target:
+                    continue
+                return self._bbox_center_from_payload(payload)
+        return None
+
+    def _draw_actions_overlay(self, frame, frame_tracks, actions_info):
+        if not isinstance(actions_info, dict):
+            return
+        raw = actions_info.get("raw_edge") if isinstance(actions_info.get("raw_edge"), dict) else {}
+        post = actions_info.get("confirmed_action") if isinstance(actions_info.get("confirmed_action"), dict) else {}
+        slot_map = actions_info.get("person_slot_assignments") if isinstance(actions_info.get("person_slot_assignments"), dict) else {}
+        ref_slot_map = actions_info.get("referee_slot_assignments") if isinstance(actions_info.get("referee_slot_assignments"), dict) else {}
+
+        raw_src = raw.get("edge_src")
+        raw_dst = raw.get("edge_dst")
+        raw_src_tid = raw.get("edge_src_track_id")
+        raw_dst_tid = raw.get("edge_dst_track_id")
+
+        post_label = str(post.get("event_type") or "None")
+        lines = [
+            f"PathCRF raw: {raw_src}->{raw_dst}" if raw_src is not None and raw_dst is not None else "PathCRF raw: None",
+            f"PathCRF post: {post_label}",
+            f"raw src/dst track: {raw_src_tid}->{raw_dst_tid}",
+            f"raw src/dst slot: {raw_src}->{raw_dst}",
+        ]
+        if isinstance(post, dict) and post:
+            lines.append(
+                f"post src/dst track: {post.get('player_track_id')}->{post.get('receiver_track_id')}"
+            )
+            lines.append(
+                f"post src/dst slot: {post.get('player_slot_id')}->{post.get('receiver_slot_id')}"
+            )
+        y = 24
+        for text in lines:
+            (tw, th), b = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(frame, (10, y - th - 8), (22 + tw, y + b + 3), (25, 25, 25), -1)
+            cv2.putText(frame, text, (16, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 220, 255), 1, cv2.LINE_AA)
+            y += 24
+
+        # Flecha amarilla del raw PathCRF sobre el broadcast usando track_ids reales.
+        src_center = self._find_track_center(frame_tracks, raw_src_tid)
+        dst_center = self._find_track_center(frame_tracks, raw_dst_tid)
+        if src_center is not None and dst_center is not None:
+            cv2.arrowedLine(frame, src_center, dst_center, (0, 255, 255), 3, cv2.LINE_AA, tipLength=0.18)
+
+        # Etiquetas slot sobre cada track cuando exista mapping.
+        merged_slot_map = {}
+        merged_slot_map.update({str(k): str(v) for k, v in slot_map.items()})
+        merged_slot_map.update({str(k): str(v) for k, v in ref_slot_map.items()})
+        for class_name in ("player", "goalkeeper", "referee"):
+            for track_id, payload in frame_tracks.get(class_name, {}).items():
+                slot = merged_slot_map.get(str(track_id))
+                center = self._bbox_center_from_payload(payload)
+                if slot is None or center is None:
+                    continue
+                cv2.putText(frame, slot, (center[0] + 6, center[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+
     def _draw_possession_banner(self, frame, possession_info, compact=False, top_margin_px=6):
         if not isinstance(possession_info, dict):
             return
@@ -649,23 +792,12 @@ class Drawer:
 
     def _team_fill_color(self, team_name):
         if team_name is None:
-            return (180, 180, 180)
+            return None
         team_key = str(team_name).strip().lower()
         configured = self.team_fill_colors.get(team_key)
         if configured is not None:
             return configured
-        stable_colors = [
-            (46, 134, 193),
-            (39, 174, 96),
-            (241, 196, 15),
-            (231, 76, 60),
-            (155, 89, 182),
-            (26, 188, 156),
-        ]
-        # Hash determinista para no depender del random salt de Python entre ejecuciones.
-        deterministic_hash = sum(ord(ch) for ch in team_key)
-        idx = deterministic_hash % len(stable_colors)
-        return stable_colors[idx]
+        return None
 
     @staticmethod
     def _class_border_color(class_name):
@@ -743,7 +875,11 @@ class Drawer:
                 if point_m is None:
                     continue
                 x, y = self._to_panel_xy(point_m, panel_w, panel_h)
-                team_fill = self._team_fill_color(data.get("team"))
+                team_fill = self._detection_draw_color(
+                    class_name,
+                    data,
+                    fallback_color=(180, 180, 180),
+                )
                 border_color = self._class_border_color(class_name)
                 if class_name == "ball":
                     side = 8
@@ -811,6 +947,7 @@ class Drawer:
                     continue
                 x1, y1, x2, y2 = map(int, bbox)
                 class_name = self._resolve_debug_detection_class_name(det)
+                draw_color = color
                 cls = self._short_debug_class_label(class_name)
                 conf = float(det.get("confidence", 0.0))
                 source_label = self._format_detection_source_label(det)
@@ -827,14 +964,14 @@ class Drawer:
                         compact_reason = self._short_discard_reason(reason)
                         if compact_reason:
                             label = f"{label} {compact_reason[:28]}"
-                cv2.rectangle(panel, (x1, y1), (x2, y2), color, 1)
+                cv2.rectangle(panel, (x1, y1), (x2, y2), draw_color, 1)
                 cv2.putText(
                     panel,
                     label,
                     (x1, max(12, y1 - 3)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     self.compact_font_scale,
-                    color,
+                    draw_color,
                     1,
                     cv2.LINE_AA,
                 )
@@ -1007,6 +1144,7 @@ class Drawer:
                 else:
                     output_frame = frame
                     frame_tracks = self._extract_frame_tracks(tracks, frame_id)
+                    actions_info = self._frame_actions_from_tracks(tracks, frame_id)
                     possession_info = self._merge_possession_info(
                         self._frame_possession_from_tracks(tracks, frame_id),
                         self._frame_possession_info(frame_tracks),
@@ -1023,6 +1161,7 @@ class Drawer:
                         compact=False,
                         top_margin_px=8,
                     )
+                    self._draw_actions_overlay(output_frame, frame_tracks, actions_info)
 
                 out.write(output_frame)
                 if show_window:
