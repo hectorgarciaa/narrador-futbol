@@ -12,7 +12,7 @@ class IdentificationPhase(Phase):
         referee_field_width_m,
         referee_sideline_band_distance_m,
     ):
-        self.team_detector = TeamDetector(**team_detector_conf)
+        self.team_detector = TeamDetector(**dict(team_detector_conf or {}))
         self.referee_field_width_m = float(referee_field_width_m)
         self.referee_sideline_band_distance_m = float(
             referee_sideline_band_distance_m
