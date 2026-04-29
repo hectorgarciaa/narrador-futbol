@@ -9,17 +9,16 @@ class IdentificationPhase(Phase):
     def __init__(
         self,
         team_detector_conf,
-        *,
         referee_field_width_m,
         referee_sideline_band_distance_m,
     ):
-        self.team_detector = TeamDetector(**dict(team_detector_conf or {}))
+        self.team_detector = TeamDetector(**team_detector_conf)
         self.referee_field_width_m = float(referee_field_width_m)
         self.referee_sideline_band_distance_m = float(
             referee_sideline_band_distance_m
         )
 
-    def execute(self, frame_bgr, filtering_packet, *, show_kmeans=False):
+    def execute(self, frame_bgr, filtering_packet, show_kmeans=False):
         return self.team_detector.identify_packet(
             frame_bgr,
             filtering_packet,

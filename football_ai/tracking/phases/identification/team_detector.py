@@ -23,23 +23,11 @@ from .team_detector_utils import (
 class TeamDetector:
     def __init__(
         self,
-        team_colors=None,
-        min_samples={"player": 60, "referee": 15},
-        min_size_cluster=4,
-        min_conf={"player": 0.8, "referee": 0.7},
-        max_samples_per_class=500,
-        referee_bootstrap_margin=10,
+        team_color_model_conf={},
         shirt_detector_conf={},
     ):
         self.shirt_detector = ShirtDetector(**shirt_detector_conf)
-        self.color_model = TeamColorModel(
-            team_colors=team_colors,
-            min_samples=min_samples,
-            min_size_cluster=min_size_cluster,
-            min_conf=min_conf,
-            max_samples_per_class=max_samples_per_class,
-            referee_bootstrap_margin=referee_bootstrap_margin,
-        )
+        self.color_model = TeamColorModel(**team_color_model_conf)
         self.candidate_classes = CANDIDATE_CLASSES
         self.team_colors = self.color_model.team_colors
         self.updated = self.color_model.updated
@@ -90,44 +78,8 @@ class TeamDetector:
             },
         )
 
-    def detect_teams(
-        self,
-        frame_bgr,
-        bbox_xyxy,
-        confidence,
-        yolo_class_labels,
-        field_positions,
-        field_width_m,
-        sideline_band_distance_m,
-        show_plot=False,
-    ):
-        entries, _cluster_events = self._run_detection_pass(
-            frame_bgr=frame_bgr,
-            bbox_xyxy=bbox_xyxy,
-            confidence=confidence,
-            yolo_class_labels=yolo_class_labels,
-            field_positions=field_positions,
-            field_width_m=field_width_m,
-            sideline_band_distance_m=sideline_band_distance_m,
-            show_plot=show_plot,
-        )
-        return [
-            {
-                "class": entry["class_name_td"],
-                "class_name_td": entry["class_name_td"],
-                "team": entry["team"],
-                "shirt_color": entry["shirt_color"],
-                "distances": entry["distances"],
-                "bbox_size": entry["bbox_size"],
-                "referee_reassign_gate": entry["referee_reassign_gate"],
-                "goalkeeper_reassign_gate": entry["goalkeeper_reassign_gate"],
-            }
-            for entry in entries
-        ]
-
     def _run_detection_pass(
         self,
-        *,
         frame_bgr,
         bbox_xyxy,
         confidence,
@@ -198,7 +150,6 @@ class TeamDetector:
 
     def _build_detection_entry(
         self,
-        *,
         det_index,
         class_name,
         bbox_xyxy,

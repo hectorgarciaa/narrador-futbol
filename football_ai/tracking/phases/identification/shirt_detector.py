@@ -7,25 +7,11 @@ from .kmeans_batch_gpu import BatchedKMeansGPU
 class ShirtDetector:
     def __init__(
         self,
-        n_clusters=2,
-        init="k-means++",
-        n_init=1,
         pixels_resize=1536,
-        random_state=0,
-        use_gpu=False,
-        batch_max_iter=12,
-        batch_tol=1e-3,
+        batched_kmeans_gpu_conf= {},
     ):
         self.pixels_resize = max(2, int(pixels_resize))
-        self.kmeans = BatchedKMeansGPU(
-            n_clusters=n_clusters,
-            init=init,
-            n_init=n_init,
-            use_gpu=use_gpu,
-            max_iter=batch_max_iter,
-            tol=batch_tol,
-            random_state=random_state,
-        )
+        self.kmeans = BatchedKMeansGPU(**batched_kmeans_gpu_conf)
 
     def get_color_kmeans_batch(self, images):
         pixels_by_idx = {}

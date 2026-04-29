@@ -13,9 +13,9 @@ class TeamColorModel:
     def __init__(
         self,
         team_colors=None,
-        min_samples=None,
+        min_samples={"player": 60, "referee": 15},
         min_size_cluster=4,
-        min_conf=None,
+        min_conf={"player": 0.8, "referee": 0.7},
         max_samples_per_class=500,
         referee_bootstrap_margin=10,
     ):

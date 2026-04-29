@@ -93,19 +93,11 @@ class BatchedKMeansGPU:
         self.inertia_ = {}
 
         for sample_id, x in samples.items():
-            km = KMeans(
-                n_clusters=self.n_clusters,
-                init=self.init,
-                n_init=self.n_init,
-                random_state=self.random_state,
-                max_iter=self.max_iter,
-                tol=self.tol,
-            )
             points = np.asarray(x, dtype=np.float32)
-            km.fit(points)
-            self.cluster_centers_[sample_id] = np.asarray(km.cluster_centers_, dtype=np.float32)
-            self.labels_[sample_id] = np.asarray(km.labels_, dtype=np.int32)
-            self.inertia_[sample_id] = float(km.inertia_)
+            self._km_cpu.fit(points)
+            self.cluster_centers_[sample_id] = np.asarray(self._km_cpu.cluster_centers_, dtype=np.float32)
+            self.labels_[sample_id] = np.asarray(self._km_cpu.labels_, dtype=np.int32)
+            self.inertia_[sample_id] = float(self._km_cpu.inertia_)
         return self
 
     def _fit_batch_gpu(self, samples):
