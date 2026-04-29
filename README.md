@@ -63,7 +63,8 @@ narrador-futbol/
 │
 ├── football_ai/            # Paquete principal (toda la lógica de negocio)
 │   ├── core/               # Configuración, logging, serialización
-│   ├── actions/            # Adaptadores de tracking a datasets de acciones (PathCRF)
+│   ├── actions/            # Adaptadores offline de tracking a datasets de acciones (PathCRF)
+│   ├── actions_incremental/ # Detector incremental de acciones con estado por slot + runtime PathCRF online
 │   ├── detection/          # Wrapper YOLO + cabeza DetectR8 para balón
 │   ├── positions/          # Lógica de roles posicionales y estabilización online
 │   ├── bytetrack/         # Fase ByteTrack desacoplada (packet IDENTIFICATION -> BYTETRACK)

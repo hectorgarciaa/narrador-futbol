@@ -7,7 +7,8 @@ Paquete Python principal del sistema de narración de fútbol con IA. Contiene t
 ```
 football_ai/
 ├── __init__.py
-├── actions/        # Adaptadores y utilidades para datasets de acciones (PathCRF)
+├── actions/        # Adaptadores y utilidades offline para datasets de acciones (PathCRF)
+├── actions_incremental/ # Detector incremental de acciones con estado por slot y runtime PathCRF
 ├── bytetrack/      # Fase desacoplada de asociacion multi-objeto basada en ByteTrack
 ├── canonicaltrack/ # Fase desacoplada de canonización de IDs y tracks por frame
 ├── core/           # Configuración global, logging centralizado, serialización
@@ -27,7 +28,8 @@ football_ai/
 | Módulo | Responsabilidad principal | Clases clave |
 |---|---|---|
 | [`core`](core/README.md) | Carga de `config.yaml`, logging, conversión a JSON | `Config`, `Logger`, `convert_to_serializable` |
-| [`actions`](actions/README.md) | Adaptación de `tracks.json` a datasets de acciones y puente con PathCRF | `PathCRFTracksAdapter` |
+| [`actions`](actions/README.md) | Adaptación offline de `tracks.json` a datasets de acciones y puente con PathCRF | `PathCRFTracksAdapter` |
+| [`actions_incremental`](actions_incremental/README.md) | Detector incremental de acciones con representación materializada por slot y ejecución online de PathCRF | `ActionsDetector`, `ActionsRuntime`, `ActionsDetectorPhase` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
 | [`positions`](positions/README.md) | Dataset, modelo Set Transformer e inferencia online de roles con doble Húngaro | `PositionInferingPhase`, `OnlineSpecialSeedRoleAssigner` |
 | [`report`](report/README.md) | Informes tecnicos, benchmarkings y decisiones documentadas | Documentacion Markdown |
