@@ -135,6 +135,7 @@ class CanonicalRefereeMixin:
         canonical_state,
         class_name=None,
         field_position=None,
+        team_name=None,
     ):
         reserved_referee_ids = set(self.referee_canonical_ids)
         reserved_goalkeeper_ids = set(self.special_seed_canonical_ids)
@@ -148,6 +149,13 @@ class CanonicalRefereeMixin:
             candidate_range = [required_id]
         elif class_name == "goalkeeper":
             candidate_range = list(self.special_seed_canonical_ids)
+        elif class_name == "player":
+            candidate_range = list(
+                self._player_canonical_ids_for_team(
+                    team_name,
+                    create_mapping=True,
+                )
+            )
         else:
             candidate_range = [
                 canonical_id

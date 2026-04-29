@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 
 
 class CanonicalCommonMixin:
+    @staticmethod
+    def _normalize_team_name(team_name):
+        if team_name is None:
+            return None
+        normalized = str(team_name).strip()
+        return normalized or None
+
     @staticmethod
     def _bbox_to_list(bbox):
         if bbox is None:
@@ -148,6 +156,116 @@ class CanonicalCommonMixin:
         if geometry is not None and np.isfinite(geometry.field_width_m) and geometry.field_width_m > 0.0:
             return float(geometry.field_width_m)
         return float(self.referee_field_width_m)
+
+    def _player_team_slot_index_from_canonical_id(self, canonical_id):
+        canonical_id = int(canonical_id)
+        for slot_index, canonical_ids in enumerate(self.player_team_canonical_id_groups):
+            if canonical_id in canonical_ids:
+                return slot_index
+        return None
+
+    def _preferred_player_team_slot_index_from_name(self, team_name):
+        normalized_team = self._normalize_team_name(team_name)
+        if normalized_team is None:
+            return None
+        match = re.fullmatch(r"(equipo|team)\s*([12])", normalized_team.strip().lower())
+        if match is None:
+            return None
+        return int(match.group(2)) - 1
+
+    def _register_player_team_slot(
+        self,
+        team_name,
+        *,
+        preferred_canonical_id=None,
+        create=False,
+    ):
+        normalized_team = self._normalize_team_name(team_name)
+        if normalized_team is None:
+            return None
+
+        mapping = self.state.player_team_slot_by_name
+        existing_slot_index = mapping.get(normalized_team)
+        if existing_slot_index is not None:
+            return int(existing_slot_index)
+
+        preferred_slot_index = None
+        if preferred_canonical_id is not None:
+            preferred_slot_index = self._player_team_slot_index_from_canonical_id(
+                preferred_canonical_id
+            )
+            if preferred_slot_index is not None:
+                owner_team_name = next(
+                    (
+                        name
+                        for name, slot_index in mapping.items()
+                        if int(slot_index) == int(preferred_slot_index)
+                    ),
+                    None,
+                )
+                if owner_team_name is None:
+                    if create:
+                        mapping[normalized_team] = int(preferred_slot_index)
+                    return int(preferred_slot_index)
+                if owner_team_name == normalized_team:
+                    return int(preferred_slot_index)
+                return None
+
+        if not create:
+            return None
+
+        used_slot_indexes = {int(slot_index) for slot_index in mapping.values()}
+        preferred_label_slot_index = self._preferred_player_team_slot_index_from_name(
+            normalized_team
+        )
+        if (
+            preferred_label_slot_index is not None
+            and preferred_label_slot_index not in used_slot_indexes
+        ):
+            mapping[normalized_team] = int(preferred_label_slot_index)
+            return int(preferred_label_slot_index)
+        for slot_index in range(len(self.player_team_canonical_id_groups)):
+            if slot_index in used_slot_indexes:
+                continue
+            mapping[normalized_team] = int(slot_index)
+            return int(slot_index)
+        return None
+
+    def _player_canonical_ids_for_team(
+        self,
+        team_name,
+        *,
+        preferred_canonical_id=None,
+        create_mapping=False,
+    ):
+        slot_index = self._register_player_team_slot(
+            team_name,
+            preferred_canonical_id=preferred_canonical_id,
+            create=create_mapping,
+        )
+        if slot_index is None:
+            return ()
+        return tuple(self.player_team_canonical_id_groups[int(slot_index)])
+
+    def _is_player_canonical_slot_compatible(
+        self,
+        canonical_id,
+        team_name,
+        *,
+        create_mapping=False,
+    ):
+        slot_index = self._player_team_slot_index_from_canonical_id(canonical_id)
+        if slot_index is None:
+            return False
+        candidate_ids = self._player_canonical_ids_for_team(
+            team_name,
+            preferred_canonical_id=canonical_id,
+            create_mapping=create_mapping,
+        )
+        return int(canonical_id) in candidate_ids
+
+    def _player_team_count_limit(self):
+        return int(self.player_team_capacity)
 
     def _is_compatible_class(self, previous_class, new_class):
         if previous_class is None or new_class is None:

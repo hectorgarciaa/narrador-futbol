@@ -68,13 +68,29 @@ class CanonicalPendingAssignmentMixin:
 
         return assignments
 
-    def _count_ids_for_class(self, canonical_state, class_name, current_frame=None):
+    def _count_ids_for_class(
+        self,
+        canonical_state,
+        class_name,
+        current_frame=None,
+        team_name=None,
+    ):
         max_lost_frames = self._max_lost_frames_for_class(class_name)
+        normalized_team = self._normalize_team_name(team_name)
         return sum(
             1
-            for state in canonical_state.values()
+            for canonical_id, state in canonical_state.items()
             if state.get("class_name") == class_name
             and not state.get("reserved_seed", False)
+            and (
+                class_name != "player"
+                or normalized_team is None
+                or self._is_player_canonical_slot_compatible(
+                    canonical_id,
+                    normalized_team,
+                    create_mapping=True,
+                )
+            )
             and (
                 current_frame is None
                 or (

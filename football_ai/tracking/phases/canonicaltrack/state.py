@@ -9,6 +9,7 @@ class CanonicalTrackState:
     canonical_to_raw_id: dict[int, int] = field(default_factory=dict)
     canonical_state: dict[int, dict] = field(default_factory=dict)
     forced_absorption_state: dict[int, dict] = field(default_factory=dict)
+    player_team_slot_by_name: dict[str, int] = field(default_factory=dict)
     ball_state: dict | None = None
     tracks_history: dict[str, list[dict]] = field(
         default_factory=lambda: {

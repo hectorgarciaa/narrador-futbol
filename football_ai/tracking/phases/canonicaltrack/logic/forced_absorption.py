@@ -99,6 +99,12 @@ class CanonicalForcedAbsorptionMixin:
                 continue
             if state.get("team") != team_name:
                 continue
+            if not self._is_player_canonical_slot_compatible(
+                canonical_id,
+                team_name,
+                create_mapping=True,
+            ):
+                continue
             if state.get("reserved_seed", False):
                 continue
             if state.get("special_penalty_seed", False):

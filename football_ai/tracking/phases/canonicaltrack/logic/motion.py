@@ -247,6 +247,18 @@ class CanonicalMotionMixin:
                 candidate_class,
             ):
                 return None
+            if candidate_class == "player":
+                resolved_team = self._normalize_team_name(
+                    detection_team if detection_team is not None else candidate_state.get("team")
+                )
+                if resolved_team is None:
+                    return None
+                if not self._is_player_canonical_slot_compatible(
+                    candidate_canonical_id,
+                    resolved_team,
+                    create_mapping=True,
+                ):
+                    return None
             if not self._is_motion_compatible(
                 candidate_state,
                 detection_bbox,
@@ -310,6 +322,18 @@ class CanonicalMotionMixin:
             candidate_class,
         ):
             return None, "team_incompatible"
+        if candidate_class == "player":
+            resolved_team = self._normalize_team_name(
+                detection_team if detection_team is not None else candidate_state.get("team")
+            )
+            if resolved_team is None:
+                return None, "player_team_unknown"
+            if not self._is_player_canonical_slot_compatible(
+                candidate_canonical_id,
+                resolved_team,
+                create_mapping=True,
+            ):
+                return None, "player_team_slot_incompatible"
         if not self._is_motion_compatible(
             candidate_state,
             detection_bbox,

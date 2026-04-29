@@ -292,25 +292,51 @@ class CanonicalAssignmentProcessMixin:
                         )
                     continue
                 output_class_name = pending["preferred_class_name"]
-                class_limit = self.max_tracks_per_class.get(output_class_name)
-                if class_limit is not None:
-                    class_count = self._count_ids_for_class(
-                        canonical_state,
-                        output_class_name,
-                        current_frame=n_frame,
-                    )
-                    if class_count >= int(class_limit):
+                if output_class_name == "player":
+                    pending_team = self._normalize_team_name(pending.get("detected_team"))
+                    if pending_team is None:
                         if collect_visual_debug and pending.get("raw_detection_idx") is not None:
                             entry = bytetrack_discard_reason_by_raw_idx.setdefault(
                                 int(pending["raw_detection_idx"]),
                                 {},
                             )
-                            entry["reason_post"] = "canonical_class_limit_reached"
+                            entry["reason_post"] = "canonical_player_team_unknown"
                         continue
+                    class_count = self._count_ids_for_class(
+                        canonical_state,
+                        output_class_name,
+                        current_frame=n_frame,
+                        team_name=pending_team,
+                    )
+                    if class_count >= self._player_team_count_limit():
+                        if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                            entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                                int(pending["raw_detection_idx"]),
+                                {},
+                            )
+                            entry["reason_post"] = "canonical_player_team_limit_reached"
+                        continue
+                else:
+                    class_limit = self.max_tracks_per_class.get(output_class_name)
+                    if class_limit is not None:
+                        class_count = self._count_ids_for_class(
+                            canonical_state,
+                            output_class_name,
+                            current_frame=n_frame,
+                        )
+                        if class_count >= int(class_limit):
+                            if collect_visual_debug and pending.get("raw_detection_idx") is not None:
+                                entry = bytetrack_discard_reason_by_raw_idx.setdefault(
+                                    int(pending["raw_detection_idx"]),
+                                    {},
+                                )
+                                entry["reason_post"] = "canonical_class_limit_reached"
+                            continue
                 next_free_id = self._next_free_canonical_id(
                     canonical_state,
                     class_name=output_class_name,
                     field_position=pending.get("field_position"),
+                    team_name=pending.get("detected_team"),
                 )
                 if next_free_id is None:
                     if collect_visual_debug and pending.get("raw_detection_idx") is not None:
@@ -318,7 +344,11 @@ class CanonicalAssignmentProcessMixin:
                             int(pending["raw_detection_idx"]),
                             {},
                         )
-                        entry["reason_post"] = "canonical_no_free_id"
+                        entry["reason_post"] = (
+                            "canonical_player_team_slot_unavailable"
+                            if output_class_name == "player"
+                            else "canonical_no_free_id"
+                        )
                     continue
                 canonical_id = next_free_id
 

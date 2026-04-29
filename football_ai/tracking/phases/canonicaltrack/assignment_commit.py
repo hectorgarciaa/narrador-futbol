@@ -140,6 +140,13 @@ class CanonicalAssignmentCommitMixin:
             if detected_team is not None
             else previous_state.get("team")
         )
+        resolved_team = self._normalize_team_name(resolved_team)
+        if output_class_name == "player" and resolved_team is not None:
+            self._register_player_team_slot(
+                resolved_team,
+                preferred_canonical_id=canonical_id,
+                create=True,
+            )
         if special_penalty_seed:
             resolved_team = None
         resolved_field_position = (

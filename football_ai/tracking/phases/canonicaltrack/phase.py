@@ -46,6 +46,7 @@ class CanonicalTrackPhase(
             for class_name, limit in self.max_tracks_per_class.items()
             if str(class_name) != "ball"
         )
+        self.player_class_limit = int(self.max_tracks_per_class.get("player", 0) or 0)
 
         self.ball_min_conf = ball_conf["ball_min_conf"]
         self.ball_expected_position_gate_px = ball_conf["ball_expected_position_gate_px"]
@@ -105,6 +106,31 @@ class CanonicalTrackPhase(
         )
         if not self.referee_canonical_ids:
             self.referee_canonical_ids = (23, 24, 25)
+
+        reserved_person_ids = set(self.special_seed_canonical_ids) | set(
+            self.referee_canonical_ids
+        )
+        player_canonical_ids = tuple(
+            canonical_id
+            for canonical_id in range(1, self.max_total_tracks + 1)
+            if canonical_id not in reserved_person_ids
+        )
+        if self.player_class_limit and len(player_canonical_ids) != self.player_class_limit:
+            raise ValueError(
+                "CanonicalTrackPhase player canonical range mismatch: "
+                f"expected {self.player_class_limit} ids but found {len(player_canonical_ids)}"
+            )
+        if len(player_canonical_ids) % 2 != 0:
+            raise ValueError(
+                "CanonicalTrackPhase requires an even number of player canonical ids "
+                "to split them across the two teams."
+            )
+        half_player_ids = len(player_canonical_ids) // 2
+        self.player_team_canonical_id_groups = (
+            tuple(player_canonical_ids[:half_player_ids]),
+            tuple(player_canonical_ids[half_player_ids:]),
+        )
+        self.player_team_capacity = half_player_ids
 
         self.referee_sideline_band_distance_m = float(
             tracker_conf.get("referee_sideline_band_distance_m", 3.0)
@@ -504,6 +530,72 @@ class CanonicalTrackPhase(
             "dropped_count": int(dropped_count),
         }
 
+        discarded_yolo_not_tracked = []
+        discarded_bytetrack_not_canonical = []
+        if collect_visual_debug:
+            detection_payload_by_raw_idx = {}
+            for det_index, raw_det_idx in enumerate(clean_in.get("det_id", [])):
+                try:
+                    raw_idx_int = int(raw_det_idx)
+                except (TypeError, ValueError):
+                    continue
+                bbox = clean_in["bbox_xyxy"][det_index] if det_index < len(clean_in["bbox_xyxy"]) else None
+                confidence = clean_in["confidence"][det_index] if det_index < len(clean_in["confidence"]) else None
+                class_yolo = clean_in["class_name"][det_index] if det_index < len(clean_in["class_name"]) else None
+                class_td = clean_in["class_name_td"][det_index] if det_index < len(clean_in["class_name_td"]) else None
+                team = clean_in["team"][det_index] if det_index < len(clean_in["team"]) else None
+                distances = clean_in["distances"][det_index] if det_index < len(clean_in["distances"]) else None
+                detection_payload_by_raw_idx[raw_idx_int] = {
+                    "raw_det_idx": raw_idx_int,
+                    "bbox": self._bbox_to_list(bbox),
+                    "confidence": (float(confidence) if confidence is not None else None),
+                    "class_name": class_yolo,
+                    "class_yolo": class_yolo,
+                    "class_name_td": class_td,
+                    "class_relabel": class_td,
+                    "team": team,
+                    "distances": distances,
+                }
+
+            accepted_set = {int(raw_idx) for raw_idx in accepted_raw_detection_indexes}
+            bytetrack_set = {int(raw_idx) for raw_idx in bytetrack_raw_detection_indexes}
+
+            for raw_idx in sorted(detection_payload_by_raw_idx.keys()):
+                if raw_idx in accepted_set:
+                    continue
+                entry = dict(detection_payload_by_raw_idx[raw_idx])
+                discard_reason = bytetrack_discard_reason_by_raw_idx.get(raw_idx, {})
+                if isinstance(discard_reason, dict):
+                    reason_pre = discard_reason.get("reason_pre")
+                    reason_post = discard_reason.get("reason_post")
+                    combined_reason = "|".join(
+                        str(token)
+                        for token in (reason_pre, reason_post)
+                        if token
+                    )
+                    if combined_reason:
+                        entry["discard_reason"] = combined_reason
+                    class_tracker = discard_reason.get("class_tracker")
+                    if class_tracker:
+                        entry["class_tracker"] = class_tracker
+                if raw_idx in bytetrack_set:
+                    entry["bytetrack_id"] = bytetrack_id_by_raw_idx.get(raw_idx)
+                    discarded_bytetrack_not_canonical.append(entry)
+                else:
+                    not_tracked_reason = bytetrack_not_tracked_reason_by_raw_idx.get(raw_idx, {})
+                    if isinstance(not_tracked_reason, dict):
+                        for extra_key in (
+                            "bytetrack_reason",
+                            "bytetrack_stage",
+                            "reject_code",
+                            "reject_label",
+                            "class_tracker",
+                        ):
+                            extra_value = not_tracked_reason.get(extra_key)
+                            if extra_value is not None:
+                                entry[extra_key] = extra_value
+                    discarded_yolo_not_tracked.append(entry)
+
         clean_out = {
             "tracks_frame": tracks_frame,
             "summary": summary,
@@ -537,6 +629,12 @@ class CanonicalTrackPhase(
             ),
             "unconfirmed_association_debug": serialize_for_trace(
                 bytetrack_packet["trace"].get("unconfirmed_association_debug", [])
+            ),
+            "discarded_yolo_not_tracked": serialize_for_trace(
+                discarded_yolo_not_tracked
+            ),
+            "discarded_bytetrack_not_canonical": serialize_for_trace(
+                discarded_bytetrack_not_canonical
             ),
         }
 
