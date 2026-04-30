@@ -188,6 +188,8 @@ class ActionsDetector:
         self._slot_last_xy: dict[str, tuple[float, float] | None] = {}
         self._slot_last_speed: dict[str, float] = {}
         self._slot_recent_observations: dict[str, deque[tuple[float, float]]] = {}
+        self._slot_has_real_observation: dict[str, bool] = {}
+        self._slot_anchor_just_acquired: set[str] = set()
 
     @staticmethod
     def _clone_frame_map(frame_map: Any) -> dict[str, Any]:
@@ -422,6 +424,7 @@ class ActionsDetector:
         for slot_name in [*person_slots, *referee_slots, "ball"]:
             self._slot_last_xy[slot_name] = None
             self._slot_last_speed[slot_name] = 0.0
+            self._slot_has_real_observation[slot_name] = False
         return MaterializedSlotState(
             frame_count=0,
             person_slot_assignments={},
@@ -439,6 +442,7 @@ class ActionsDetector:
 
     def _append_causal_frame(self, local_frame_id: int) -> None:
         assert self._materialized_state is not None
+        self._slot_anchor_just_acquired = set()
         person_positions = self._resolve_person_slot_positions_for_frame(local_frame_id)
         referee_positions = self._resolve_referee_slot_positions_for_frame(local_frame_id)
         self._append_xy_row_map(self._materialized_state.slot_tracks, person_positions)
@@ -591,13 +595,9 @@ class ActionsDetector:
         person_positions: Mapping[str, tuple[float, float]],
     ) -> tuple[tuple[float, float], str | None, str | None]:
         del local_frame_id, person_positions
-        ball_xy = self._compute_causal_slot_xy(
-            slot_name="ball",
-            observed_xy=None,
-            fallback_xy=(self.config.pitch_length_m / 2.0, self.config.pitch_width_m / 2.0),
-            max_speed_mps=self.config.ball_outlier_speed_mps,
-        )
-        return ball_xy, None, None
+        # El pipeline legacy exporta el balón vacío para no contaminar PathCRF con
+        # una proyección poco fiable. Igualamos esa semántica aquí.
+        return (float("nan"), float("nan")), None, None
 
     def _compute_causal_slot_xy(
         self,
@@ -607,6 +607,7 @@ class ActionsDetector:
         fallback_xy: tuple[float, float],
         max_speed_mps: float,
     ) -> tuple[float, float]:
+        has_real_anchor = bool(self._slot_has_real_observation.get(slot_name, False))
         prev_xy = self._slot_last_xy.get(slot_name)
         history = self._slot_recent_observations.setdefault(
             slot_name,
@@ -614,29 +615,40 @@ class ActionsDetector:
         )
         if observed_xy is not None:
             history.append((float(observed_xy[0]), float(observed_xy[1])))
-        if history:
+        if observed_xy is not None and not has_real_anchor:
+            # La primera detección real debe fijar el slot inmediatamente; si la
+            # mezclamos con la seed/template arrastramos el warmup decenas de frames.
+            self._slot_has_real_observation[slot_name] = True
+            self._slot_anchor_just_acquired.add(slot_name)
+            smoothed_arr = np.asarray(observed_xy, dtype=np.float32)
+        elif history:
             observed_arr = np.asarray(list(history), dtype=np.float32)
             median_xy = np.median(observed_arr, axis=0)
             source_xy = (float(median_xy[0]), float(median_xy[1]))
+            source_arr = np.asarray(source_xy, dtype=np.float32)
+            if prev_xy is None:
+                smoothed_arr = source_arr
+            else:
+                prev_arr = np.asarray(prev_xy, dtype=np.float32)
+                blended = (0.45 * source_arr) + (0.55 * prev_arr)
+                delta = blended - prev_arr
+                dt = 1.0 / float(self.config.fps)
+                max_step = float(max_speed_mps) * dt
+                step = float(np.linalg.norm(delta))
+                if step > max_step > 1e-6:
+                    blended = prev_arr + (delta * (max_step / step))
+                smoothed_arr = blended
+        elif not has_real_anchor:
+            smoothed_arr = np.asarray(fallback_xy, dtype=np.float32)
         else:
             source_xy = observed_xy if observed_xy is not None else (prev_xy if prev_xy is not None else fallback_xy)
-        source_arr = np.asarray(source_xy, dtype=np.float32)
-        if prev_xy is None:
-            smoothed_arr = source_arr
-        else:
-            prev_arr = np.asarray(prev_xy, dtype=np.float32)
-            blended = (0.45 * source_arr) + (0.55 * prev_arr)
-            delta = blended - prev_arr
-            dt = 1.0 / float(self.config.fps)
-            max_step = float(max_speed_mps) * dt
-            step = float(np.linalg.norm(delta))
-            if step > max_step > 1e-6:
-                blended = prev_arr + (delta * (max_step / step))
-            smoothed_arr = blended
+            smoothed_arr = np.asarray(source_xy, dtype=np.float32)
         smoothed_arr[0] = float(np.clip(smoothed_arr[0], 0.0, self.config.pitch_length_m))
         smoothed_arr[1] = float(np.clip(smoothed_arr[1], 0.0, self.config.pitch_width_m))
-        self._slot_last_xy[slot_name] = (float(smoothed_arr[0]), float(smoothed_arr[1]))
-        return self._slot_last_xy[slot_name]
+        if observed_xy is not None or has_real_anchor:
+            self._slot_last_xy[slot_name] = (float(smoothed_arr[0]), float(smoothed_arr[1]))
+            return self._slot_last_xy[slot_name]
+        return float(smoothed_arr[0]), float(smoothed_arr[1])
 
     def _fallback_slot_xy(self, slot_name: str) -> tuple[float, float]:
         if slot_name.startswith("home_"):
@@ -696,6 +708,8 @@ class ActionsDetector:
             prev_y = self._materialized_state.tracking_df.iloc[-1].get(f"{slot_name}_y")
             if pd.notna(prev_x) and pd.notna(prev_y):
                 prev_xy = (float(prev_x), float(prev_y))
+        if slot_name in self._slot_anchor_just_acquired:
+            prev_xy = None
         dt = 1.0 / float(self.config.fps)
         if prev_xy is None:
             vx = 0.0

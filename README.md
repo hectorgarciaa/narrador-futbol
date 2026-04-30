@@ -819,6 +819,26 @@ Notas:
 - `ball_x/ball_y` se deja vacío de forma deliberada para no contaminar PathCRF con una proyección de balón poco fiable.
 - el postproceso semántico actual añade dos capas encima de `detect_events`: reclasificación de inicios de episodio a `corner`, `throw_in` y `goalkick`, y una heurística de `shot` adaptada al flujo local basado en `kick/control/out`.
 
+### Comparar PathCRF legacy vs incremental
+```bash
+python scripts/actions/compare_pathcrf_modes.py output/tracks_json/tracker/partido_corto_tracks.json
+```
+
+Este script está pensado para depurar divergencias entre el adaptador offline histórico (`football_ai.actions`) y el flujo online actual (`football_ai.actions_incremental`).
+En la rama incremental actual, el warmup intenta parecerse más al legacy en dos puntos que sesgaban mucho la comparación: la primera observación real de cada slot se ancla sin arrastrarla con la seed/template y `ball_x/ball_y` vuelve a exportarse vacío para no meter un balón sintético fijo en el centro.
+
+Genera en `output/actions/pathcrf_compare/<video>/`:
+- `offline/`: tracking parquet, edges y eventos semánticos del pipeline legacy;
+- `incremental/`: tracking parquet, edges y eventos semánticos del pipeline incremental actual;
+- `compare/`: diffs por frame/slot (`tracking_diff.parquet`, `edge_diff.parquet`) y error contra observaciones canónicas reales (`observation_error.parquet`, `observation_error_summary.json`);
+- `checkpoints/`: replay de `legacy-on-snapshot` en los frames donde el runtime incremental inferiría, con un `comparison.json` por checkpoint y un resumen global.
+
+Flags útiles:
+- `--max-frames 200` para un smoke test corto;
+- `--checkpoint-limit 5` para no generar demasiados snapshots;
+- `--window-size-frames N` para reproducir una ventana incremental truncada;
+- `--no-crf`, `--decode`, `--trial`, `--sample-freq` y `--window-seconds` para alinear exactamente el experimento con el checkpoint que quieras inspeccionar.
+
 ### Grid search de hiperparámetros del tracker
 ```bash
 python scripts/track_experiments.py
