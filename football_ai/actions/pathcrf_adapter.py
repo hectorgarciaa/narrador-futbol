@@ -13,6 +13,13 @@ import pandas as pd
 from scipy.signal import savgol_filter
 from scipy.optimize import linear_sum_assignment
 
+from football_ai.pathcrf_slot_mapping import (
+    all_person_slots,
+    all_referee_slots,
+    canonical_id_to_person_slot,
+    canonical_id_to_referee_slot,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +213,7 @@ class PathCRFTracksAdapter:
                 if not isinstance(frame_map, Mapping):
                     continue
                 for raw_id, payload in frame_map.items():
-                    if class_name in {"player", "goalkeeper", "referee"} and not self._should_use_payload_for_slot_tracking(payload):
+                    if class_name in {"player", "referee"} and not self._should_use_payload_for_slot_tracking(payload):
                         continue
                     record = records[class_name].setdefault(
                         str(raw_id),
@@ -260,29 +267,49 @@ class PathCRFTracksAdapter:
         self,
         records: dict[str, dict[str, TrackRecord]],
     ) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]]]:
-        person_records = list(records["player"].values()) + list(records["goalkeeper"].values())
-        person_records = [record for record in person_records if record.observations]
-        referee_records = [record for record in records["referee"].values() if record.observations]
+        active_person_ids = sorted(
+            {
+                str(raw_id)
+                for class_name in ("player", "goalkeeper")
+                for raw_id, record in records[class_name].items()
+                if record.observations
+            },
+            key=int,
+        )
+        active_referee_ids = sorted(
+            [str(raw_id) for raw_id, record in records["referee"].items() if record.observations],
+            key=int,
+        )
 
-        team_records, side_by_team = self._group_person_records_by_side(person_records)
-
-        home_records = [record for team, recs in team_records.items() if side_by_team.get(team) == "home" for record in recs]
-        away_records = [record for team, recs in team_records.items() if side_by_team.get(team) == "away" for record in recs]
-
-        person_assignments = {}
-        person_assignments.update(self._assign_team_slots("home", home_records))
-        person_assignments.update(self._assign_team_slots("away", away_records))
-
-        referee_assignments = {}
-        for idx, record in enumerate(sorted(referee_records, key=lambda item: (item.first_frame, int(item.raw_track_id))), start=1):
-            if idx > self.config.expected_referees:
-                break
-            referee_assignments[f"referee_{idx}"] = record.raw_track_id
+        person_assignments = {
+            slot_name: raw_id
+            for raw_id in active_person_ids
+            for slot_name in [canonical_id_to_person_slot(raw_id)]
+            if slot_name is not None
+        }
+        referee_assignments = {
+            slot_name: raw_id
+            for raw_id in active_referee_ids
+            for slot_name in [canonical_id_to_referee_slot(raw_id)]
+            if slot_name is not None
+        }
 
         synthetic_slots = {
-            "home": [f"home_{idx}" for idx in range(1, self.config.expected_players_per_team + 1) if f"home_{idx}" not in person_assignments],
-            "away": [f"away_{idx}" for idx in range(1, self.config.expected_players_per_team + 1) if f"away_{idx}" not in person_assignments],
-            "referee": [f"referee_{idx}" for idx in range(1, self.config.expected_referees + 1) if f"referee_{idx}" not in referee_assignments],
+            "home": [
+                f"home_{idx}"
+                for idx in range(1, self.config.expected_players_per_team + 1)
+                if f"home_{idx}" not in person_assignments
+            ],
+            "away": [
+                f"away_{idx}"
+                for idx in range(1, self.config.expected_players_per_team + 1)
+                if f"away_{idx}" not in person_assignments
+            ],
+            "referee": [
+                f"referee_{idx}"
+                for idx in range(1, self.config.expected_referees + 1)
+                if f"referee_{idx}" not in referee_assignments
+            ],
         }
         return person_assignments, referee_assignments, synthetic_slots
 
@@ -384,26 +411,19 @@ class PathCRFTracksAdapter:
     ) -> pd.DataFrame:
         raw_to_slot = {raw_id: slot for slot, raw_id in person_assignments.items()}
         raw_ref_to_slot = {raw_id: slot for slot, raw_id in referee_assignments.items()}
-        all_person_slots = [f"home_{idx}" for idx in range(1, 12)] + [f"away_{idx}" for idx in range(1, 12)]
-        all_ref_slots = [f"referee_{idx}" for idx in range(1, self.config.expected_referees + 1)]
-        _, side_by_team = self._group_person_records_by_side(
-            [*records["player"].values(), *records["goalkeeper"].values()]
+        ordered_person_slots = all_person_slots(self.config.expected_players_per_team)
+        ordered_ref_slots = all_referee_slots(self.config.expected_referees)
+        slot_tracks = self._build_slot_track_arrays(
+            tracks,
+            frame_count,
+            raw_to_slot,
+            ordered_person_slots,
         )
-
-        if self.config.framewise_person_slot_assignment:
-            slot_tracks = self._build_person_slot_tracks(
-                tracks=tracks,
-                frame_count=frame_count,
-                side_by_team=side_by_team,
-                ordered_slots=all_person_slots,
-            )
-        else:
-            slot_tracks = self._build_slot_track_arrays(tracks, frame_count, raw_to_slot, all_person_slots)
         referee_tracks = self._build_slot_track_arrays(
             tracks,
             frame_count,
             raw_ref_to_slot,
-            all_ref_slots,
+            ordered_ref_slots,
             class_names=("referee",),
             max_speed_mps=self.config.referee_outlier_speed_mps,
         )
@@ -635,7 +655,7 @@ class PathCRFTracksAdapter:
                     slot_name = raw_to_slot.get(str(raw_id))
                     if slot_name is None:
                         continue
-                    if not self._should_use_payload_for_slot_tracking(payload):
+                    if class_name != "goalkeeper" and not self._should_use_payload_for_slot_tracking(payload):
                         continue
                     field_position = self._safe_field_position(payload.get("field_position_m"))
                     if field_position is None:

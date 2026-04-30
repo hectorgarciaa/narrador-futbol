@@ -64,6 +64,7 @@ class ActionsRuntime:
         self._last_raw_edge: dict[str, Any] | None = None
         self._last_confirmed_action: dict[str, Any] | None = None
         self._last_confirmed_frame = -10**9
+        self._last_inference_frame = -10**9
         self._emitted_event_keys: set[tuple[Any, ...]] = set()
 
     def process_frame(self, frame_index: int, clean_packet: Mapping[str, Any]) -> ActionsRuntimeResult:
@@ -73,9 +74,10 @@ class ActionsRuntime:
         snapshot = self.detector.update(int(frame_index), clean_packet)
         timings["state_update_ms"] = (perf_counter() - started) * 1000.0
 
+        cadence_frames = max(int(self.config.cadence_frames), 1)
         should_infer = (
-            snapshot.frame_count >= int(self.config.min_frames_warmup)
-            and ((snapshot.frame_count - int(self.config.min_frames_warmup)) % max(int(self.config.cadence_frames), 1) == 0)
+            (int(frame_index) + 1) >= int(self.config.min_frames_warmup)
+            and (self._last_inference_frame < 0 or (int(frame_index) - int(self._last_inference_frame)) >= cadence_frames)
         )
         if not should_infer:
             metadata = {
@@ -99,6 +101,7 @@ class ActionsRuntime:
         started = perf_counter()
         tracking_df, summary = self.detector.build_tracking_dataframe()
         timings["feature_update_ms"] = (perf_counter() - started) * 1000.0
+        self._last_inference_frame = int(frame_index)
 
         started = perf_counter()
         edge_sequence_df, semantic_events_df = self._run_pathcrf(tracking_df)

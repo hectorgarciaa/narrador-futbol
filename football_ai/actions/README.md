@@ -10,9 +10,9 @@ Convierte un `tracks.json` del tracker actual a un parquet ancho compatible con 
 
 - fusiona `player` y `goalkeeper` en 22 slots fijos (`home_1..11`, `away_1..11`);
 - conserva 3 árbitros en slots `referee_1..3`;
+- reutiliza el reparto fijo de IDs canónicos del tracker para mapear sin heurísticas: `1 -> home_1`, `2 -> away_1`, `3..12 -> home_2..11`, `13..22 -> away_2..11`, `23..25 -> referee_1..3`;
 - genera columnas de estado (`frame_id`, `period_id`, `timestamp`, `phase_id`, `episode_id`, `ball_state`, `ball_owning_team_id`, `player_id`) y deja `ball_x/ball_y` vacío de forma intencionada;
 - interpola huecos internos por coordenadas de campo con interpolación lineal;
-- asigna los slots de jugadores por ajuste espacial a una plantilla base de equipo para mantener una semántica más estable de `home_1..11` y `away_1..11`;
 - suaviza temporalmente las trayectorias exportadas con mediana móvil, Savitzky-Golay y limitación de jitter antes de recalcular velocidades;
 - rellena extremos con arrastre (`ffill/bfill`);
 - si un slot nunca aparece en el clip, sintetiza una trayectoria razonable a partir de una plantilla simple de formación y la desplaza según el centro del equipo visible en ese frame;

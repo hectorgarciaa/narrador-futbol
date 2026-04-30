@@ -101,6 +101,8 @@ class Tracker:
     ):
         trace_detector = detector_packet.get("trace", {})
         raw_detections = trace_detector.get("raw_detections", [])
+        if not isinstance(raw_detections, list):
+            raw_detections = trace_detector.get("detections", [])
         
         trace_bytetrack = bytetrack_packet.get("trace", {})
         bytetrack_unconfirmed_association_debug = trace_bytetrack.get(

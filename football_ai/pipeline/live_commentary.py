@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from collections import deque
 import hashlib
 import json
 import logging
@@ -16,13 +17,7 @@ from typing import Any, Callable
 from urllib import error, request
 
 from football_ai.commentaries.voice import probe_audio_duration_seconds
-from football_ai.actions import (
-    PathCRFInferenceConfig,
-    PathCRFRenderConfig,
-    run_pathcrf_pipeline,
-)
-from football_ai.actions.pathcrf_adapter import PathCRFAdapterConfig
-from football_ai.core import convert_to_serializable
+from football_ai.actions_incremental.pathcrf_semantics import PITCH_LENGTH_M, team_attacks_right, team_id_from_player_id
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +26,21 @@ AUDIO_TIMELINE_EPSILON_S = 0.05
 CONTEXT_COMMENT_PROBABILITY = 0.3
 CONTEXT_COMMENT_COOLDOWN_S = 35.0
 URGENT_COMMENTARY_ACTIONS = {"tiro", "gol"}
+COMMENTARY_ACTION_MAP = {
+    "control": "control",
+    "kick": "pase",
+    "robo": "robo",
+    "shot": "tiro",
+    "corner": "corner",
+    "throw_in": "fuera de banda",
+    "goalkick": "saque de puerta",
+}
+TEAM_IN_FAVOR_ACTIONS = {"corner", "fuera de banda", "saque de puerta"}
+FIELD_ZONE_LABELS = {
+    "iniciacion": "zona de iniciacion",
+    "creacion": "zona de creacion",
+    "finalizacion": "zona de finalizacion",
+}
 
 ENV_ENABLE = "NARRADOR_APP_ENABLE_LIVE_COMMENTARY"
 ENV_SERVICE_URL = "NARRADOR_APP_COMMENTARY_SERVICE_URL"
@@ -39,12 +49,7 @@ ENV_AUDIO_DIR = "NARRADOR_APP_COMMENTARY_AUDIO_DIR"
 ENV_MODE = "NARRADOR_APP_COMMENTARY_MODE"
 ENV_RUN_DIR = "NARRADOR_APP_RUN_DIR"
 ENV_RUN_ID = "NARRADOR_APP_RUN_ID"
-ENV_PATHCRF_REPO_PATH = "NARRADOR_APP_PATHCRF_REPO_PATH"
-ENV_PATHCRF_TRIAL = "NARRADOR_APP_PATHCRF_TRIAL"
-ENV_PATHCRF_DEVICE = "NARRADOR_APP_PATHCRF_DEVICE"
-ENV_PATHCRF_INTERVAL_FRAMES = "NARRADOR_APP_PATHCRF_INTERVAL_FRAMES"
 ENV_PATHCRF_MIN_FRAMES = "NARRADOR_APP_PATHCRF_MIN_FRAMES"
-ENV_PATHCRF_STABILIZATION_LAG_S = "NARRADOR_APP_PATHCRF_STABILIZATION_LAG_S"
 ENV_PATHCRF_FPS = "NARRADOR_APP_PATHCRF_FPS"
 
 
@@ -56,20 +61,14 @@ class LiveCommentaryBridgeConfig:
     run_dir: Path
     run_id: str
     commentary_mode: str = "deferred"
-    repo_path: Path = Path("football_ai/actions/repo/pathcrf")
-    trial: int = 120
-    device: str = "auto"
-    snapshot_interval_frames: int = 75
     min_frames: int = 50
-    stabilization_lag_s: float = 3.0
     fps: float = 25.0
 
 
 @dataclass(slots=True)
-class SnapshotTask:
+class FrameTask:
     frame_id: int
-    observed_seconds: float
-    tracks_snapshot: dict[str, Any]
+    clean_packet: dict[str, Any]
 
 
 class CompositeFrameHook:
@@ -85,9 +84,9 @@ class CompositeFrameHook:
                 return role_session
         return None
 
-    def __call__(self, tracks: dict[str, Any], n_frame: int) -> None:
+    def __call__(self, *args: Any, **kwargs: Any) -> None:
         for hook in self.hooks:
-            hook(tracks, n_frame)
+            hook(*args, **kwargs)
 
 
 class AppLiveCommentaryBridge:
@@ -96,21 +95,17 @@ class AppLiveCommentaryBridge:
         self.audio_dir = config.audio_dir.expanduser().resolve()
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self.run_dir = config.run_dir.expanduser().resolve()
-        self.pathcrf_root = self.run_dir / "pathcrf_live"
-        self.pathcrf_root.mkdir(parents=True, exist_ok=True)
-        self.latest_snapshot_path = self.pathcrf_root / "latest_tracks_snapshot.json"
-        self.latest_output_dir = self.pathcrf_root / "latest"
-        self.final_output_dir = self.pathcrf_root / "final"
         self._condition = threading.Condition()
-        self._pending_task: SnapshotTask | None = None
+        self._pending_tasks: deque[FrameTask] = deque()
         self._stop_requested = False
-        self._last_submitted_frame = -1
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._dispatched_signatures: set[str] = set()
         self._dispatched_semantic_event_times: dict[
             tuple[str, str, str, str],
             list[float],
         ] = {}
+        self._track_identity_by_id: dict[str, dict[str, Any]] = {}
+        self._action_index = 0
         self._intro_audio_duration_seconds = self._initial_intro_audio_duration()
         self._audio_busy_until_wall_time = self._initial_audio_busy_until(
             self._intro_audio_duration_seconds
@@ -137,43 +132,23 @@ class AppLiveCommentaryBridge:
             return 0.0
         return time.perf_counter() + float(intro_duration_seconds)
 
-    def on_frame(self, tracks: dict[str, Any], n_frame: int) -> None:
-        if (n_frame + 1) < int(self.config.min_frames):
+    def on_frame(self, frame_index: int, frame_bgr: Any, final_packet: dict[str, Any]) -> None:
+        del frame_bgr
+        if (int(frame_index) + 1) < int(self.config.min_frames):
             return
-        if self._last_submitted_frame >= 0:
-            delta = int(n_frame) - int(self._last_submitted_frame)
-            if delta < int(self.config.snapshot_interval_frames):
-                return
-
-        snapshot = copy.deepcopy(tracks)
-        task = SnapshotTask(
-            frame_id=int(n_frame),
-            observed_seconds=float(n_frame + 1) / max(float(self.config.fps), 1e-6),
-            tracks_snapshot=snapshot,
-        )
+        clean_packet = copy.deepcopy(dict(final_packet.get("clean") or {}))
+        task = FrameTask(frame_id=int(frame_index), clean_packet=clean_packet)
         with self._condition:
-            self._pending_task = task
-            self._last_submitted_frame = int(n_frame)
+            self._pending_tasks.append(task)
             self._condition.notify_all()
 
     def finalize(self, final_tracks_path: str | Path | None) -> None:
+        del final_tracks_path
         self.close()
-        if final_tracks_path is None:
-            return
-        try:
-            self._process_tracks_file(
-                tracks_path=Path(final_tracks_path).expanduser().resolve(),
-                output_dir=self.final_output_dir,
-                observed_seconds=None,
-                final_pass=True,
-            )
-        except Exception:
-            logger.exception("No se pudo ejecutar el flush final de PathCRF live.")
 
     def close(self) -> None:
         with self._condition:
             self._stop_requested = True
-            self._pending_task = None
             self._condition.notify_all()
         if self._worker.is_alive():
             self._worker.join()
@@ -181,38 +156,18 @@ class AppLiveCommentaryBridge:
     def _worker_loop(self) -> None:
         while True:
             with self._condition:
-                while self._pending_task is None and not self._stop_requested:
+                while not self._pending_tasks and not self._stop_requested:
                     self._condition.wait(timeout=0.5)
-                if self._stop_requested:
+                if self._stop_requested and not self._pending_tasks:
                     return
-                task = self._pending_task
-                self._pending_task = None
-            if task is None:
-                continue
+                task = self._pending_tasks.popleft()
             try:
-                self._write_tracks_snapshot(task.tracks_snapshot, self.latest_snapshot_path)
-                self._process_tracks_file(
-                    tracks_path=self.latest_snapshot_path,
-                    output_dir=self.latest_output_dir,
-                    observed_seconds=float(task.observed_seconds),
-                    final_pass=False,
-                )
+                self._process_frame_task(task)
             except Exception:
                 logger.exception(
-                    "Fallo en la ejecución incremental de PathCRF live para el frame %s.",
+                    "Fallo en la ejecución incremental de comentarios live para el frame %s.",
                     task.frame_id,
                 )
-
-    def _write_tracks_snapshot(self, tracks: dict[str, Any], target_path: Path) -> None:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        with target_path.open("w", encoding="utf-8") as f:
-            json.dump(
-                convert_to_serializable(tracks),
-                f,
-                indent=2,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
 
     @staticmethod
     def _stable_seed(value: str) -> int:
@@ -416,52 +371,38 @@ class AppLiveCommentaryBridge:
             )
         self._current_audio_interruptible = bool(interruptible_audio)
 
-    def _process_tracks_file(
-        self,
-        *,
-        tracks_path: Path,
-        output_dir: Path,
-        observed_seconds: float | None,
-        final_pass: bool,
-    ) -> None:
-        inference_config = PathCRFInferenceConfig(
-            repo_path=self.config.repo_path,
-            trial=int(self.config.trial),
-            device=self.config.device,
-        )
-        render_config = PathCRFRenderConfig(enabled=False)
-        adapter_config = PathCRFAdapterConfig(fps=float(self.config.fps))
-        result = run_pathcrf_pipeline(
-            output_dir=output_dir,
-            tracks_path=tracks_path,
-            adapter_config=adapter_config,
-            inference_config=inference_config,
-            render_config=render_config,
-        )
-        if result.commentary_json_path is None or not result.commentary_json_path.exists():
+    def _process_frame_task(self, task: FrameTask) -> None:
+        self._update_identity_cache(task.clean_packet)
+        actions_payload = dict(task.clean_packet.get("actions_incremental") or {})
+        confirmed_action = actions_payload.get("confirmed_action")
+        if not isinstance(confirmed_action, dict):
             return
-        self._dispatch_new_events(
-            commentary_json_path=result.commentary_json_path,
-            observed_seconds=observed_seconds,
-            final_pass=final_pass,
+        commentary_item = self._build_commentary_item(
+            confirmed_action=confirmed_action,
+            frame_id=int(task.frame_id),
+            clean_packet=task.clean_packet,
+        )
+        if commentary_item is None:
+            return
+        self._dispatch_ready_commentary_events(
+            commentary_events=[commentary_item],
+            observed_seconds=float(task.frame_id + 1) / max(float(self.config.fps), 1e-6),
+            final_pass=False,
         )
 
-    def _dispatch_new_events(
+    def _dispatch_ready_commentary_events(
         self,
         *,
-        commentary_json_path: Path,
+        commentary_events: list[dict[str, Any]],
         observed_seconds: float | None,
         final_pass: bool,
     ) -> None:
-        with commentary_json_path.open("r", encoding="utf-8") as f:
-            payload = json.load(f)
-        commentary_events = list(payload.get("commentary_events") or [])
         if not commentary_events:
             return
 
         stabilization_limit = None
         if not final_pass and observed_seconds is not None:
-            stabilization_limit = max(0.0, float(observed_seconds) - float(self.config.stabilization_lag_s))
+            stabilization_limit = float(observed_seconds)
 
         for item in commentary_events:
             event_payload = dict(item.get("event") or {})
@@ -576,6 +517,179 @@ class AppLiveCommentaryBridge:
                 event_time_s,
                 f" (solo texto: {text_only_reason})" if text_only else "",
             )
+
+    def _update_identity_cache(self, clean_packet: dict[str, Any]) -> None:
+        tracks_frame = dict(clean_packet.get("tracks_frame") or {})
+        for class_name in ("player", "goalkeeper"):
+            for raw_track_id, payload in dict(tracks_frame.get(class_name) or {}).items():
+                if not isinstance(payload, dict):
+                    continue
+                track_id = str(raw_track_id)
+                player_name = str(payload.get("player_name") or "").strip() or None
+                player_position = self._normalize_position(payload)
+                team_name = str(payload.get("team") or "").strip() or None
+                self._track_identity_by_id[track_id] = {
+                    "track_id": track_id,
+                    "team_name": team_name,
+                    "player_name": player_name,
+                    "player_position": player_position,
+                }
+
+    @staticmethod
+    def _normalize_position(payload: dict[str, Any]) -> str | None:
+        for key in ("lineup_slot", "predicted_role", "predicted_role_frame"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                return value
+        return None
+
+    def _build_commentary_item(
+        self,
+        *,
+        confirmed_action: dict[str, Any],
+        frame_id: int,
+        clean_packet: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        semantic_event_type = str(
+            confirmed_action.get("event_type_semantic") or confirmed_action.get("event_type") or ""
+        ).strip()
+        commentary_action = COMMENTARY_ACTION_MAP.get(semantic_event_type)
+        if not commentary_action:
+            return None
+
+        player_slot_id = str(
+            confirmed_action.get("player_slot_id") or confirmed_action.get("player_id") or ""
+        ).strip() or None
+        receiver_slot_id = str(
+            confirmed_action.get("receiver_slot_id") or confirmed_action.get("receiver_id") or ""
+        ).strip() or None
+        track_id = str(confirmed_action.get("player_track_id") or "").strip() or None
+        receiver_track_id = str(confirmed_action.get("receiver_track_id") or "").strip() or None
+
+        identity = self._track_identity_by_id.get(str(track_id)) if track_id is not None else None
+        receiver_identity = self._track_identity_by_id.get(str(receiver_track_id)) if receiver_track_id is not None else None
+        team_name = (identity or {}).get("team_name")
+        receiver_team_name = (receiver_identity or {}).get("team_name")
+        all_team_names = sorted(
+            {
+                str(identity_payload.get("team_name")).strip()
+                for identity_payload in self._track_identity_by_id.values()
+                if str(identity_payload.get("team_name") or "").strip()
+            }
+        )
+        opponent_team_name = None
+        for candidate in all_team_names:
+            if candidate != team_name:
+                opponent_team_name = candidate
+                break
+
+        player_name = (identity or {}).get("player_name") or (f"jugador {track_id}" if track_id else None)
+        receiver_name = (receiver_identity or {}).get("player_name")
+        player_position = (identity or {}).get("player_position") or "JUG"
+        field_position_m = self._field_position_from_action(confirmed_action, clean_packet, track_id)
+        pathcrf_team_id = team_id_from_player_id(player_slot_id)
+        attacks_right = team_attacks_right(confirmed_action.get("period_id"), pathcrf_team_id, None)
+        field_zone_key = self._field_zone_key(field_position_m, attacks_right=attacks_right)
+        field_zone = FIELD_ZONE_LABELS.get(field_zone_key)
+        commentary_priority = self._commentary_priority_for_zone(commentary_action, field_zone_key)
+
+        self._action_index += 1
+        effective_frame_id = int(confirmed_action.get("frame_id", frame_id) or frame_id)
+        event_time_s = float(effective_frame_id) / max(float(self.config.fps), 1e-6)
+        commentary_event = {
+            "action": commentary_action,
+            "event_time_s": event_time_s,
+            "player_name": str(player_name or "jugador"),
+            "player_position": str(player_position),
+            "team_name": team_name,
+            "opponent_team_name": opponent_team_name,
+            "team_in_favor": team_name if commentary_action in TEAM_IN_FAVOR_ACTIONS else None,
+            "field_zone": field_zone,
+            "action_target": receiver_name,
+            "action_index": int(self._action_index),
+        }
+        metadata = {
+            "action_index": int(self._action_index),
+            "frame_id": int(effective_frame_id),
+            "episode_id": confirmed_action.get("episode_id"),
+            "pathcrf_player_id": player_slot_id,
+            "pathcrf_receiver_id": receiver_slot_id,
+            "track_id": int(track_id) if track_id and track_id.isdigit() else track_id,
+            "receiver_track_id": int(receiver_track_id) if receiver_track_id and receiver_track_id.isdigit() else receiver_track_id,
+            "event_type_raw": semantic_event_type,
+            "event_type_semantic": semantic_event_type,
+            "semantic_source": confirmed_action.get("semantic_source", "runtime"),
+            "possession_postprocess": confirmed_action.get("possession_postprocess"),
+            "field_position_m": (
+                [float(field_position_m[0]), float(field_position_m[1])]
+                if field_position_m is not None
+                else None
+            ),
+            "field_zone_key": field_zone_key,
+            "field_zone": field_zone,
+            "attack_direction_right": bool(attacks_right),
+            "pathcrf_team_id": pathcrf_team_id,
+            "commentary_priority": commentary_priority,
+        }
+        return {"event": commentary_event, "metadata": metadata}
+
+    def _field_position_from_action(
+        self,
+        confirmed_action: dict[str, Any],
+        clean_packet: dict[str, Any],
+        track_id: str | None,
+    ) -> tuple[float, float] | None:
+        try:
+            start_x = float(confirmed_action.get("start_x"))
+            start_y = float(confirmed_action.get("start_y"))
+            return (start_x, start_y)
+        except (TypeError, ValueError):
+            pass
+        if track_id is None:
+            return None
+        tracks_frame = dict(clean_packet.get("tracks_frame") or {})
+        for class_name in ("player", "goalkeeper"):
+            payload = dict(tracks_frame.get(class_name) or {}).get(track_id)
+            if not isinstance(payload, dict):
+                continue
+            raw_position = payload.get("field_position_m") or payload.get("field_position")
+            if isinstance(raw_position, (list, tuple)) and len(raw_position) >= 2:
+                try:
+                    return (float(raw_position[0]), float(raw_position[1]))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    @staticmethod
+    def _field_zone_key(
+        field_position_m: tuple[float, float] | None,
+        *,
+        attacks_right: bool,
+    ) -> str | None:
+        if field_position_m is None:
+            return None
+        x_m = max(0.0, min(PITCH_LENGTH_M, float(field_position_m[0])))
+        first_third = PITCH_LENGTH_M / 3.0
+        second_third = (2.0 * PITCH_LENGTH_M) / 3.0
+        if attacks_right:
+            if x_m < first_third:
+                return "iniciacion"
+            if x_m < second_third:
+                return "creacion"
+            return "finalizacion"
+        if x_m < first_third:
+            return "finalizacion"
+        if x_m < second_third:
+            return "creacion"
+        return "iniciacion"
+
+    @staticmethod
+    def _commentary_priority_for_zone(action: str | None, field_zone_key: str | None) -> str:
+        if action in {"tiro", "gol"} or field_zone_key == "finalizacion":
+            return "high"
+        if field_zone_key == "iniciacion":
+            return "low"
+        return "normal"
 
     def _audio_policy_for_event(
         self,
@@ -802,21 +916,13 @@ def create_app_live_commentary_bridge_from_env() -> AppLiveCommentaryBridge | No
             run_dir=Path(run_dir),
             run_id=run_id,
             commentary_mode=str(os.environ.get(ENV_MODE) or "deferred").strip().lower() or "deferred",
-            repo_path=Path(os.environ.get(ENV_PATHCRF_REPO_PATH) or "football_ai/actions/repo/pathcrf"),
-            trial=int(os.environ.get(ENV_PATHCRF_TRIAL) or 120),
-            device=str(os.environ.get(ENV_PATHCRF_DEVICE) or "auto").strip() or "auto",
-            snapshot_interval_frames=max(1, int(os.environ.get(ENV_PATHCRF_INTERVAL_FRAMES) or 75)),
             min_frames=max(1, int(os.environ.get(ENV_PATHCRF_MIN_FRAMES) or 50)),
-            stabilization_lag_s=max(
-                0.0,
-                float(os.environ.get(ENV_PATHCRF_STABILIZATION_LAG_S) or 3.0),
-            ),
             fps=max(1.0, float(os.environ.get(ENV_PATHCRF_FPS) or 25.0)),
         )
     )
 
 
-def compose_frame_hooks(*hooks: Callable[[dict[str, Any], int], None] | None) -> Callable[[dict[str, Any], int], None] | None:
+def compose_frame_hooks(*hooks: Callable[..., None] | None) -> Callable[..., None] | None:
     valid_hooks = [hook for hook in hooks if callable(hook)]
     if not valid_hooks:
         return None

@@ -63,8 +63,8 @@ narrador-futbol/
 │
 ├── football_ai/            # Paquete principal (toda la lógica de negocio)
 │   ├── core/               # Configuración, logging, serialización
-│   ├── actions/            # Adaptadores offline de tracking a datasets de acciones (PathCRF)
-│   ├── actions_incremental/ # Detector incremental de acciones con estado por slot + runtime PathCRF online
+│   ├── actions/            # Utilidades históricas/offline de PathCRF
+│   ├── actions_incremental/ # Flujo activo de acciones online con estado por slot + runtime PathCRF
 │   ├── detection/          # Wrapper YOLO + cabeza DetectR8 para balón
 │   ├── positions/          # Lógica de roles posicionales y estabilización online
 │   ├── bytetrack/         # Fase ByteTrack desacoplada (packet IDENTIFICATION -> BYTETRACK)
@@ -127,6 +127,7 @@ Incluye, por frame:
 - detecciones devueltas por ByteTrack pero descartadas en el mapeo a IDs canónicos (incluye `bt#<id>` y opcionalmente un `discard_reason`).
 
 En la salida 2x2, los paneles compacto/continuidad muestran además `tr:<cls>`, `y:<cls>` y `td:<cls>` para distinguir la clase actual del track, la clase YOLO y la clase relabelada por `TeamDetector`. El panel inferior izquierdo usa ese mismo trío de etiquetas en las detecciones descartadas junto a la confianza; cuando una detección no llegó a salir de ByteTrack, aparece como `tr:-`. Si activas `visualization.discarded_panel_show_reasons`, el vídeo muestra una versión compacta del `discard_reason` para que quepa en overlay, mientras que el JSON `*_debug_frames.json` conserva el motivo completo.
+Además, los paneles superior izquierdo, superior derecho e inferior derecho colorean `player/gk` usando los `team_colors` activos del `TeamDetector` (centros/refs LAB del clustering convertidos a BGR para render). Si un track no tiene equipo resoluble, caen al color por clase.
 Ese JSON también puede incluir `frame_num`, `bytetrack_reason`, `bytetrack_stage` y `bytetrack_unconfirmed_association` para auditar por qué un track tentativo no llegó a confirmarse: mejor candidato, IoU, penalizaciones de clase/tamaño/campo y conflicto de asignación. La información de homografía queda ahora en el packet `REFERENCE_POINTS`: `trace.attempts`, `trace.diagnostics`, `clean.quality_status`, `clean.quality_score` y el desglose de intentos aceptados/rechazados por frame.
 
 Para un resumen offline rápido puedes usar:
@@ -332,7 +333,7 @@ http://127.0.0.1:8767
 
 La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/lineup_spec.json` y llama a `scripts/track.py --lineup-spec ...`. El `<run_id>` ya no es un hash opaco: incluye fecha/hora local, equipos, vídeo y un sufijo corto, por ejemplo `20260413-153012_madrid-vs-barcelona_video-prueba-ajustado_a1b2`.
 También deja el manifiesto de comentarios en `output/interfaz/runs/<run_id>/commentaries/events_manifest.jsonl`; en `live` intenta reproducir el `intro` precalentado nada más guardar y, cuando el tracking termina, ensambla una pista diferida desde ese manifiesto para incrustarla en el MP4 final. Además, cuando la ejecución nace desde la interfaz, el subprocess de tracking activa un bridge incremental `tracking -> PathCRF -> servidor de comentarios` solo para ese run, de modo que los scripts sueltos del repo siguen sin ejecutar PathCRF ni comentar jugadas automáticamente.
-Ese bridge descarta reenvíos casi idénticos de PathCRF, guarda comentarios de texto aunque el audio esté ocupado y solo pide un nuevo WAV si la acción cae fuera de la ventana temporal ocupada por la generación + duración del audio anterior. Los eventos que ocurren mientras suena otro audio no quedan en cola sonora: permanecen en el manifiesto como texto. PathCRF etiqueta además cada acción con zona de campo (`iniciacion`, `creacion`, `finalizacion`) según el tercio del largo y la dirección de ataque del equipo; las acciones en finalización y los tiros tienen prioridad alta, y algunas acciones en iniciación pueden disparar un comentario de contexto generado por el LLM con datos tácticos de la alineación y clasificación simulada. Si ese comentario contextual está sonando y aparece un tiro o gol, el nuevo audio se marca como interrupción y la interfaz corta el comentario anterior. La pista diferida tampoco desplaza WAV antiguos hacia delante; omite los audios que se solaparían y, si un tiro/gol pisa un contexto interruptible, conserva la acción peligrosa y descarta ese contexto de la pista sonora. El servidor de comentarios sigue omitiendo duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo). El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC` y se limita a `1080p`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores mostraban en negro los exports demasiado grandes.
+Ese bridge descarta reenvíos casi idénticos de PathCRF, guarda comentarios de texto aunque el audio esté ocupado y solo pide un nuevo WAV si la acción cae fuera de la ventana temporal ocupada por la generación + duración del audio anterior. Los eventos que ocurren mientras suena otro audio no quedan en cola sonora: permanecen en el manifiesto como texto. El flujo activo de acciones usa `football_ai/actions_incremental`: mantiene estado causal por slot (`n-1` congelados, actualización solo del frame `n`) y ejecuta PathCRF online sin reconstruir ventanas completas. Las acciones se etiquetan además con zona de campo (`iniciacion`, `creacion`, `finalizacion`) según el tercio del largo y la dirección de ataque del equipo; las acciones en finalización y los tiros tienen prioridad alta, y algunas acciones en iniciación pueden disparar un comentario de contexto generado por el LLM con datos tácticos de la alineación y clasificación simulada. Si ese comentario contextual está sonando y aparece un tiro o gol, el nuevo audio se marca como interrupción y la interfaz corta el comentario anterior. La pista diferida tampoco desplaza WAV antiguos hacia delante; omite los audios que se solaparían y, si un tiro/gol pisa un contexto interruptible, conserva la acción peligrosa y descarta ese contexto de la pista sonora. El servidor de comentarios sigue omitiendo duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo). El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC` y se limita a `1080p`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores mostraban en negro los exports demasiado grandes.
 La interfaz intenta usar dos comentaristas cuando existen referencias de Qwen VoiceDesign cacheadas: mantiene XTTS como backend estable y elige entre la voz masculina y la femenina con aleatoriedad controlada, sin permitir mas de tres comentarios seguidos de la misma voz.
 Si `--commentary-backend auto` no se toca, la interfaz intenta usar `llama.cpp` cuando existe `llama.cpp/config.yaml`; si no, cae a `ollama`. Si `--commentary-base-url` apunta a una URL local, la interfaz intenta arrancar ese backend localmente; si apuntas a un backend remoto, ese autoarranque no se intenta.
 El fichero `llama.cpp/config.yaml` fija el binario `llama-server`, el alias expuesto por la API y el GGUF que se cargará al abrir la interfaz.
@@ -786,7 +787,7 @@ python scripts/train/finetune_player.py
 python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/partido_corto_tracks.json
 ```
 Este paso genera un parquet ancho en `football_ai/actions/pathcrf/data/narrador/tracking_processed/` con 22 slots fijos de jugadores, 3 árbitros y variables de estado por frame. Si faltan tracks en algún frame, el adaptador interpola huecos internos y rellena ausencias persistentes con una plantilla simple de formación alineada al equipo visible.
-En la versión actual del adaptador, las trayectorias exportadas se suavizan de forma más agresiva con mediana móvil, Savitzky-Golay y limitación de jitter por frame. Además, los slots de cada equipo se asignan por ajuste espacial a una plantilla táctica base en vez de por orden de aparición, se filtran seeds/observaciones sintéticas antes de recalcular velocidades y `player_id`/`ball_owning_team_id` se dejan vacíos por defecto en el parquet final para no contaminar PathCRF con una posesión heurística poco fiable.
+En la versión actual del adaptador, las trayectorias exportadas se suavizan de forma más agresiva con mediana móvil, Savitzky-Golay y limitación de jitter por frame. Además, los slots PathCRF ya no se infieren por heurística espacial: salen directamente del reparto fijo de IDs canónicos (`1 -> home_1`, `2 -> away_1`, `3-12 -> home_2..11`, `13-22 -> away_2..11`, `23-25 -> referee_1..3`), se filtran seeds/observaciones sintéticas antes de recalcular velocidades y `player_id`/`ball_owning_team_id` se dejan vacíos por defecto en el parquet final para no contaminar PathCRF con una posesión heurística poco fiable.
 
 ### Ejecutar inferencia PathCRF sobre la salida del tracker
 ```bash
@@ -940,7 +941,8 @@ teams:
 
 Para reducir creación de IDs nuevos y mantener estabilidad en el tracking, el sistema usa límites por clase sobre la salida final `tracks`:
 
-- `player`: 22
+- `goalkeeper`: 2
+- `player`: 20
 - `ball`: 1
 - `referee`: 3
 
@@ -949,6 +951,7 @@ Puntos importantes:
 - La validación de límites se hace sobre `Tracker.get_tracks(...)`, no sobre el conteo crudo de detecciones YOLO por frame.
 - Cuando se alcanza el máximo global de IDs visibles (`max_total_tracks`), se prioriza reasignar IDs previos compatibles antes de crear IDs nuevos.
 - La reasignación mantiene coherencia por clase/equipo y aplica filtros de movimiento/cercanía para evitar saltos de identidad.
+- En la capa canónica actual, los `goalkeeper` usan siempre los IDs `1-2` y los `player` se reparten en dos bloques fijos por equipo: `3-12` para un equipo y `13-22` para el otro, con máximo de 10 jugadores por bloque.
 
 Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/bytetrack/byte_tracker.py`):
 

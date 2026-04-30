@@ -218,6 +218,15 @@ tracking:
   possession:
     enabled: true
     strict_control_distance_px: 60.0
+  actions:
+    enabled: true
+    fps: 25.0
+    cadence_frames: 10
+    min_frames_warmup: 50
+    min_event_duration: 10
+    window_size_frames: 120
+    sample_freq: 5
+    window_seconds: 10.0
     strict_control_distance_ratio_to_height: 0.65
     loose_control_distance_px: 95.0
     loose_control_distance_ratio_to_height: 1.0

@@ -13,6 +13,8 @@ Módulo alternativo en paralelo a `football_ai.actions` para reconstruir el fluj
 ## Componentes
 
 - `detector.py`: clase `ActionsDetector`, stateful, incremental y autosuficiente, con la lógica de adaptación integrada y caché materializada por slot.
+- El detector usa un flujo online único (sin rutas offline): mapeo determinista `canonical_id -> slot` y actualización causal frame a frame.
+- El mapeo actual es fijo: `1 -> home_1`, `2 -> away_1`, `3..12 -> home_2..11`, `13..22 -> away_2..11`, `23..25 -> referee_1..3`.
 - `runtime.py`: clase `ActionsRuntime`, ejecuta PathCRF y aplica el postprocesado causal sobre la ventana actual.
 - `pathcrf_semantics.py`, `pathcrf_setpieces.py`, `pathcrf_shot.py`: reglas semánticas y heurísticas locales, sin depender de `football_ai.actions`.
 - `phase.py`: clase `ActionsDetectorPhase`, wrapper `Phase` no intrusivo para el pipeline.
@@ -24,4 +26,4 @@ Módulo alternativo en paralelo a `football_ai.actions` para reconstruir el fluj
 - El runtime mantiene una vista materializada por slot y reutiliza esa estructura entre frames.
 - La actualización es causal: `0..n-1` quedan fijados y cada `update(frame_n)` solo añade la fila nueva y expulsa la más antigua si la ventana está llena.
 - La salida del phase se publica en `clean.actions_incremental` y `trace.actions_incremental`.
-- Las asignaciones `track_id -> slot` son persistentes dentro de la ventana y solo se liberan cuando el track desaparece del estado activo.
+- Las asignaciones `track_id -> slot` ya no dependen de heurísticas espaciales ni de inferencia de lado: salen directamente del ID canónico activo dentro de la ventana.

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pandas as pd
 
 from football_ai.core import Logger, get_config, get_logger
 from football_ai.evaluation import Evaluator
@@ -20,6 +21,8 @@ from football_ai.positions import (
 )
 from football_ai.tracking import Tracker
 from football_ai.visualization import Drawer
+from football_ai.visualization.pathcrf_drawer import PathCRFDrawer
+from football_ai.actions_incremental import ActionsDetector, ActionsDetectorConfig
 
 from .paths import (
     build_output_video_path,
@@ -274,7 +277,7 @@ def run_tracking_pipeline(args):
         role_frame_csv_path_legacy, role_player_csv_path_legacy, role_greedy_csv_path_legacy = build_role_predictions_output_paths(config, video_path, use_artifacts_dir=False)
 
         # Configuration parameters
-        visualization_conf = config.visualization
+        visualization_conf = dict(config.visualization or {})
         show_kmeans = config.get("visualization", "show_kmeans")
         show_output = config.get("visualization", "show_output")
         four_panel_enabled = bool(visualization_conf.get("four_panel_enabled", False))
@@ -292,7 +295,8 @@ def run_tracking_pipeline(args):
 
         if lineup_spec is not None:
             lineup_colors = _build_team_colors_from_raw_mapping(lineup_team_colors_raw)
-            team_detector_conf["team_colors"] = {
+            team_detector_conf.setdefault("team_color_model_conf", {})
+            team_detector_conf["team_color_model_conf"]["team_colors"] = {
                 team: [float(channel) for channel in color]
                 for team, color in lineup_colors.items()
             }
@@ -300,10 +304,13 @@ def run_tracking_pipeline(args):
         if getattr(args, "team_colors", None):
             base_colors = {
                 team_name: np.asarray(color, dtype=np.float32)
-                for team_name, color in dict(team_detector_conf.get("team_colors", {})).items()
+                for team_name, color in dict(
+                    team_detector_conf.get("team_color_model_conf", {}).get("team_colors", {})
+                ).items()
             }
             override_colors = _apply_team_color_overrides(base_colors, args.team_colors, logger)
-            team_detector_conf["team_colors"] = {
+            team_detector_conf.setdefault("team_color_model_conf", {})
+            team_detector_conf["team_color_model_conf"]["team_colors"] = {
                 team_name: [float(channel) for channel in color]
                 for team_name, color in override_colors.items()
             }
@@ -343,6 +350,7 @@ def run_tracking_pipeline(args):
         from football_ai.tracking import TrackingPhase
         from football_ai.posession.phase import PosessionPhase
         from football_ai.positions import PositionInferingPhase
+        from football_ai.actions_incremental import ActionsDetectorConfig, ActionsDetectorPhase, ActionsRuntimeConfig
         from scripts.utils import iter_video_frames
 
         tracking_phase = TrackingPhase(
@@ -358,6 +366,7 @@ def run_tracking_pipeline(args):
         posession_phase = PosessionPhase(tracker_conf.get("possession"))
         
         position_phase = None
+        actions_phase = None
         if config is not None and video_path is not None and logger is not None:
             position_phase = PositionInferingPhase(
                 config,
@@ -366,10 +375,29 @@ def run_tracking_pipeline(args):
                 expected_roles_by_team_override=lineup_expected_roles_by_team,
                 lineup_matcher=lineup_matcher,
             )
+        actions_conf = dict(tracker_conf.get("actions") or {})
+        if bool(actions_conf.get("enabled", True)):
+            actions_phase = ActionsDetectorPhase(
+                ActionsRuntimeConfig(
+                    detector=ActionsDetectorConfig(
+                        fps=float(actions_conf.get("fps", 25.0)),
+                        window_size_frames=(
+                            int(actions_conf["window_size_frames"])
+                            if actions_conf.get("window_size_frames") is not None
+                            else None
+                        ),
+                    ),
+                    cadence_frames=max(1, int(actions_conf.get("cadence_frames", 10))),
+                    min_frames_warmup=max(1, int(actions_conf.get("min_frames_warmup", 50))),
+                    min_event_duration=max(1, int(actions_conf.get("min_event_duration", 10))),
+                    window_seconds=actions_conf.get("window_seconds"),
+                    sample_freq=actions_conf.get("sample_freq"),
+                )
+            )
 
         online_commentary_bridge = create_app_live_commentary_bridge_from_env()
         if online_commentary_bridge is not None:
-            logger.info("PathCRF live commentary bridge activado para esta ejecución.")
+            logger.info("Actions live commentary bridge activado para esta ejecución.")
         frame_hook = compose_frame_hooks(
             (online_commentary_bridge.on_frame if online_commentary_bridge is not None else None),
         )
@@ -395,13 +423,22 @@ def run_tracking_pipeline(args):
 
         logger.info("Extracting tracks from video...")
         
-        tracks = {"player": [], "goalkeeper": [], "referee": [], "ball": [], "possession": []}
+        tracks = {
+            "player": [],
+            "goalkeeper": [],
+            "referee": [],
+            "ball": [],
+            "possession": [],
+            "actions_incremental": [],
+        }
         visual_debug_frames = []
 
         tracking_phase.reset()
         posession_phase.reset()
         if position_phase:
             position_phase.reset()
+        if actions_phase:
+            actions_phase.reset()
 
         for frame_index, frame_time_ms, frame_bgr in iter_video_frames(video_path, getattr(args, "max_frames", None)):
             tracking_packet, tracking_ms = tracking_phase.process(
@@ -416,9 +453,13 @@ def run_tracking_pipeline(args):
             
             final_packet = posession_packet
             position_ms = 0.0
+            actions_ms = 0.0
             if position_phase:
                 position_packet, position_ms = position_phase.process(posession_packet)
                 final_packet = position_packet
+            if actions_phase:
+                actions_packet, actions_ms = actions_phase.process(final_packet)
+                final_packet = actions_packet
             
             tracks_frame = final_packet["clean"]["tracks_frame"]
             for cls in ["player", "goalkeeper", "referee", "ball"]:
@@ -426,6 +467,17 @@ def run_tracking_pipeline(args):
             
             possession_info = final_packet["clean"].get("possession", {})
             tracks["possession"].append(dict(possession_info))
+            actions_info = final_packet["clean"].get("actions_incremental", {})
+            actions_trace = final_packet["trace"].get("actions_incremental", {})
+            tracks["actions_incremental"].append(
+                {
+                    "raw_edge": dict(actions_info.get("raw_edge") or {}) if isinstance(actions_info, dict) else {},
+                    "confirmed_action": dict(actions_info.get("confirmed_action") or {}) if isinstance(actions_info, dict) else {},
+                    "action_metadata": dict(actions_info.get("action_metadata") or {}) if isinstance(actions_info, dict) else {},
+                    "person_slot_assignments": dict(actions_trace.get("person_slot_assignments") or {}) if isinstance(actions_trace, dict) else {},
+                    "referee_slot_assignments": dict(actions_trace.get("referee_slot_assignments") or {}) if isinstance(actions_trace, dict) else {},
+                }
+            )
 
             if four_panel_enabled:
                 trace_debug = final_packet["trace"].get("visual_debug")
@@ -442,13 +494,15 @@ def run_tracking_pipeline(args):
                 c_ms = prof.get("canon_ms", 0.0)
                 
                 total_ms = tracking_ms + posession_ms + position_ms
+                total_ms += actions_ms
                 pos_inf = f" | PosInf: {position_ms:.1f}ms" if position_phase else ""
+                act_inf = f" | Actions: {actions_ms:.1f}ms" if actions_phase else ""
                 
                 print(
                     f"[frame {frame_index:04d}] "
                     f"Detect: {d_ms:.1f}ms | Proj: {p_ms:.1f}ms | Filter: {f_ms:.1f}ms | "
                     f"Id: {i_ms:.1f}ms | Byte: {b_ms:.1f}ms | Canon: {c_ms:.1f}ms | "
-                    f"Poss: {posession_ms:.1f}ms{pos_inf} || Total AI: {total_ms:.1f}ms",
+                    f"Poss: {posession_ms:.1f}ms{pos_inf}{act_inf} || Total AI: {total_ms:.1f}ms",
                     flush=True
                 )
 
@@ -480,8 +534,29 @@ def run_tracking_pipeline(args):
             )
 
         # Draw tracks
+        drawer_visualization_conf = dict(visualization_conf or {})
+        runtime_team_colors = None
+        try:
+            runtime_team_colors = (
+                tracking_phase.tracker
+                .identification_phase
+                .team_detector
+                .color_model
+                .team_colors
+            )
+        except Exception:
+            runtime_team_colors = (
+                team_detector_conf.get("team_color_model_conf", {}).get("team_colors")
+            )
+        if isinstance(runtime_team_colors, dict) and runtime_team_colors:
+            drawer_visualization_conf["team_colors"] = {
+                str(team_name): [float(channel) for channel in color]
+                for team_name, color in runtime_team_colors.items()
+                if color is not None
+            }
+            drawer_visualization_conf["team_colors_space"] = "lab_opencv"
         colors = config.get_visualization_colors()
-        drawer = Drawer(colors=colors, visualization_conf=visualization_conf)
+        drawer = Drawer(colors=colors, visualization_conf=drawer_visualization_conf)
         logger.info("Drawing tracks on video...")
         if not bool(getattr(args, "skip_render_video", False)):
             drawer.draw_tracks(
@@ -496,6 +571,74 @@ def run_tracking_pipeline(args):
             logger.info(f"Video with tracks saved to: {output}")
         else:
             logger.info("Skipping annotated video rendering for this execution.")
+
+        # Render dedicado PathCRF (single panel) con slots, raw edge y acción postprocesada.
+        try:
+            actions_conf = tracker_conf.get("actions", {}) if isinstance(tracker_conf, dict) else {}
+            fps_for_actions = float(actions_conf.get("fps", 25.0))
+            detector_for_render = ActionsDetector(ActionsDetectorConfig(fps=fps_for_actions))
+            frame_count = len(tracks.get("player", []))
+            for fi in range(frame_count):
+                detector_for_render.update(
+                    fi,
+                    {
+                        "tracks_frame": {
+                            "player": tracks.get("player", [])[fi],
+                            "goalkeeper": tracks.get("goalkeeper", [])[fi],
+                            "referee": tracks.get("referee", [])[fi],
+                            "ball": tracks.get("ball", [])[fi],
+                        },
+                        "possession": tracks.get("possession", [])[fi] if fi < len(tracks.get("possession", [])) else {},
+                    },
+                )
+            tracking_df, conversion_summary = detector_for_render.build_tracking_dataframe()
+
+            edge_rows = []
+            event_rows = []
+            for fi, payload in enumerate(tracks.get("actions_incremental", [])):
+                if not isinstance(payload, dict):
+                    continue
+                raw = payload.get("raw_edge")
+                if isinstance(raw, dict) and raw.get("edge_src") is not None and raw.get("edge_dst") is not None:
+                    edge_rows.append(
+                        {
+                            "frame_id": int(fi),
+                            "edge_src": raw.get("edge_src"),
+                            "edge_dst": raw.get("edge_dst"),
+                            "edge_team": raw.get("edge_team"),
+                        }
+                    )
+                post = payload.get("confirmed_action")
+                if isinstance(post, dict) and post:
+                    event_rows.append(
+                        {
+                            "frame_id": int(fi),
+                            "event_type": post.get("event_type"),
+                            "player_id": post.get("player_slot_id") or post.get("player_id"),
+                            "receiver_id": post.get("receiver_slot_id") or post.get("receiver_id"),
+                        }
+                    )
+            edge_df = pd.DataFrame(edge_rows) if edge_rows else pd.DataFrame(columns=["frame_id", "edge_src", "edge_dst", "edge_team"])
+            events_df = pd.DataFrame(event_rows) if event_rows else pd.DataFrame(columns=["frame_id", "event_type", "player_id", "receiver_id"])
+            output_path_obj = Path(output)
+            pathcrf_video_output = output_path_obj.with_name(f"{output_path_obj.stem}_pathcrf.mp4")
+            PathCRFDrawer().render_tracking_and_edges(
+                tracking=tracking_df,
+                edge_sequence=edge_df,
+                events=events_df,
+                output_path=pathcrf_video_output,
+                fps=fps_for_actions,
+                video_path=video_path,
+                tracks_path=output_path_named,
+                conversion_summary={
+                    "person_slot_assignments": dict(conversion_summary.person_slot_assignments),
+                    "referee_slot_assignments": dict(conversion_summary.referee_slot_assignments),
+                },
+                show=False,
+            )
+            logger.info(f"PathCRF dedicated video saved to: {pathcrf_video_output}")
+        except Exception:
+            logger.exception("No se pudo generar el video dedicado de PathCRF.")
 
         # Evaluation
         logger.info("Evaluating tracks...")

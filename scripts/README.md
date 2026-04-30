@@ -147,6 +147,7 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto el mismo comportamiento que
      - `output/tracks_json/tracker/<video_sanitizado>_debug_frames.json` (metadatos por frame para depuración)
 4. Genera el video anotado con `Drawer.draw_tracks()` e incluye `field_position_m` bajo los `player` cuando está disponible.
    - Si `visualization.four_panel_enabled=true`, la salida pasa a mosaico 2x2 (tracking compacto, mapa de campo, detecciones YOLO descartadas y vista con continuidad).
+   - En ese mosaico, los paneles de tracking/campo/continuidad colorean `player/gk` por cluster de equipo, y el panel de descartes separa YOLO no trackeadas por ByteTrack de detecciones sí trackeadas pero descartadas al entrar en la capa canónica.
    - Si `tracking.possession.enabled=true`, resalta al poseedor con un segundo recuadro amarillo y muestra `POS: <equipo>` en overlays (modo 1 panel y 4 paneles).
 5. El nombre del MP4 de salida se construye con el nombre del vídeo de entrada + `_tracking.mp4`.
 6. Llama a `Evaluator` para imprimir métricas en consola.
@@ -218,8 +219,8 @@ python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/p
 **Flujo:**
 1. Lee el `tracks.json` generado por `scripts/track.py`.
 2. Fusiona `player` y `goalkeeper` en 22 slots fijos (`home_1..11`, `away_1..11`) y conserva 3 árbitros (`referee_1..3`).
-3. Interpola huecos internos con coordenadas de campo (`field_position_m`) y rellena los slots que nunca aparecen con una plantilla simple de formación alineada al equipo visible.
-4. Asigna los slots por cercanía a una plantilla espacial base de equipo, suaviza las trayectorias con mediana móvil, Savitzky-Golay y limitación de jitter, corrige picos aislados imposibles y filtra seeds/observaciones sintéticas antes de recalcular movimiento.
+3. Mapea los slots directamente desde los IDs canónicos reservados: `1 -> home_1`, `2 -> away_1`, `3..12 -> home_2..11`, `13..22 -> away_2..11`, `23..25 -> referee_1..3`.
+4. Interpola huecos internos con coordenadas de campo (`field_position_m`), rellena los slots que nunca aparecen con una plantilla simple de formación y suaviza las trayectorias con mediana móvil, Savitzky-Golay y limitación de jitter antes de recalcular movimiento.
 5. Deja `ball_x/ball_y` vacío de forma deliberada para no introducir una señal de balón poco fiable en el parquet de PathCRF.
 6. Por defecto deja `player_id` y `ball_owning_team_id` vacíos en el parquet final para no inyectar una señal de posesión heurística y ruidosa en PathCRF.
 7. Exporta:
