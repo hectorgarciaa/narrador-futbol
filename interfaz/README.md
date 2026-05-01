@@ -10,13 +10,13 @@ Interfaz web ligera para preparar alineaciones y lanzar el tracking del partido.
 - renderiza un campo más detallado con marcas reglamentarias y slots clicables
 - guarda un `lineup_spec.json` por ejecución
 - lanza `scripts/track.py --lineup-spec ...`
-- arranca automáticamente el servidor de comentarios al abrir la interfaz
-- por defecto intenta usar `llama.cpp` leyendo `llama.cpp/config.yaml` y lanza `llama-server` automáticamente antes de precalentar el `intro`
-- el precalentado del `intro` y del servidor de comentarios corre en segundo plano, así que la interfaz HTTP queda disponible sin esperar a XTTS ni al primer warmup de Gemma
+- prepara automáticamente el servidor de comentarios al abrir la interfaz
+- por defecto intenta usar `llama.cpp` leyendo `llama.cpp/config.yaml` y lanza `llama-server` automáticamente para dejar listo el backend de comentarios
+- el arranque del servidor de comentarios corre en segundo plano, así que la interfaz HTTP queda disponible sin esperar a XTTS ni al primer warmup del LLM
 - permite elegir modo de comentarios `live` o `deferred` (por defecto `live`)
-- precalienta un comentario de `intro` al arrancar la interfaz para que ya esté listo al guardar la alineación
+- genera el comentario de `intro` al lanzar un run, usando los dos nombres de equipo ya introducidos
 - si el `intro` sale con una plantilla absurda o el servidor reutilizado es antiguo, la interfaz lo regenera localmente antes de guardarlo
-- obliga a completar primero los dos nombres de equipo antes de desbloquear vídeo, modo de comentarios, colores, formación y jugadores
+- obliga a completar primero los dos nombres de equipo antes de desbloquear vídeo, modo de comentarios, colores, formación y jugadores; esos nombres se pasan al modelo de generación del `intro`
 - no recrea las tarjetas mientras escribes el segundo nombre, para que el formulario no se desbloquee ni te robe el foco a mitad de la edición
 - muestra el vídeo final dentro de la propia interfaz cuando el MP4 ya está listo
 - si la ejecución nace desde la interfaz, activa un bridge incremental `tracking -> PathCRF -> servidor de comentarios` en segundo plano, sin afectar a `scripts/track.py` cuando se ejecuta suelto
@@ -67,7 +67,7 @@ El propio `track.py` copia además el spec dentro del directorio de artefactos d
 
 ## Modo comentarios
 
-- `live`: la interfaz intenta reproducir el `intro` ya precalentado nada más guardar y luego hace polling del manifiesto para sonar el audio más reciente disponible cuando el canal esté libre, sin cola FIFO de audios antiguos.
+- `live`: la interfaz intenta reproducir el `intro` específico del partido nada más guardar y luego hace polling del manifiesto para sonar el audio más reciente disponible cuando el canal esté libre, sin cola FIFO de audios antiguos.
 - `deferred`: se siguen generando y guardando comentarios/audio, pero la interfaz no los reproduce al vuelo. Al terminar el tracking, la interfaz construye una pista continua desde el manifiesto y la incrusta en el MP4 final del tracking.
 - si existen referencias masculina y femenina de Qwen VoiceDesign en cache, la interfaz usa XTTS en modo dos comentaristas y elige voz con aleatoriedad controlada: una misma voz puede repetir, pero no mas de tres audios seguidos; si falta la femenina, sigue usando solo la masculina.
 - con `--commentary-tts-backend elevenlabs`, el texto del LLM llega completo y ElevenLabs devuelve audio por chunks; si `ELEVENLABS_FEMALE_VOICE_ID` está configurada, el selector de voces existente alterna entre `male` y `female` igual que con XTTS.
@@ -77,7 +77,7 @@ El propio `track.py` copia además el spec dentro del directorio de artefactos d
 - al ensamblar el vídeo diferido, los WAV del manifiesto se colocan en su `event_time_s` real y los que se solaparían con un audio ya aceptado se omiten de la pista sonora, manteniendo el comentario escrito; un tiro/gol puede sustituir a un contexto interruptible si se pisan.
 - el servidor de comentarios omite duplicados consecutivos cuando llega otra vez la misma `action` para el mismo `player_name` y equipo.
 - el MP4 final diferido se vuelve a codificar como `H.264/AAC` con perfil compatible y límite `1080p`, así que el archivo que sirve la interfaz es reproducible por navegadores modernos y no se queda en negro por usar `mp4v` o por exportar un H.264 4K demasiado pesado.
-- si lanzas un run demasiado pronto y el `intro` todavía sigue en `starting`, el tracking arranca igualmente; simplemente ese run puede salir sin el `intro` precopiado.
+- la intro ya no se genera de forma genérica al arrancar la interfaz: siempre se espera a tener los dos equipos para producir una bienvenida del partido concreto.
 
 Cuando el run se lanza desde la interfaz, el propio subprocess de tracking recibe por entorno la información necesaria para:
 
