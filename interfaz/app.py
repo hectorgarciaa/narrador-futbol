@@ -45,7 +45,15 @@ from football_ai.commentaries.server import (
     DEFAULT_SERVER_PORT as DEFAULT_COMMENTARY_PORT,
     create_http_server,
 )
-from football_ai.commentaries.voice import CommentaryAudioPipeline, build_voice_synthesizer
+from football_ai.commentaries.voice import (
+    DEFAULT_ELEVENLABS_LANGUAGE_CODE,
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
+    DEFAULT_TTS_BACKEND,
+    TTS_BACKEND_CHOICES,
+    CommentaryAudioPipeline,
+    build_voice_synthesizer,
+)
 from football_ai.positions import (
     LineupSpecError,
     get_formation_catalog,
@@ -59,6 +67,13 @@ from football_ai.tracking_cli.paths import (
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+if load_dotenv is not None:
+    load_dotenv(PROJECT_ROOT / ".env")
+
 RUNS_ROOT = PROJECT_ROOT / "output" / "interfaz" / "runs"
 RUNS_ROOT.mkdir(parents=True, exist_ok=True)
 COMMENTARY_CACHE_ROOT = PROJECT_ROOT / "output" / "interfaz" / "commentary_cache"
@@ -273,6 +288,19 @@ class CommentaryServerManager:
         temperature=DEFAULT_COMMENTARY_TEMPERATURE,
         base_url=None,
         llama_cpp_config=None,
+        tts_backend=DEFAULT_TTS_BACKEND,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
+        elevenlabs_female_voice_id=None,
+        elevenlabs_model_id=None,
+        elevenlabs_output_format=None,
+        elevenlabs_language_code=None,
+        elevenlabs_stability=None,
+        elevenlabs_similarity_boost=None,
+        elevenlabs_style=None,
+        elevenlabs_speed=None,
+        elevenlabs_use_speaker_boost=None,
+        elevenlabs_optimize_streaming_latency=None,
     ):
         self.host = str(host).strip() or DEFAULT_COMMENTARY_HOST
         self.port = int(port)
@@ -282,6 +310,33 @@ class CommentaryServerManager:
         self.temperature = float(temperature)
         self.base_url = str(base_url).strip() if base_url else None
         self.llama_cpp_config = dict(llama_cpp_config or {})
+        self.tts_backend = str(tts_backend or DEFAULT_TTS_BACKEND).strip().lower()
+        self.elevenlabs_api_key = (
+            str(elevenlabs_api_key).strip() if elevenlabs_api_key else None
+        )
+        self.elevenlabs_voice_id = (
+            str(elevenlabs_voice_id).strip() if elevenlabs_voice_id else None
+        )
+        self.elevenlabs_female_voice_id = (
+            str(elevenlabs_female_voice_id).strip()
+            if elevenlabs_female_voice_id
+            else None
+        )
+        self.elevenlabs_model_id = (
+            str(elevenlabs_model_id).strip() if elevenlabs_model_id else None
+        )
+        self.elevenlabs_output_format = (
+            str(elevenlabs_output_format).strip() if elevenlabs_output_format else None
+        )
+        self.elevenlabs_language_code = (
+            str(elevenlabs_language_code).strip() if elevenlabs_language_code else None
+        )
+        self.elevenlabs_stability = elevenlabs_stability
+        self.elevenlabs_similarity_boost = elevenlabs_similarity_boost
+        self.elevenlabs_style = elevenlabs_style
+        self.elevenlabs_speed = elevenlabs_speed
+        self.elevenlabs_use_speaker_boost = elevenlabs_use_speaker_boost
+        self.elevenlabs_optimize_streaming_latency = elevenlabs_optimize_streaming_latency
         self._start_lock = threading.Lock()
         self._ready_event = threading.Event()
         self._thread = None
@@ -524,6 +579,26 @@ class CommentaryServerManager:
             base_url=self.base_url,
         )
 
+    def build_voice_synthesizer(self, *, alternate_voices=True):
+        return build_voice_synthesizer(
+            tts_backend=self.tts_backend,
+            alternate_voices=bool(alternate_voices),
+            elevenlabs_api_key=self.elevenlabs_api_key,
+            elevenlabs_voice_id=self.elevenlabs_voice_id,
+            elevenlabs_female_voice_id=self.elevenlabs_female_voice_id,
+            elevenlabs_model_id=self.elevenlabs_model_id,
+            elevenlabs_output_format=self.elevenlabs_output_format,
+            elevenlabs_language_code=self.elevenlabs_language_code,
+            elevenlabs_stability=self.elevenlabs_stability,
+            elevenlabs_similarity_boost=self.elevenlabs_similarity_boost,
+            elevenlabs_style=self.elevenlabs_style,
+            elevenlabs_speed=self.elevenlabs_speed,
+            elevenlabs_use_speaker_boost=self.elevenlabs_use_speaker_boost,
+            elevenlabs_optimize_streaming_latency=(
+                self.elevenlabs_optimize_streaming_latency
+            ),
+        )
+
     def start(self):
         with self._start_lock:
             if self._thread is not None or self._reused_external:
@@ -547,7 +622,7 @@ class CommentaryServerManager:
     def _serve(self):
         try:
             generator = self.build_commentary_generator()
-            voice_synthesizer = build_voice_synthesizer(alternate_voices=True)
+            voice_synthesizer = self.build_voice_synthesizer(alternate_voices=True)
             pipeline = CommentaryAudioPipeline(
                 commentary_generator=generator,
                 voice_synthesizer=voice_synthesizer,
@@ -744,7 +819,9 @@ def generate_startup_intro_commentary_locally():
 
     event = build_startup_intro_event()
     generator = COMMENTARY_SERVER_MANAGER.build_commentary_generator()
-    voice_synthesizer = build_voice_synthesizer(alternate_voices=True)
+    voice_synthesizer = COMMENTARY_SERVER_MANAGER.build_voice_synthesizer(
+        alternate_voices=True,
+    )
     voice_synthesizer.prepare()
     pipeline = CommentaryAudioPipeline(
         commentary_generator=generator,
@@ -1046,12 +1123,18 @@ def attach_cached_intro_to_run(run_id, commentary_mode):
         return payload
 
     cached_audio_path = Path(cached_intro["audio_path"]).expanduser().resolve()
-    shutil.copy2(cached_audio_path, run_paths["commentary_intro_audio_path"])
+    intro_audio_path = run_paths["commentary_intro_audio_path"]
+    if (
+        cached_audio_path.suffix
+        and cached_audio_path.suffix.lower() != intro_audio_path.suffix.lower()
+    ):
+        intro_audio_path = intro_audio_path.with_suffix(cached_audio_path.suffix)
+    shutil.copy2(cached_audio_path, intro_audio_path)
 
     intro_payload = {
         **cached_intro,
         "copied_at_utc": now_iso(),
-        "audio_path": str(run_paths["commentary_intro_audio_path"]),
+        "audio_path": str(intro_audio_path),
     }
     write_json(run_paths["commentary_intro_meta_path"], intro_payload)
     append_jsonl(
@@ -1067,7 +1150,7 @@ def attach_cached_intro_to_run(run_id, commentary_mode):
                 "prebuilt_on_interface_startup": True,
             },
             "commentary": intro_payload.get("commentary"),
-            "audio_path": str(run_paths["commentary_intro_audio_path"]),
+            "audio_path": str(intro_audio_path),
             "model": intro_payload.get("model"),
             "tts_model": intro_payload.get("tts_model"),
             "voice_label": intro_payload.get("voice_label"),
@@ -1661,6 +1744,95 @@ def parse_args():
         help="URL base del backend LLM para el servidor de comentarios.",
     )
     parser.add_argument(
+        "--commentary-tts-backend",
+        choices=TTS_BACKEND_CHOICES,
+        default=os.environ.get("NARRADOR_COMMENTARY_TTS_BACKEND", DEFAULT_TTS_BACKEND),
+        help=(
+            "Backend de voz para el servidor de comentarios. "
+            "`xtts` mantiene el flujo local; `elevenlabs` usa la API streaming."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-api-key",
+        default=None,
+        help="API key de ElevenLabs. Si no se indica, usa ELEVENLABS_API_KEY.",
+    )
+    parser.add_argument(
+        "--elevenlabs-voice-id",
+        default=None,
+        help="ID de la voz de ElevenLabs. Si no se indica, usa ELEVENLABS_VOICE_ID.",
+    )
+    parser.add_argument(
+        "--elevenlabs-female-voice-id",
+        default=None,
+        help=(
+            "ID de voz femenina de ElevenLabs para alternar comentaristas. "
+            "Si no se indica, usa ELEVENLABS_FEMALE_VOICE_ID."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-model-id",
+        default=None,
+        help=(
+            "Modelo de ElevenLabs para TTS streaming. "
+            f"Default/env: ELEVENLABS_MODEL_ID o {DEFAULT_ELEVENLABS_MODEL_ID}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-output-format",
+        default=None,
+        help=(
+            "Formato de audio de ElevenLabs. "
+            f"Default/env: ELEVENLABS_OUTPUT_FORMAT o {DEFAULT_ELEVENLABS_OUTPUT_FORMAT}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-language-code",
+        default=None,
+        help=(
+            "Codigo de idioma enviado a ElevenLabs. "
+            f"Default/env: ELEVENLABS_LANGUAGE_CODE o {DEFAULT_ELEVENLABS_LANGUAGE_CODE}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-stability",
+        type=float,
+        default=None,
+        help="Voice setting opcional `stability` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-similarity-boost",
+        type=float,
+        default=None,
+        help="Voice setting opcional `similarity_boost` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-style",
+        type=float,
+        default=None,
+        help="Voice setting opcional `style` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-speed",
+        type=float,
+        default=None,
+        help="Voice setting opcional `speed` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-use-speaker-boost",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Activa o desactiva `use_speaker_boost` en ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-optimize-streaming-latency",
+        type=int,
+        choices=range(0, 5),
+        default=None,
+        metavar="{0,1,2,3,4}",
+        help="Optimizacion de latencia streaming de ElevenLabs.",
+    )
+    parser.add_argument(
         "--llama-cpp-config",
         default=str(LLAMA_CPP_CONFIG_PATH),
         help="Ruta al config YAML usado para lanzar `llama-server`.",
@@ -1680,6 +1852,21 @@ def main():
         temperature=args.commentary_temperature,
         base_url=commentary_runtime["base_url"],
         llama_cpp_config=commentary_runtime["llama_cpp_config"],
+        tts_backend=args.commentary_tts_backend,
+        elevenlabs_api_key=args.elevenlabs_api_key,
+        elevenlabs_voice_id=args.elevenlabs_voice_id,
+        elevenlabs_female_voice_id=args.elevenlabs_female_voice_id,
+        elevenlabs_model_id=args.elevenlabs_model_id,
+        elevenlabs_output_format=args.elevenlabs_output_format,
+        elevenlabs_language_code=args.elevenlabs_language_code,
+        elevenlabs_stability=args.elevenlabs_stability,
+        elevenlabs_similarity_boost=args.elevenlabs_similarity_boost,
+        elevenlabs_style=args.elevenlabs_style,
+        elevenlabs_speed=args.elevenlabs_speed,
+        elevenlabs_use_speaker_boost=args.elevenlabs_use_speaker_boost,
+        elevenlabs_optimize_streaming_latency=(
+            args.elevenlabs_optimize_streaming_latency
+        ),
     )
     server = ThreadingHTTPServer((args.host, args.port), InterfaceRequestHandler)
     warmup_started = start_startup_intro_preparation_background()
@@ -1699,6 +1886,10 @@ def main():
     print(
         "API del backend LLM apuntando a "
         f"{COMMENTARY_SERVER_MANAGER.llm_base_url}"
+    )
+    print(
+        "Backend TTS de comentarios: "
+        f"{COMMENTARY_SERVER_MANAGER.tts_backend}"
     )
     if COMMENTARY_SERVER_MANAGER.backend == "llama_cpp":
         print(

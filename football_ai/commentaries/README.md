@@ -4,8 +4,9 @@ Generacion de comentarios sinteticos de futbol a partir de eventos ya detectados
 
 ## Objetivo
 
-Tomar un evento estructurado en JSON y convertirlo en un comentario corto de narrador usando un backend LLM local y convertirlo despues a audio. El backend estable sigue siendo XTTS, pero ahora tambien puedes probar dos rutas de Qwen TTS:
+Tomar un evento estructurado en JSON y convertirlo en un comentario corto de narrador usando un backend LLM local y convertirlo despues a audio. El backend estable sigue siendo XTTS, pero ahora tambien puedes probar ElevenLabs y dos rutas de Qwen TTS:
 
+- `elevenlabs`: usa una voz de tu libreria de ElevenLabs, por ejemplo una voz creada con Voice Design, mediante la API streaming de Text to Speech.
 - `qwen`: flujo Python `VoiceDesign -> Base`, donde primero diseñas una voz de narrador y luego reutilizas esa identidad vocal.
 - `qwen_cpp`: runtime experimental con `qwen3-tts.cpp`, speaker embedding cacheado y modelos GGUF (`q8_0` para el TTS principal + `f16` para tokenizer/vocoder).
 
@@ -66,7 +67,7 @@ ollama pull gemma4:e2b
 Sintesis de voz:
 
 ```bash
-pip install qwen-tts
+pip install qwen-tts elevenlabs
 ```
 
 Generar comentario con demo integrada:
@@ -200,6 +201,41 @@ Si quieres volver al backend estable:
 python -m football_ai.commentaries --tts-backend xtts
 ```
 
+## Backend `elevenlabs`
+
+ElevenLabs queda integrado como backend TTS opcional. No sustituye XTTS por defecto: se activa con `--tts-backend elevenlabs` o, desde la interfaz, con `--commentary-tts-backend elevenlabs`.
+
+Configura `.env` en la raiz del repo:
+
+```env
+ELEVENLABS_API_KEY=tu_api_key_real
+ELEVENLABS_VOICE_ID=id_de_tu_voz_masculina
+ELEVENLABS_FEMALE_VOICE_ID=id_de_tu_voz_femenina
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+ELEVENLABS_LANGUAGE_CODE=es
+```
+
+Ejemplo puntual:
+
+```bash
+python -m football_ai.commentaries \
+  --tts-backend elevenlabs \
+  --event-json '{"action":"gol","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","opponent_team_name":"Wolfsburgo","field_zone":"frontal del area","action_index":30}' \
+  --audio-out output/commentaries/audio/elevenlabs_demo.mp3 \
+  --print-timings
+```
+
+Ejemplo desde la interfaz:
+
+```bash
+python interfaz/app.py --commentary-tts-backend elevenlabs
+```
+
+En este proyecto el texto a sintetizar ya llega completo desde el LLM. El streaming de ElevenLabs no significa que recibamos palabra a palabra desde el modelo: significa que ElevenLabs empieza a devolver bytes de audio mientras genera la locucion. El backend los va escribiendo en el MP3 de salida por chunks y el manifiesto sigue apuntando al audio final para mantener compatible el flujo actual de `live` y `deferred`.
+
+Si `--alternate-voices` o la interfaz activan la alternancia y existe `ELEVENLABS_FEMALE_VOICE_ID`, el mismo `AlternatingVoiceSynthesizer` que ya se usaba con XTTS alterna entre la voz principal (`male`) y la voz femenina (`female`), conservando el limite de tres comentarios seguidos con la misma voz.
+
 Si lo que buscas es la mejor solucion practica ahora mismo, la combinacion recomendada es:
 
 - `XTTS` para el backend estable y de baja latencia;
@@ -332,9 +368,10 @@ Los eventos SSE actuales son:
 - `accepted`: la peticion ha sido aceptada;
 - `commentary`: el LLM ya ha devuelto el texto;
 - `tts_start`: empieza la sintesis del audio;
+- `audio_chunk`: solo con backends de audio streaming como `elevenlabs`; contiene `data_base64`, `content_type` y `chunk_index` para clientes que quieran procesar audio incremental;
 - `completed`: ya existe el WAV y se devuelve su ruta.
 
-Importante: con `qwen_cpp` este stream adelanta el texto y el estado del trabajo, pero no hace streaming PCM real porque `qwen3-tts.cpp` genera primero los `speech codes` y solo despues decodifica el audio completo.
+Importante: con `qwen_cpp` este stream adelanta el texto y el estado del trabajo, pero no hace streaming PCM real porque `qwen3-tts.cpp` genera primero los `speech codes` y solo despues decodifica el audio completo. Con `elevenlabs`, la peticion a la API de TTS si usa streaming de audio por chunks y el endpoint SSE reemite esos chunks en base64 mientras tambien escribe el MP3 final. La interfaz actual puede ignorar `audio_chunk` y seguir usando el fichero publicado en `completed`.
 
 Si quieres que el servidor vaya dejando un manifiesto listo para `live` o `deferred`, puedes añadir `manifest_path`, `mode` y `metadata`:
 
@@ -389,6 +426,7 @@ El prompt esta pensado para:
 - El fallback del comentario esta desactivado temporalmente: `FINAL_COMMENTARY` devuelve el texto del modelo tras la limpieza basica.
 - El backend `transformers` esta pensado para pruebas locales de Hymba en una venv separada como `.venv-hymba`, para no romper el entorno principal del proyecto.
 - La sintesis de voz usa por defecto `tts_models/multilingual/multi-dataset/xtts_v2`.
+- `--tts-backend elevenlabs` usa `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` y opcionalmente `ELEVENLABS_FEMALE_VOICE_ID` desde `.env` y escribe MP3 por streaming.
 - Tambien puedes probar `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` junto con `Qwen/Qwen3-TTS-12Hz-0.6B-Base` usando `--tts-backend qwen`.
 - Si existe una referencia masculina de Qwen VoiceDesign en `output/commentaries/qwen_voices/`, el modulo la usa como voz masculina por defecto. `mi_Voz.wav` queda solo como fallback si no hay voz Qwen cacheada. Si quieres forzar otra referencia, pasala explicitamente con `--speaker-wav`.
 - `--alternate-voices` permite usar una voz masculina y una femenina con seleccion aleatoria controlada; cada entrada de manifiesto guarda `voice_label` cuando se ha usado el selector de voces.

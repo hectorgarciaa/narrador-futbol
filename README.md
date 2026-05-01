@@ -308,6 +308,7 @@ Ahora el proyecto incluye una interfaz web ligera en `interfaz/` para:
 - lanzar `scripts/track.py` automáticamente con un `lineup_spec.json`
 - arrancar automáticamente el servidor local de comentarios y precalentar un `intro` al abrir la interfaz
 - intentar lanzar automáticamente el backend LLM configurado; por defecto usa `llama.cpp` leyendo `llama.cpp/config.yaml`
+- permitir ElevenLabs como backend TTS opcional para voces creadas con Voice Design
 - dejar la interfaz disponible enseguida y mover el warmup de Gemma/XTTS a segundo plano
 - bloquear el resto del formulario hasta que los dos nombres de equipo estén completos
 - no rehacer las tarjetas mientras estás escribiendo el segundo equipo, para que el foco no se pierda a mitad de edición
@@ -329,6 +330,7 @@ La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/line
 También deja el manifiesto de comentarios en `output/interfaz/runs/<run_id>/commentaries/events_manifest.jsonl`; en `live` intenta reproducir el `intro` precalentado nada más guardar y, cuando el tracking termina, ensambla una pista diferida desde ese manifiesto para incrustarla en el MP4 final. Además, cuando la ejecución nace desde la interfaz, el subprocess de tracking activa un bridge incremental `tracking -> PathCRF -> servidor de comentarios` solo para ese run, de modo que los scripts sueltos del repo siguen sin ejecutar PathCRF ni comentar jugadas automáticamente.
 Ese bridge descarta reenvíos casi idénticos de PathCRF, guarda comentarios de texto aunque el audio esté ocupado y solo pide un nuevo WAV si la acción cae fuera de la ventana temporal ocupada por la generación + duración del audio anterior. Los eventos que ocurren mientras suena otro audio no quedan en cola sonora: permanecen en el manifiesto como texto. PathCRF etiqueta además cada acción con zona de campo (`iniciacion`, `creacion`, `finalizacion`) según el tercio del largo y la dirección de ataque del equipo; las acciones en finalización y los tiros tienen prioridad alta, y algunas acciones en iniciación pueden disparar un comentario de contexto generado por el LLM con datos tácticos de la alineación y clasificación simulada. Si ese comentario contextual está sonando y aparece un tiro o gol, el nuevo audio se marca como interrupción y la interfaz corta el comentario anterior. La pista diferida tampoco desplaza WAV antiguos hacia delante; omite los audios que se solaparían y, si un tiro/gol pisa un contexto interruptible, conserva la acción peligrosa y descarta ese contexto de la pista sonora. El servidor de comentarios sigue omitiendo duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo). El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC` y se limita a `1080p`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores mostraban en negro los exports demasiado grandes.
 La interfaz intenta usar dos comentaristas cuando existen referencias de Qwen VoiceDesign cacheadas: mantiene XTTS como backend estable y elige entre la voz masculina y la femenina con aleatoriedad controlada, sin permitir mas de tres comentarios seguidos de la misma voz.
+Si quieres usar voces creadas en ElevenLabs Voice Design, configura `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` y opcionalmente `ELEVENLABS_FEMALE_VOICE_ID` en `.env`, y lanza `python interfaz/app.py --commentary-tts-backend elevenlabs`. El servidor local de comentarios sigue existiendo, pero el paso TTS llama a ElevenLabs por streaming, alterna entre `male` y `female` cuando hay dos voces configuradas, y guarda los chunks como MP3 para que la interfaz y el ensamblado diferido sigan leyendo el manifiesto habitual.
 Si `--commentary-backend auto` no se toca, la interfaz intenta usar `llama.cpp` cuando existe `llama.cpp/config.yaml`; si no, cae a `ollama`. Si `--commentary-base-url` apunta a una URL local, la interfaz intenta arrancar ese backend localmente; si apuntas a un backend remoto, ese autoarranque no se intenta.
 El fichero `llama.cpp/config.yaml` fija el binario `llama-server`, el alias expuesto por la API y el GGUF que se cargará al abrir la interfaz.
 Ese precalentado ya no bloquea el arranque visible de la UI: la interfaz HTTP sube primero y el warmup de Gemma/XTTS sigue en segundo plano.
@@ -381,8 +383,9 @@ python -m football_ai.commentaries.eval_llm \
   --event-json '{"action":"pase largo","player_name":"Bellingham","player_position":"MC","event_time_s":132.4,"team_name":"Real Madrid","field_zone":"medio campo","action_index":30}'
 ```
 
-Ese mismo módulo puede convertir el comentario a audio. El backend estable sigue siendo XTTS, pero ahora también puedes probar dos rutas de Qwen:
+Ese mismo módulo puede convertir el comentario a audio. El backend estable sigue siendo XTTS, pero ahora también puedes probar ElevenLabs y dos rutas de Qwen:
 
+- `elevenlabs`: usa la API streaming de ElevenLabs con una voz de tu librería, incluida una voz creada con Voice Design.
 - `qwen`: flujo Python `VoiceDesign -> Base`, primero diseña una voz de narrador y luego la reutiliza.
 - `qwen_cpp`: runtime experimental con `qwen3-tts.cpp`, speaker embedding cacheado y modelos GGUF.
 
@@ -411,6 +414,25 @@ python -m football_ai.commentaries \
 El servidor escucha por defecto en `http://127.0.0.1:8788` y acepta `POST /api/commentaries`.
 
 También expone `POST /api/commentaries/stream` como SSE. Ese endpoint emite `accepted`, `commentary`, `tts_start` y `completed`, de modo que el cliente recibe el texto del LLM antes de que termine la síntesis del WAV.
+
+Para ElevenLabs, añade a `.env`:
+
+```env
+ELEVENLABS_API_KEY=tu_api_key_real
+ELEVENLABS_VOICE_ID=id_de_tu_voz_masculina
+ELEVENLABS_FEMALE_VOICE_ID=id_de_tu_voz_femenina
+ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+ELEVENLABS_LANGUAGE_CODE=es
+```
+
+Y ejecuta:
+
+```bash
+python interfaz/app.py --commentary-tts-backend elevenlabs
+```
+
+Como el texto del comentario llega completo desde el LLM, el streaming ocurre en la respuesta de audio de ElevenLabs: se reciben bytes por chunks y se escriben progresivamente en el MP3. El endpoint SSE `/api/commentaries/stream` puede reemitir esos chunks como `audio_chunk` en base64, y el manifiesto/hosting local de audios se conserva para no romper `live` ni `deferred`.
 
 Ejemplo con `qwen_cpp`:
 

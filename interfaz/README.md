@@ -36,6 +36,7 @@ Opciones:
 python interfaz/app.py --host 127.0.0.1 --port 8767
 python interfaz/app.py --commentary-backend llama_cpp --commentary-port 8788
 python interfaz/app.py --commentary-backend ollama --commentary-model gemma4:e2b
+python interfaz/app.py --commentary-tts-backend elevenlabs
 ```
 
 Después abre `http://127.0.0.1:8767`.
@@ -47,6 +48,7 @@ Nota:
 - `--commentary-backend auto` intenta usar `llama.cpp` si existe `llama.cpp/config.yaml`; si no, cae a `ollama`.
 - el autoarranque del backend LLM solo se intenta cuando `--commentary-base-url` apunta a una URL local; si apuntas a un backend remoto, la interfaz solo lo reutiliza.
 - la configuración de `llama.cpp` vive en `llama.cpp/config.yaml`; ahí se fija el binario `llama-server`, el alias, el puerto y el GGUF a cargar.
+- `--commentary-tts-backend elevenlabs` mantiene el mismo servidor local de comentarios, pero cambia la síntesis de voz por la API streaming de ElevenLabs. Lee `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` y, si existe, `ELEVENLABS_FEMALE_VOICE_ID` desde `.env` o desde los argumentos `--elevenlabs-*`.
 
 ## Qué genera
 
@@ -68,6 +70,7 @@ El propio `track.py` copia además el spec dentro del directorio de artefactos d
 - `live`: la interfaz intenta reproducir el `intro` ya precalentado nada más guardar y luego hace polling del manifiesto para sonar el audio más reciente disponible cuando el canal esté libre, sin cola FIFO de audios antiguos.
 - `deferred`: se siguen generando y guardando comentarios/audio, pero la interfaz no los reproduce al vuelo. Al terminar el tracking, la interfaz construye una pista continua desde el manifiesto y la incrusta en el MP4 final del tracking.
 - si existen referencias masculina y femenina de Qwen VoiceDesign en cache, la interfaz usa XTTS en modo dos comentaristas y elige voz con aleatoriedad controlada: una misma voz puede repetir, pero no mas de tres audios seguidos; si falta la femenina, sigue usando solo la masculina.
+- con `--commentary-tts-backend elevenlabs`, el texto del LLM llega completo y ElevenLabs devuelve audio por chunks; si `ELEVENLABS_FEMALE_VOICE_ID` está configurada, el selector de voces existente alterna entre `male` y `female` igual que con XTTS.
 - el bridge PathCRF evita reenvíos casi idénticos, guarda comentarios de texto aunque el turno de audio esté ocupado y solo solicita un nuevo WAV si el `event_time_s` cae después de la ventana ocupada por la generación más la duración del audio anterior.
 - PathCRF etiqueta cada acción con zona de campo (`iniciacion`, `creacion`, `finalizacion`) según el tercio del largo y la dirección de ataque; las acciones en iniciación pueden generar de forma puntual un comentario de contexto con datos tácticos del `lineup_spec.json` y clasificación simulada.
 - si un comentario de contexto está sonando y aparece una acción urgente (`tiro` o `gol`), el nuevo audio se marca como interrupción y el navegador corta el contexto para reproducir la acción peligrosa.

@@ -5,15 +5,24 @@ from datetime import datetime
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import random
 import re
 import shutil
+import subprocess
 import sys
 import time
 import wave
 from typing import Any, Sequence
 
+from .elevenlabs_tts import (
+    ELEVENLABS_FEMALE_VOICE_ID_ENV,
+    DEFAULT_ELEVENLABS_LANGUAGE_CODE,
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
+    ElevenLabsVoiceSynthesizer,
+)
 from .generator import (
     CommentaryEvent,
     CommentaryGenerationResult,
@@ -30,6 +39,7 @@ DEFAULT_QWEN_CPP_RUNTIME_DIR = PROJECT_ROOT / "output" / "commentaries" / "qwen_
 DEFAULT_QWEN_CPP_MODEL_DIR = DEFAULT_QWEN_CPP_RUNTIME_DIR / "models"
 DEFAULT_QWEN_CPP_THREADS = 6
 DEFAULT_TTS_BACKEND = "xtts"
+TTS_BACKEND_CHOICES = ("xtts", "qwen", "qwen_cpp", "elevenlabs")
 DEFAULT_MAX_CONSECUTIVE_VOICE_COMMENTS = 3
 DEFAULT_QWEN_VOICE_DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 DEFAULT_QWEN_VOICE_CLONE_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
@@ -233,6 +243,38 @@ def probe_audio_duration_seconds(audio_path: str | Path) -> float | None:
         sample_rate = int(info.samplerate)
         if frames > 0 and sample_rate > 0:
             return float(frames) / float(sample_rate)
+    except Exception:
+        pass
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+
+        ffmpeg_exe = str(get_ffmpeg_exe())
+        completed = subprocess.run(
+            [
+                ffmpeg_exe,
+                "-hide_banner",
+                "-i",
+                str(resolved_path),
+                "-f",
+                "null",
+                "-",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        probe_text = f"{completed.stderr}\n{completed.stdout}"
+        match = re.search(
+            r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)",
+            probe_text,
+        )
+        if match:
+            hours, minutes, seconds = match.groups()
+            return (
+                int(hours) * 3600.0
+                + int(minutes) * 60.0
+                + float(seconds)
+            )
     except Exception:
         return None
     return None
@@ -549,6 +591,23 @@ class AlternatingVoiceSynthesizer:
                     resolved.append(path)
         return tuple(resolved)
 
+    @property
+    def supports_streaming_audio(self) -> bool:
+        return all(
+            bool(getattr(voice, "supports_streaming_audio", False))
+            for voice in self.voices
+        )
+
+    @property
+    def output_suffix(self) -> str:
+        return str(getattr(self.voices[0], "output_suffix", ".wav"))
+
+    @property
+    def audio_mimetype(self) -> str:
+        return str(
+            getattr(self.voices[0], "audio_mimetype", "application/octet-stream")
+        )
+
     def prepare(self, warmup_text: str | None = None) -> "AlternatingVoiceSynthesizer":
         for voice in self.voices:
             if hasattr(voice, "prepare"):
@@ -575,6 +634,21 @@ class AlternatingVoiceSynthesizer:
             self._same_voice_streak = 1
         return index
 
+    def _next_voice(self) -> Any:
+        index = self._next_voice_index()
+        voice = self.voices[index]
+        self.last_voice_label = self.labels[index]
+        self.last_voice_synthesizer = voice
+        return voice
+
+    def iter_audio_chunks(self, text: str):
+        voice = self._next_voice()
+        if not hasattr(voice, "iter_audio_chunks"):
+            raise RuntimeError(
+                "La voz seleccionada no soporta streaming incremental de audio."
+            )
+        yield from voice.iter_audio_chunks(text)
+
     def synthesize_to_file(
         self,
         text: str,
@@ -583,10 +657,7 @@ class AlternatingVoiceSynthesizer:
         language: str | None = None,
         split_sentences: bool | None = None,
     ) -> Path:
-        index = self._next_voice_index()
-        voice = self.voices[index]
-        self.last_voice_label = self.labels[index]
-        self.last_voice_synthesizer = voice
+        voice = self._next_voice()
         return voice.synthesize_to_file(
             text,
             file_path,
@@ -616,6 +687,18 @@ def build_voice_synthesizer(
     qwen_cpp_threads: int = DEFAULT_QWEN_CPP_THREADS,
     qwen_cpp_repo_dir: str | Path | None = None,
     qwen_cpp_model_dir: str | Path | None = None,
+    elevenlabs_api_key: str | None = None,
+    elevenlabs_voice_id: str | None = None,
+    elevenlabs_female_voice_id: str | None = None,
+    elevenlabs_model_id: str | None = None,
+    elevenlabs_output_format: str | None = None,
+    elevenlabs_language_code: str | None = None,
+    elevenlabs_stability: float | None = None,
+    elevenlabs_similarity_boost: float | None = None,
+    elevenlabs_style: float | None = None,
+    elevenlabs_speed: float | None = None,
+    elevenlabs_use_speaker_boost: bool | None = None,
+    elevenlabs_optimize_streaming_latency: int | None = None,
 ):
     backend = str(tts_backend or DEFAULT_TTS_BACKEND).strip().lower()
     if backend == "xtts":
@@ -730,8 +813,50 @@ def build_voice_synthesizer(
             (primary, secondary),
             labels=("male", "female"),
         )
+    if backend == "elevenlabs":
+        primary = ElevenLabsVoiceSynthesizer(
+            api_key=elevenlabs_api_key,
+            voice_id=elevenlabs_voice_id,
+            model_id=elevenlabs_model_id,
+            output_format=elevenlabs_output_format,
+            language_code=elevenlabs_language_code,
+            stability=elevenlabs_stability,
+            similarity_boost=elevenlabs_similarity_boost,
+            style=elevenlabs_style,
+            speed=elevenlabs_speed,
+            use_speaker_boost=elevenlabs_use_speaker_boost,
+            optimize_streaming_latency=elevenlabs_optimize_streaming_latency,
+        )
+        if not alternate_voices:
+            return primary
+
+        female_voice_id = (
+            str(elevenlabs_female_voice_id).strip()
+            if elevenlabs_female_voice_id
+            else str(os.environ.get(ELEVENLABS_FEMALE_VOICE_ID_ENV) or "").strip()
+        )
+        if not female_voice_id:
+            return primary
+        secondary = ElevenLabsVoiceSynthesizer(
+            api_key=elevenlabs_api_key,
+            voice_id=female_voice_id,
+            model_id=elevenlabs_model_id,
+            output_format=elevenlabs_output_format,
+            language_code=elevenlabs_language_code,
+            stability=elevenlabs_stability,
+            similarity_boost=elevenlabs_similarity_boost,
+            style=elevenlabs_style,
+            speed=elevenlabs_speed,
+            use_speaker_boost=elevenlabs_use_speaker_boost,
+            optimize_streaming_latency=elevenlabs_optimize_streaming_latency,
+        )
+        return AlternatingVoiceSynthesizer(
+            (primary, secondary),
+            labels=("male", "female"),
+        )
     raise ValueError(
-        f"`tts_backend` no soportado: {backend}. Usa `xtts`, `qwen` o `qwen_cpp`."
+        f"`tts_backend` no soportado: {backend}. "
+        f"Usa {', '.join(TTS_BACKEND_CHOICES)}."
     )
 
 
