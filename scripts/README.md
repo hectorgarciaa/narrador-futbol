@@ -233,7 +233,7 @@ python scripts/actions/convert_tracks_to_pathcrf.py output/tracks_json/tracker/p
 
 ### `actions/run_pathcrf.py` — Conversión + inferencia + drawer PathCRF
 
-**Objetivo:** tomar la salida ya guardada de `scripts/track.py`, convertirla a formato PathCRF, ejecutar inferencia con el repo clonado en `football_ai/actions/repo/pathcrf/` y generar una visualización PathCRF. Si el script conoce el vídeo original y el `tracks.json`, el render sale sobre el broadcast real con `bbox` reales y un mini-mapa 2D incrustado; si no, cae al modo 2D puro.
+**Objetivo:** pipeline **offline legacy**. Toma la salida ya guardada de `scripts/track.py`, convierte una sola vez a formato PathCRF y ejecuta una sola inferencia batch sobre toda la secuencia.
 
 **CLI:**
 ```bash
@@ -258,16 +258,132 @@ python scripts/actions/run_pathcrf.py output/tracks_json/tracker/partido_corto_t
 **Flujo:**
 1. Resuelve la entrada: shortcut de `config.yaml`, vídeo, `tracks.json` o parquet ya convertido.
 2. Si la entrada es `tracks.json`, la convierte a `*_tracking.parquet`.
-3. Carga el checkpoint de PathCRF y ejecuta inferencia sobre el parquet ancho.
-4. Exporta:
+3. Carga el checkpoint de PathCRF y ejecuta una inferencia offline sobre el parquet ancho.
+4. Dentro de esa inferencia, PathCRF recorre internamente su ventana temporal deslizante para producir `edge` por frame.
+5. Exporta:
    - `*_edge_sequence.parquet`
    - `*_events.parquet`
    - `*_macro_prev.parquet`
    - `*_macro_next.parquet`
    - `*_summary.json`
-5. Si no se desactiva, genera `*_pitch_pathcrf.mp4` con el nuevo drawer. Con shortcut de vídeo o `tracks.json` asociado intenta renderizar sobre el vídeo original con `bbox` reales; con solo parquet, usa el fallback 2D.
+6. Si no se desactiva, genera `*_pitch_pathcrf.mp4` con el nuevo drawer. Con shortcut de vídeo o `tracks.json` asociado intenta renderizar sobre el vídeo original con `bbox` reales; con solo parquet, usa el fallback 2D.
 
 **Nota de entorno:** los checkpoints `set_*` del repo clonado funcionan aunque falte `torch_geometric` en la `venv`; el wrapper local mete un stub mínimo porque ese import solo es imprescindible para la variante `gat`.
+
+---
+
+### `actions/run_live_snapshots_pathcrf.py` — Pipeline snapshot aislado
+
+**Objetivo:** pipeline **snapshot/live bridge aislado**. Reprocesa `tracks` N veces: en cada snapshot acumulado ejecuta PathCRF legacy completo.
+
+**CLI:**
+```bash
+python scripts/actions/run_live_snapshots_pathcrf.py video_prueba
+```
+
+**Semántica:**
+1. Avanza frame a frame sobre `tracks.json`.
+2. Solo cuando cumple warmup/cadencia (`--min-frames`, `--snapshot-interval-frames`) genera snapshot acumulado `0..frame_n`.
+3. En cada snapshot corre `run_pathcrf_pipeline` legacy.
+4. Guarda artefactos por snapshot y un resumen global `live_snapshots_summary.json`.
+
+---
+
+### `actions/run_incremental_pathcrf.py` — Pipeline incremental aislado
+
+**Objetivo:** pipeline **incremental causal**. Actualiza estado cada frame y ejecuta inferencia de PathCRF cada N frames.
+
+**CLI:**
+```bash
+python scripts/actions/run_incremental_pathcrf.py video_prueba
+```
+
+**Semántica:**
+1. Actualiza `ActionsRuntime` en cada frame (`process_frame`).
+2. Ejecuta inferencia solo cuando toca por `--min-frames-warmup` y `--cadence-frames`.
+3. Mantiene postproceso causal (confirmación/cooldown).
+4. Cada inferencia batch genera internamente un edge por frame del batch (`raw_edge_batch`).
+5. Mantiene salida pública con un edge representativo por disparo de inferencia (`raw_edge`).
+6. Exporta `tracking.parquet`, `edge_sequence.parquet`, `events_semantic.parquet`, `runtime_checkpoints.json` e `internal_edges_per_frame.parquet`.
+
+---
+
+### `actions/run_rolling_pathcrf.py` — Rolling con snapshots (paridad con live)
+
+**Objetivo:** emular el bridge live con snapshots: en cada cadencia genera un snapshot acumulado `0..frame_n`, corre `run_pathcrf_pipeline` (adapter offline) y emite edges con delay.
+
+**CLI:**
+```bash
+python scripts/actions/run_rolling_pathcrf.py video_prueba \
+  --cadence-frames 10 \
+  --emit-delay-frames 25 \
+  --emit-frames 10
+```
+
+**Semántica (modo default):**
+1. Mantiene un buffer en memoria de `tracks` frame a frame.
+2. Cada `--cadence-frames` genera `tracks_snapshot_<frame>.json` y ejecuta PathCRF offline sobre ese snapshot.
+3. Exporta:
+   - `rolling_edges_per_frame.parquet`
+   - `emitted_edges.parquet`
+   - `runtime_checkpoints.json`
+   - `summary.json`
+4. Los artefactos por snapshot quedan en `output/actions/pathcrf_rolling/<video>/snapshots/`.
+
+**Modo diagnostico (upper-bound):**
+```bash
+python scripts/actions/run_rolling_pathcrf.py video_prueba \
+  --tracking-path output/actions/pathcrf/<video>/<video>_tracking.parquet
+```
+Este modo usa un `tracking.parquet` ya construido (no snapshots) y sirve solo como referencia/upper-bound.
+
+**Debug de tracking:**
+- `--tracking-diff` compara el tracking de cada snapshot contra el offline completo y guarda diffs por checkpoint en `tracking_diffs/`.
+
+---
+
+### `actions/evaluate_edge_similarity.py` — Similitud de edges contra offline
+
+**Objetivo:** comparar `snapshot` e `incremental` contra `offline` usando IDs canónicos y tolerancia temporal.
+
+**CLI:**
+```bash
+python scripts/actions/evaluate_edge_similarity.py \
+  --offline-edge-path output/actions/pathcrf/<video>/<video>_edge_sequence.parquet \
+  --snapshot-summary-path output/actions/pathcrf_live_snapshots/<video>/live_snapshots_summary.json \
+  --incremental-internal-edges-path output/actions/pathcrf_incremental/<video>/internal_edges_per_frame.parquet \
+  --tolerance-frames 5 \
+  --output-dir output/actions/edge_eval/<video>
+```
+
+**Semántica de matching:**
+1. Convierte `edge_src/edge_dst` desde slots PathCRF a IDs canónicos (`home_1 -> 1`, etc.).
+2. Ignora edges que no puedan mapearse a IDs canónicos.
+3. Cuenta match si existe mismo par dirigido `(src,dst)` en offline dentro de `frame ± 5`.
+4. Reporta `edge_match_ratio` y también `precision/recall/F1`.
+
+---
+
+### `actions/run_cumulative_context_and_runtime_debug.py` — Ablation acumulativa + debug incremental
+
+**Objetivo:** auditar paridad incremental vs snapshot/offline corrigiendo la referencia de snapshot a frame-level interno, ejecutando contexto acumulado en checkpoints incrementales y exportando debug por etapas del runtime.
+
+**CLI:**
+```bash
+.venv/bin/python scripts/actions/run_cumulative_context_and_runtime_debug.py \
+  --offline-dir output/actions/pipeline_audit/eval_full_offline \
+  --snapshot-dir output/actions/pipeline_audit/eval_full_snapshot \
+  --incremental-dir output/actions/pipeline_audit/eval_full_incremental \
+  --snapshot-internal-path output/actions/pipeline_audit/eval_full_similarity/snapshot_internal_edges_per_frame.parquet \
+  --output-dir output/actions/pipeline_audit/eval_full_cumulative_context_and_runtime_debug
+```
+
+**Salidas clave:**
+1. `cumulative_context_summary.json` y `effective_config_audit.json`.
+2. `snapshot_cumulative_at_incremental_checkpoints_edges.parquet`.
+3. `incremental_stateful_explicit_config_edges.parquet` e `incremental_stateless_explicit_config_edges.parquet`.
+4. `incremental_runtime_debug_by_frame.parquet` e `incremental_runtime_debug_by_batch.csv`.
+5. Comparativas: `comparison_against_offline.csv`, `comparison_against_snapshot_internal.csv`, `comparison_by_stage.csv`, `comparison_by_batch_local_index.csv`.
 
 ---
 

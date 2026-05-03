@@ -23,6 +23,7 @@ from football_ai.tracking import Tracker
 from football_ai.visualization import Drawer
 from football_ai.visualization.pathcrf_drawer import PathCRFDrawer
 from football_ai.actions_incremental import ActionsDetector, ActionsDetectorConfig
+from football_ai.actions_realtime import RollingActionsConfig, RollingActionsPhase
 
 from .paths import (
     build_output_video_path,
@@ -208,6 +209,15 @@ def _resolve_position_infering_device(position_phase):
     runtime_device = getattr(role_session, "device", "cpu")
     return _resolve_runtime_device_label(runtime_device)
 
+def _build_rolling_output_dir(config, video_path) -> Path:
+    stem = Path(video_path).stem
+    for suffix in ("_tracks", "_tracking", "_edge_sequence"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    return (config.project_root / "output" / "actions" / "rolling_online" / stem).resolve()
+
+
 def resolve_lineup_spec(args, config):
     lineup_spec = getattr(args, "lineup_spec", None)
     if not lineup_spec:
@@ -376,24 +386,66 @@ def run_tracking_pipeline(args):
                 lineup_matcher=lineup_matcher,
             )
         actions_conf = dict(tracker_conf.get("actions") or {})
+        actions_mode = str(actions_conf.get("mode", "legacy")).strip().lower()
+        logger.info("Actions mode: %s", actions_mode)
         if bool(actions_conf.get("enabled", True)):
-            actions_phase = ActionsDetectorPhase(
-                ActionsRuntimeConfig(
-                    detector=ActionsDetectorConfig(
+            if actions_mode == "rolling":
+                rolling_output_dir = _build_rolling_output_dir(config, video_path)
+                actions_phase = RollingActionsPhase(
+                    RollingActionsConfig(
+                        enabled=True,
                         fps=float(actions_conf.get("fps", 25.0)),
-                        window_size_frames=(
-                            int(actions_conf["window_size_frames"])
-                            if actions_conf.get("window_size_frames") is not None
+                        cadence_frames=max(1, int(actions_conf.get("cadence_frames", 10))),
+                        min_frames_warmup=max(1, int(actions_conf.get("min_frames_warmup", 50))),
+                        emit_delay_frames=max(0, int(actions_conf.get("emit_delay_frames", 100))),
+                        emit_frames=max(1, int(actions_conf.get("emit_frames", 10))),
+                        repo_path=Path(str(actions_conf.get("repo_path", "football_ai/actions/repo/pathcrf"))),
+                        trial=int(actions_conf.get("trial", 120)),
+                        model_file=str(actions_conf.get("model_file", "state_dict_best_acc.pt")),
+                        device=str(actions_conf.get("device", "auto")),
+                        use_crf=bool(actions_conf.get("use_crf", True)),
+                        decode=str(actions_conf.get("decode", "indep")),
+                        window_seconds=float(actions_conf.get("window_seconds", 10.0)),
+                        sample_freq=int(actions_conf.get("sample_freq", 5)),
+                        min_event_duration=int(actions_conf.get("min_event_duration", 10)),
+                        smooth_edges=bool(actions_conf.get("smooth_edges", False)),
+                        export_debug=bool(actions_conf.get("export_debug", True)),
+                        output_dir=str(rolling_output_dir),
+                        async_enabled=bool(actions_conf.get("async_enabled", True)),
+                        max_workers=max(1, int(actions_conf.get("max_workers", 1))),
+                        drop_policy=str(actions_conf.get("drop_policy", "latest")).strip().lower(),
+                        snapshot_window_frames=(
+                            int(actions_conf["snapshot_window_frames"])
+                            if actions_conf.get("snapshot_window_frames") is not None
                             else None
                         ),
-                    ),
-                    cadence_frames=max(1, int(actions_conf.get("cadence_frames", 10))),
-                    min_frames_warmup=max(1, int(actions_conf.get("min_frames_warmup", 50))),
-                    min_event_duration=max(1, int(actions_conf.get("min_event_duration", 10))),
-                    window_seconds=actions_conf.get("window_seconds"),
-                    sample_freq=actions_conf.get("sample_freq"),
+                        incremental_tracking=bool(actions_conf.get("incremental_tracking", False)),
+                        incremental_tracking_mode=str(actions_conf.get("incremental_tracking_mode", "adapter_tail_replace")),
+                        incremental_recompute_tail_frames=int(actions_conf.get("incremental_recompute_tail_frames", 75)),
+                        incremental_tail_overlap_frames=int(actions_conf.get("incremental_tail_overlap_frames", 100)),
+                        incremental_validate_every=int(actions_conf.get("incremental_validate_every", 10)),
+                        incremental_validation_tolerance=float(actions_conf.get("incremental_validation_tolerance", 1e-3)),
+                        incremental_fallback_on_mismatch=bool(actions_conf.get("incremental_fallback_on_mismatch", True)),
+                    )
                 )
-            )
+            else:
+                actions_phase = ActionsDetectorPhase(
+                    ActionsRuntimeConfig(
+                        detector=ActionsDetectorConfig(
+                            fps=float(actions_conf.get("fps", 25.0)),
+                            window_size_frames=(
+                                int(actions_conf["window_size_frames"])
+                                if actions_conf.get("window_size_frames") is not None
+                                else None
+                            ),
+                        ),
+                        cadence_frames=max(1, int(actions_conf.get("cadence_frames", 10))),
+                        min_frames_warmup=max(1, int(actions_conf.get("min_frames_warmup", 50))),
+                        min_event_duration=max(1, int(actions_conf.get("min_event_duration", 10))),
+                        window_seconds=actions_conf.get("window_seconds"),
+                        sample_freq=actions_conf.get("sample_freq"),
+                    )
+                )
 
         online_commentary_bridge = create_app_live_commentary_bridge_from_env()
         if online_commentary_bridge is not None:
@@ -496,7 +548,11 @@ def run_tracking_pipeline(args):
                 total_ms = tracking_ms + posession_ms + position_ms
                 total_ms += actions_ms
                 pos_inf = f" | PosInf: {position_ms:.1f}ms" if position_phase else ""
-                act_inf = f" | Actions: {actions_ms:.1f}ms" if actions_phase else ""
+                act_extra = ""
+                if actions_phase and final_packet.get("trace", {}).get("actions_incremental", {}).get("async_enabled"):
+                    last_infer = final_packet["trace"]["actions_incremental"].get("last_infer_ms", 0)
+                    act_extra = f" (async, last chk: {last_infer:.0f}ms)"
+                act_inf = f" | Actions: {actions_ms:.1f}ms{act_extra}" if actions_phase else ""
                 
                 print(
                     f"[frame {frame_index:04d}] "
@@ -572,71 +628,131 @@ def run_tracking_pipeline(args):
         else:
             logger.info("Skipping annotated video rendering for this execution.")
 
-        # Render dedicado PathCRF (single panel) con slots, raw edge y acción postprocesada.
-        try:
-            actions_conf = tracker_conf.get("actions", {}) if isinstance(tracker_conf, dict) else {}
-            fps_for_actions = float(actions_conf.get("fps", 25.0))
-            detector_for_render = ActionsDetector(ActionsDetectorConfig(fps=fps_for_actions))
-            frame_count = len(tracks.get("player", []))
-            for fi in range(frame_count):
-                detector_for_render.update(
-                    fi,
-                    {
-                        "tracks_frame": {
-                            "player": tracks.get("player", [])[fi],
-                            "goalkeeper": tracks.get("goalkeeper", [])[fi],
-                            "referee": tracks.get("referee", [])[fi],
-                            "ball": tracks.get("ball", [])[fi],
-                        },
-                        "possession": tracks.get("possession", [])[fi] if fi < len(tracks.get("possession", [])) else {},
-                    },
+        # Save rolling artifacts if rolling mode
+        rolling_fields: dict[str, Any] = {}
+        rolling_artifacts: dict[str, Any] = {}
+        if actions_mode == "rolling" and actions_phase is not None:
+            try:
+                rolling_artifacts = actions_phase.build_result(
+                    _build_rolling_output_dir(config, video_path)
                 )
-            tracking_df, conversion_summary = detector_for_render.build_tracking_dataframe()
+                logger.info("Rolling actions completed: %d emitted edges, %d checkpoint%s",
+                            len(rolling_artifacts.get("emitted_edges_df", [])),
+                            actions_phase._completed_checkpoints,
+                            "s" if actions_phase._completed_checkpoints != 1 else "")
+                rolling_fields["rolling_mode"] = "rolling"
+                rolling_fields["rolling_emitted_edges"] = str(rolling_artifacts.get("emitted_edges", ""))
+                rolling_fields["rolling_checkpoints"] = str(rolling_artifacts.get("checkpoints", ""))
+            except Exception:
+                logger.exception("No se pudieron guardar los artefactos del rolling actions.")
 
-            edge_rows = []
-            event_rows = []
-            for fi, payload in enumerate(tracks.get("actions_incremental", [])):
-                if not isinstance(payload, dict):
-                    continue
-                raw = payload.get("raw_edge")
-                if isinstance(raw, dict) and raw.get("edge_src") is not None and raw.get("edge_dst") is not None:
-                    edge_rows.append(
-                        {
-                            "frame_id": int(fi),
-                            "edge_src": raw.get("edge_src"),
-                            "edge_dst": raw.get("edge_dst"),
-                            "edge_team": raw.get("edge_team"),
-                        }
-                    )
-                post = payload.get("confirmed_action")
-                if isinstance(post, dict) and post:
-                    event_rows.append(
-                        {
-                            "frame_id": int(fi),
-                            "event_type": post.get("event_type"),
-                            "player_id": post.get("player_slot_id") or post.get("player_id"),
-                            "receiver_id": post.get("receiver_slot_id") or post.get("receiver_id"),
-                        }
-                    )
-            edge_df = pd.DataFrame(edge_rows) if edge_rows else pd.DataFrame(columns=["frame_id", "edge_src", "edge_dst", "edge_team"])
-            events_df = pd.DataFrame(event_rows) if event_rows else pd.DataFrame(columns=["frame_id", "event_type", "player_id", "receiver_id"])
+        # Render dedicado PathCRF (single panel) con slots y edges emitidos en vivo
+        try:
+            actions_conf2 = tracker_conf.get("actions", {}) if isinstance(tracker_conf, dict) else {}
+            fps_for_actions = float(actions_conf2.get("fps", 25.0))
             output_path_obj = Path(output)
             pathcrf_video_output = output_path_obj.with_name(f"{output_path_obj.stem}_pathcrf.mp4")
-            PathCRFDrawer().render_tracking_and_edges(
-                tracking=tracking_df,
-                edge_sequence=edge_df,
-                events=events_df,
-                output_path=pathcrf_video_output,
-                fps=fps_for_actions,
-                video_path=video_path,
-                tracks_path=output_path_named,
-                conversion_summary={
+
+            should_render = True
+
+            if actions_mode != "rolling":
+                # Legacy: reconstruye tracking y edges desde los tracks acumulados
+                detector_for_render = ActionsDetector(ActionsDetectorConfig(fps=fps_for_actions))
+                frame_count = len(tracks.get("player", []))
+                for fi in range(frame_count):
+                    detector_for_render.update(
+                        fi,
+                        {
+                            "tracks_frame": {
+                                "player": tracks.get("player", [])[fi],
+                                "goalkeeper": tracks.get("goalkeeper", [])[fi],
+                                "referee": tracks.get("referee", [])[fi],
+                                "ball": tracks.get("ball", [])[fi],
+                            },
+                            "possession": tracks.get("possession", [])[fi] if fi < len(tracks.get("possession", [])) else {},
+                        },
+                    )
+                tracking_df, conversion_summary = detector_for_render.build_tracking_dataframe()
+
+                edge_rows = []
+                event_rows = []
+                for fi, payload in enumerate(tracks.get("actions_incremental", [])):
+                    if not isinstance(payload, dict):
+                        continue
+                    raw = payload.get("raw_edge")
+                    if isinstance(raw, dict) and raw.get("edge_src") is not None and raw.get("edge_dst") is not None:
+                        edge_rows.append(
+                            {"frame_id": int(fi), "edge_src": raw.get("edge_src"),
+                             "edge_dst": raw.get("edge_dst"), "edge_team": raw.get("edge_team")}
+                        )
+                    post = payload.get("confirmed_action")
+                    if isinstance(post, dict) and post:
+                        event_rows.append(
+                            {"frame_id": int(fi), "event_type": post.get("event_type"),
+                             "player_id": post.get("player_slot_id") or post.get("player_id"),
+                             "receiver_id": post.get("receiver_slot_id") or post.get("receiver_id")}
+                        )
+                edge_df = pd.DataFrame(edge_rows) if edge_rows else pd.DataFrame(columns=["frame_id", "edge_src", "edge_dst", "edge_team"])
+                events_df = pd.DataFrame(event_rows) if event_rows else pd.DataFrame(columns=["frame_id", "event_type", "player_id", "receiver_id"])
+
+                conversion_payload = {
                     "person_slot_assignments": dict(conversion_summary.person_slot_assignments),
                     "referee_slot_assignments": dict(conversion_summary.referee_slot_assignments),
-                },
-                show=False,
-            )
-            logger.info(f"PathCRF dedicated video saved to: {pathcrf_video_output}")
+                }
+
+            else:
+                # Rolling: tracking del builder (incremental) o del ultimo checkpoint (snapshot)
+                tracking_df = None
+                builder = actions_phase.builder
+                if builder is not None and builder.is_ready and builder.tracking_df is not None:
+                    tracking_df = builder.tracking_df
+                elif hasattr(actions_phase, '_last_tracking_df') and actions_phase._last_tracking_df is not None:
+                    tracking_df = actions_phase._last_tracking_df
+                else:
+                    logger.warning("PathCRF render skip: no hay tracking disponible.")
+                    should_render = False
+
+                if should_render:
+                    edge_df = rolling_artifacts.get("emitted_edges_df")
+                    if edge_df is None or (hasattr(edge_df, 'empty') and edge_df.empty):
+                        logger.warning("PathCRF render skip: no hay edges emitidos.")
+                        should_render = False
+
+                if should_render:
+                    if "frame_id" not in edge_df.columns:
+                        edge_df = edge_df.reset_index()
+                    if "frame_id" not in edge_df.columns:
+                        edge_df["frame_id"] = range(len(edge_df))
+
+                    events_df = rolling_artifacts.get("postprocessed_actions_df", pd.DataFrame())
+                    if not events_df.empty and "frame_id" not in events_df.columns:
+                        events_df["frame_id"] = range(len(events_df))
+
+                    conversion_payload = {}
+                    if builder is not None and hasattr(builder, 'raw_to_slot'):
+                        conversion_payload = {
+                            "person_slot_assignments": dict(builder.raw_to_slot),
+                            "referee_slot_assignments": {},
+                        }
+                    elif hasattr(actions_phase, '_last_person_slots'):
+                        conversion_payload = {
+                            "person_slot_assignments": dict(actions_phase._last_person_slots),
+                            "referee_slot_assignments": dict(actions_phase._last_referee_slots),
+                        }
+
+            if should_render:
+                PathCRFDrawer().render_tracking_and_edges(
+                    tracking=tracking_df,
+                    edge_sequence=edge_df,
+                    events=events_df,
+                    output_path=pathcrf_video_output,
+                    fps=fps_for_actions,
+                    video_path=video_path,
+                    tracks_path=output_path_named,
+                    conversion_summary=conversion_payload,
+                    show=False,
+                )
+                logger.info(f"PathCRF dedicated video saved to: {pathcrf_video_output}")
         except Exception:
             logger.exception("No se pudo generar el video dedicado de PathCRF.")
 
@@ -645,6 +761,7 @@ def run_tracking_pipeline(args):
         evaluator = Evaluator()
         evaluation = evaluator.evaluate(["player", "ball"], tracks)
         summary = dict(evaluation["player"]["summary"])
+        summary.update(rolling_fields)
         ball_summary = evaluation.get("ball", {}).get("summary", {})
         summary["ball_coverage"] = float(ball_summary.get("mean_coverage", 0.0))
         summary["ball_tracks"] = int(ball_summary.get("num_tracks", 0))

@@ -26,6 +26,7 @@ class ActionsDetectorPhase(Phase):
         clean_out = dict(clean_in)
         clean_out["actions_incremental"] = {
             "raw_edge": runtime_result.raw_edge,
+            "raw_edge_batch": runtime_result.raw_edge_batch,
             "confirmed_action": runtime_result.confirmed_action,
             "action_metadata": runtime_result.action_metadata,
         }

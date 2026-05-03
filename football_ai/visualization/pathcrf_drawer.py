@@ -582,7 +582,7 @@ class PathCRFDrawer:
     ) -> Path:
         tracking_df = self._normalize_frame_df(tracking)
         edge_df = self._normalize_frame_df(edge_sequence)
-        edge_df = edge_df.reindex(tracking_df.index).ffill().bfill()
+        edge_df = edge_df.reindex(tracking_df.index)  # sin ffill/bfill: solo edges reales por frame
 
         events_df = None
         if events is not None and not events.empty:

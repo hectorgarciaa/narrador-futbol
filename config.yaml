@@ -220,13 +220,47 @@ tracking:
     strict_control_distance_px: 60.0
   actions:
     enabled: true
+    mode: rolling   # legacy | rolling | disabled
+
+    # ── Live production: snapshot fijo, delay 2s max ──
     fps: 25.0
-    cadence_frames: 10
+    cadence_frames: 40          # checkpoint cada 40 frames (1.6s de video)
     min_frames_warmup: 50
     min_event_duration: 10
     window_size_frames: 120
-    sample_freq: 5
+    sample_freq: 5              # obligatorio: sf=3 o 4 rompen F1
     window_seconds: 10.0
+
+    # rolling-specific
+    emit_delay_frames: 50       # 2.0s de latencia max para narracion live
+    emit_frames: 40             # misma ventana que cadence
+
+    # PathCRF model
+    repo_path: football_ai/actions/repo/pathcrf
+    trial: 120
+    model_file: state_dict_best_acc.pt
+    device: auto                # auto=cuda si hay GPU, else cpu
+    use_crf: true
+    decode: indep
+
+    # async (rolling mode) — inferencia PathCRF en thread separado
+    async_enabled: true
+    max_workers: 1
+    drop_policy: latest         # latest | skip
+
+    # incremental tracking — desactivado para produccion (snap fijo, 0 fallbacks)
+    snapshot_window_frames: 750                          # ventana fija de 750 frames
+    incremental_tracking: false                          # false=snapshot bounded
+    incremental_tracking_mode: adapter_tail_replace      # solo si incremental_tracking=true
+    incremental_recompute_tail_frames: 75
+    incremental_tail_overlap_frames: 100
+    incremental_validate_every: 10
+    incremental_validation_tolerance: 0.001
+    incremental_fallback_on_mismatch: true
+
+    # debug
+    smooth_edges: false
+    export_debug: false         # false=0 archivos en rolling_online/
     strict_control_distance_ratio_to_height: 0.65
     loose_control_distance_px: 95.0
     loose_control_distance_ratio_to_height: 1.0

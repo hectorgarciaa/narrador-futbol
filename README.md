@@ -39,6 +39,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 
 ### 🚧 Fase 2: Detección de acciones
 - Seleccionar y adaptar una red preentrenada para detectar acciones de fútbol (pase, tiro, gol, falta, tarjeta, penal…).
+- El flujo rolling de acciones se ejecuta ahora en modo snapshot (adapter offline por cadencia) con `scripts/actions/run_rolling_pathcrf.py`; `--tracking-path` queda solo como modo diagnóstico.
 
 ### 📅 Fase 3: Generación de comentarios con LLM
 - Integrar información de tracking y acciones y enviarla a un LLM para generar comentarios expresivos y contextualizados.
@@ -818,6 +819,28 @@ Notas:
 - el wrapper local soporta los checkpoints `set_*` incluidos en el repo clonado aunque la `venv` no tenga `torch_geometric`; si se quisiera usar un checkpoint `gat`, entonces sí habría que instalar esa dependencia;
 - `ball_x/ball_y` se deja vacío de forma deliberada para no contaminar PathCRF con una proyección de balón poco fiable.
 - el postproceso semántico actual añade dos capas encima de `detect_events`: reclasificación de inicios de episodio a `corner`, `throw_in` y `goalkick`, y una heurística de `shot` adaptada al flujo local basado en `kick/control/out`.
+
+### Ejecutar pipeline live snapshots (aislado)
+```bash
+python scripts/actions/run_live_snapshots_pathcrf.py video_prueba_corto
+```
+
+Este modo reproduce el bridge por snapshots de forma aislada:
+- recorre `tracks.json` frame a frame;
+- genera snapshots acumulados cada `N` frames (`--snapshot-interval-frames`) tras warmup (`--min-frames`);
+- en cada snapshot vuelve a ejecutar PathCRF legacy completo;
+- deja resultados por snapshot y `live_snapshots_summary.json`.
+
+### Ejecutar pipeline incremental (aislado)
+```bash
+python scripts/actions/run_incremental_pathcrf.py video_prueba_corto
+```
+
+Este modo ejecuta `ActionsRuntime` causal:
+- actualiza estado en cada frame;
+- corre inferencia PathCRF cada `N` frames (`--cadence-frames`) tras warmup (`--min-frames-warmup`);
+- aplica confirmación/cooldown de acciones en línea;
+- exporta `tracking.parquet`, `edge_sequence.parquet`, `events_semantic.parquet` y `runtime_checkpoints.json`.
 
 ### Comparar PathCRF legacy vs incremental
 ```bash

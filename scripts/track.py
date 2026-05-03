@@ -94,8 +94,14 @@ def parse_args():
         action="store_true",
         help=(
             "No actualiza data/posiciones_etiquetadas/common/tracking_metrics.csv. "
-            "Útil para benchmarks aislados."
+            "Util para benchmarks aislados."
         ),
+    )
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=None,
+        help="Maximo numero de frames a procesar (util para pruebas rapidas).",
     )
     return parser.parse_args()
 

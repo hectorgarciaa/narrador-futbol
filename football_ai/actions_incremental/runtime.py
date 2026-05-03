@@ -35,11 +35,13 @@ class ActionsRuntimeConfig:
     sample_freq: int | None = None
     device: str = "auto"
     confirmation_cooldown_frames: int = 15
+    inference_batch_frames: int | None = None
 
 
 @dataclass
 class ActionsRuntimeResult:
     raw_edge: dict[str, Any] | None
+    raw_edge_batch: list[dict[str, Any]]
     confirmed_action: dict[str, Any] | None
     action_metadata: dict[str, Any]
     summary: ActionsDetectorSummary
@@ -93,6 +95,7 @@ class ActionsRuntime:
             }
             return ActionsRuntimeResult(
                 raw_edge=self._last_raw_edge,
+                raw_edge_batch=[],
                 confirmed_action=None,
                 action_metadata=metadata,
                 summary=self.detector.build_materialized_slot_state()[1],
@@ -104,15 +107,19 @@ class ActionsRuntime:
         self._last_inference_frame = int(frame_index)
 
         started = perf_counter()
-        edge_sequence_df, semantic_events_df = self._run_pathcrf(tracking_df)
+        batch_tracking_df = self._select_inference_batch(tracking_df)
+        edge_sequence_df, semantic_events_df = self._run_pathcrf(batch_tracking_df)
         timings["pathcrf_infer_ms"] = (perf_counter() - started) * 1000.0
 
         started = perf_counter()
-        raw_edge = self._build_latest_raw_edge(
+        raw_edge_batch = self._build_batch_raw_edges(
             edge_sequence_df=edge_sequence_df,
+            batch_tracking_df=batch_tracking_df,
             window_start_frame=snapshot.window_start_frame,
-            window_end_frame=snapshot.window_end_frame,
             summary=summary,
+        )
+        raw_edge = self._build_latest_raw_edge(
+            raw_edge_batch=raw_edge_batch,
         )
         confirmed_action = self._build_confirmed_action(
             semantic_events_df=semantic_events_df,
@@ -131,6 +138,7 @@ class ActionsRuntime:
             "window_start_frame": int(snapshot.window_start_frame),
             "window_end_frame": int(snapshot.window_end_frame),
             "frame_count": int(snapshot.frame_count),
+            "inference_batch_frames": int(len(batch_tracking_df)),
             "edge_rows": int(len(edge_sequence_df)),
             "event_rows": int(len(semantic_events_df)),
             **timings,
@@ -139,10 +147,22 @@ class ActionsRuntime:
 
         return ActionsRuntimeResult(
             raw_edge=raw_edge,
+            raw_edge_batch=raw_edge_batch,
             confirmed_action=confirmed_action,
             action_metadata=metadata,
             summary=summary,
         )
+
+    def _select_inference_batch(self, tracking_df: pd.DataFrame) -> pd.DataFrame:
+        if tracking_df.empty:
+            return tracking_df
+        batch_frames = self.config.inference_batch_frames
+        if batch_frames is None or int(batch_frames) <= 0:
+            batch_frames = int(self.config.cadence_frames)
+        batch_frames = max(int(batch_frames), 1)
+        if len(tracking_df) <= batch_frames:
+            return tracking_df.copy()
+        return tracking_df.tail(batch_frames).copy()
 
     def _build_model(self):
         model = self._pathcrf_utils.build_model(self._trial_args, device=self._device)
@@ -193,35 +213,58 @@ class ActionsRuntime:
         semantic_events_df = apply_shot_heuristic(semantic_events_df, fps=effective_fps)
         return edge_sequence_df, semantic_events_df
 
-    def _build_latest_raw_edge(
+    def _build_batch_raw_edges(
         self,
         *,
         edge_sequence_df: pd.DataFrame,
+        batch_tracking_df: pd.DataFrame,
         window_start_frame: int,
-        window_end_frame: int,
         summary: ActionsDetectorSummary,
-    ) -> dict[str, Any] | None:
+    ) -> list[dict[str, Any]]:
         if edge_sequence_df.empty:
-            return None
-        row = edge_sequence_df.iloc[-1].to_dict()
-        local_frame = self._coerce_int(row.get("frame_id"))
-        absolute_frame = window_end_frame if local_frame is None else window_start_frame + local_frame
-        edge_src = self._coerce_optional_str(row.get("edge_src"))
-        edge_dst = self._coerce_optional_str(row.get("edge_dst"))
-        payload = {
-            "frame_id": absolute_frame,
-            "window_frame_id": local_frame,
-            "edge_src": edge_src,
-            "edge_dst": edge_dst,
-            "edge_team": self._coerce_optional_str(row.get("edge_team")) if "edge_team" in row else None,
-            "edge_src_track_id": self._slot_to_track_id(edge_src, summary.person_slot_assignments),
-            "edge_dst_track_id": self._slot_to_track_id(edge_dst, summary.person_slot_assignments),
-        }
-        for key, value in row.items():
-            if key in payload:
+            return []
+        tracking_frame_ids: list[int | None] = []
+        if "frame_id" in batch_tracking_df.columns:
+            for value in batch_tracking_df["frame_id"].tolist():
+                tracking_frame_ids.append(self._coerce_int(value))
+        rows: list[dict[str, Any]] = []
+        for idx, (_, row_series) in enumerate(edge_sequence_df.iterrows()):
+            row = row_series.to_dict()
+            local_frame = self._coerce_int(row.get("frame_id"))
+            if local_frame is None:
+                if idx < len(tracking_frame_ids):
+                    local_frame = tracking_frame_ids[idx]
+                elif isinstance(row_series.name, int):
+                    local_frame = int(row_series.name)
+            if local_frame is None:
                 continue
-            payload[key] = self._coerce_scalar(value)
-        return payload
+            absolute_frame = window_start_frame + local_frame
+            edge_src = self._coerce_optional_str(row.get("edge_src"))
+            edge_dst = self._coerce_optional_str(row.get("edge_dst"))
+            payload = {
+                "frame_id": absolute_frame,
+                "window_frame_id": local_frame,
+                "edge_src": edge_src,
+                "edge_dst": edge_dst,
+                "edge_team": self._coerce_optional_str(row.get("edge_team")) if "edge_team" in row else None,
+                "edge_src_track_id": self._slot_to_track_id(edge_src, summary.person_slot_assignments),
+                "edge_dst_track_id": self._slot_to_track_id(edge_dst, summary.person_slot_assignments),
+            }
+            for key, value in row.items():
+                if key in payload:
+                    continue
+                payload[key] = self._coerce_scalar(value)
+            rows.append(payload)
+        return rows
+
+    @staticmethod
+    def _build_latest_raw_edge(
+        *,
+        raw_edge_batch: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not raw_edge_batch:
+            return None
+        return dict(raw_edge_batch[-1])
 
     def _build_confirmed_action(
         self,

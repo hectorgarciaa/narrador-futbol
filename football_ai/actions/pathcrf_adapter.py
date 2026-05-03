@@ -145,9 +145,43 @@ class PathCRFTracksAdapter:
         with tracks_path.open("r", encoding="utf-8") as f:
             tracks = json.load(f)
 
+        target_path = Path(output_path) if output_path is not None else self._default_output_path(tracks_path)
+        return self._convert(tracks, target_path)
+
+    def convert_tracks(self, tracks: Mapping[str, Any], output_path: str | Path) -> tuple[Path, ConversionSummary]:
+        return self._convert(tracks, Path(output_path))
+
+    def convert_tracks_to_df(self, tracks: Mapping[str, Any]) -> pd.DataFrame:
         frame_count = self._infer_frame_count(tracks)
         if frame_count <= 0:
-            raise ValueError(f"No se encontraron frames en {tracks_path}")
+            raise ValueError("No se encontraron frames en los tracks")
+        records = self._build_track_records(tracks, frame_count)
+        person_assignments, referee_assignments, synthetic_slots = self._assign_slots(records)
+        return self._build_tracking_dataframe(
+            tracks=tracks, frame_count=frame_count, records=records,
+            person_assignments=person_assignments, referee_assignments=referee_assignments,
+        )
+
+    def convert_tracks_to_df_with_slots(
+        self, tracks: Mapping[str, Any],
+    ) -> tuple[pd.DataFrame, dict[str, str], dict[str, str]]:
+        frame_count = self._infer_frame_count(tracks)
+        if frame_count <= 0:
+            raise ValueError("No se encontraron frames en los tracks")
+        records = self._build_track_records(tracks, frame_count)
+        person_assignments, referee_assignments, synthetic_slots = self._assign_slots(records)
+        df = self._build_tracking_dataframe(
+            tracks=tracks, frame_count=frame_count, records=records,
+            person_assignments=person_assignments, referee_assignments=referee_assignments,
+        )
+        person_slot_map = {raw_id: slot for slot, raw_id in person_assignments.items()}
+        referee_slot_map = {raw_id: slot for slot, raw_id in referee_assignments.items()}
+        return df, person_slot_map, referee_slot_map
+
+    def _convert(self, tracks: Mapping[str, Any], target_path: Path) -> tuple[Path, ConversionSummary]:
+        frame_count = self._infer_frame_count(tracks)
+        if frame_count <= 0:
+            raise ValueError("No se encontraron frames en los tracks")
 
         records = self._build_track_records(tracks, frame_count)
         person_assignments, referee_assignments, synthetic_slots = self._assign_slots(records)
@@ -159,7 +193,6 @@ class PathCRFTracksAdapter:
             referee_assignments=referee_assignments,
         )
 
-        target_path = Path(output_path) if output_path is not None else self._default_output_path(tracks_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         frame_df.to_parquet(target_path, index=False)
 
@@ -643,8 +676,8 @@ class PathCRFTracksAdapter:
         class_names: tuple[str, ...] = ("player", "goalkeeper"),
         max_speed_mps: float | None = None,
     ) -> dict[str, pd.DataFrame]:
-        slot_frames = {
-            slot_name: pd.DataFrame(index=np.arange(frame_count), columns=["x", "y"], dtype=np.float32)
+        slot_arrays: dict[str, np.ndarray] = {
+            slot_name: np.full((frame_count, 2), np.nan, dtype=np.float32)
             for slot_name in ordered_slots
         }
         for class_name in class_names:
@@ -660,16 +693,19 @@ class PathCRFTracksAdapter:
                     field_position = self._safe_field_position(payload.get("field_position_m"))
                     if field_position is None:
                         continue
-                    slot_frames[slot_name].loc[frame_id, ["x", "y"]] = field_position
+                    slot_arrays[slot_name][frame_id] = field_position
 
-        for slot_name, slot_df in slot_frames.items():
+        slot_frames: dict[str, pd.DataFrame] = {}
+        speed = (
+            float(max_speed_mps)
+            if max_speed_mps is not None
+            else self.config.player_outlier_speed_mps
+        )
+        for slot_name, arr in slot_arrays.items():
+            slot_df = pd.DataFrame(arr, columns=["x", "y"], dtype=np.float32)
             slot_frames[slot_name] = self._stabilize_xy(
                 self._interpolate_xy(slot_df),
-                max_speed_mps=(
-                    float(max_speed_mps)
-                    if max_speed_mps is not None
-                    else self.config.player_outlier_speed_mps
-                ),
+                max_speed_mps=speed,
             )
         return slot_frames
 
@@ -719,27 +755,34 @@ class PathCRFTracksAdapter:
         dt = 1.0 / float(self.config.fps)
         max_step = float(max_speed_mps) * dt
         xy = result[["x", "y"]].to_numpy(dtype=np.float32, copy=True)
-        if len(xy) < 3:
+        n = len(xy)
+        if n < 3:
             return result
 
-        for idx in range(1, len(xy) - 1):
-            prev_xy = xy[idx - 1]
-            curr_xy = xy[idx]
-            next_xy = xy[idx + 1]
-            if not (
-                np.all(np.isfinite(prev_xy))
-                and np.all(np.isfinite(curr_xy))
-                and np.all(np.isfinite(next_xy))
-            ):
-                continue
-            prev_jump = float(np.linalg.norm(curr_xy - prev_xy))
-            next_jump = float(np.linalg.norm(next_xy - curr_xy))
-            bridge_jump = float(np.linalg.norm(next_xy - prev_xy))
-            if prev_jump <= max_step or next_jump <= max_step:
-                continue
-            if bridge_jump > max_step:
-                continue
-            xy[idx] = (prev_xy + next_xy) * 0.5
+        diffs = np.diff(xy, axis=0)
+        jumps = np.linalg.norm(diffs, axis=1)
+
+        prev_jumps = jumps[:-1]
+        next_jumps = jumps[1:]
+        bridge_diffs = xy[2:] - xy[:-2]
+        bridge_jumps = np.linalg.norm(bridge_diffs, axis=1)
+
+        inner_finite = (
+            np.all(np.isfinite(xy[:-2]), axis=1)
+            & np.all(np.isfinite(xy[1:-1]), axis=1)
+            & np.all(np.isfinite(xy[2:]), axis=1)
+        )
+
+        spike_mask = (
+            inner_finite
+            & (prev_jumps > max_step)
+            & (next_jumps > max_step)
+            & (bridge_jumps <= max_step)
+        )
+
+        spike_indices = np.where(spike_mask)[0] + 1
+        if len(spike_indices) > 0:
+            xy[spike_indices] = (xy[spike_indices - 1] + xy[spike_indices + 1]) * 0.5
 
         result.loc[:, ["x", "y"]] = xy
         return result
@@ -786,85 +829,101 @@ class PathCRFTracksAdapter:
     def _limit_step_jitter(self, slot_df: pd.DataFrame, max_speed_mps: float) -> pd.DataFrame:
         result = slot_df.copy()
         xy = result[["x", "y"]].to_numpy(dtype=np.float32, copy=True)
-        if len(xy) < 2:
+        n = len(xy)
+        if n < 2:
             return result
 
         dt = 1.0 / float(self.config.fps)
         max_step = float(max_speed_mps) * dt
         soft_step = max_step * 0.75
 
-        for idx in range(1, len(xy)):
-            prev_xy = xy[idx - 1]
-            curr_xy = xy[idx]
-            if not (np.all(np.isfinite(prev_xy)) and np.all(np.isfinite(curr_xy))):
+        for idx in range(1, n):
+            prev = xy[idx - 1]
+            curr = xy[idx]
+            if not (np.isfinite(prev[0]) and np.isfinite(prev[1]) and np.isfinite(curr[0]) and np.isfinite(curr[1])):
                 continue
-            delta = curr_xy - prev_xy
-            step = float(np.linalg.norm(delta))
-            if step <= soft_step or step <= 1e-6:
+            dx = curr[0] - prev[0]
+            dy = curr[1] - prev[1]
+            step_sq = dx * dx + dy * dy
+            if step_sq <= soft_step * soft_step or step_sq <= 1e-12:
                 continue
-            scale = soft_step / step
-            xy[idx] = prev_xy + (delta * scale)
+            scale = soft_step / (math.sqrt(step_sq))
+            xy[idx, 0] = prev[0] + dx * scale
+            xy[idx, 1] = prev[1] + dy * scale
 
         result.loc[:, ["x", "y"]] = xy
         return result
 
     def _fill_team_templates(self, slot_tracks: dict[str, pd.DataFrame], side: str) -> None:
         pitch_template = self._team_template_for_side(side)
+        expected = self.config.expected_players_per_team
+        side_slots = [f"{side}_{idx}" for idx in range(1, expected + 1)]
+        n_frames = len(next(iter(slot_tracks.values())))
+        if n_frames == 0:
+            return
 
-        side_slots = [f"{side}_{idx}" for idx in range(1, self.config.expected_players_per_team + 1)]
-        for frame_id in range(len(next(iter(slot_tracks.values())))):
-            observed_xy = []
-            template_xy = []
-            for idx, slot_name in enumerate(side_slots):
-                row = slot_tracks[slot_name].iloc[frame_id]
-                if np.isfinite(row["x"]) and np.isfinite(row["y"]):
-                    observed_xy.append([row["x"], row["y"]])
-                    template_xy.append(pitch_template[idx])
+        xx = np.column_stack([slot_tracks[slot]["x"].to_numpy(dtype=np.float32, copy=True) for slot in side_slots])
+        yy = np.column_stack([slot_tracks[slot]["y"].to_numpy(dtype=np.float32, copy=True) for slot in side_slots])
+        valid = np.isfinite(xx) & np.isfinite(yy)
 
-            shift = np.zeros(2, dtype=np.float32)
-            if observed_xy:
-                observed_arr = np.asarray(observed_xy, dtype=np.float32)
-                template_arr = np.asarray(template_xy, dtype=np.float32)
-                shift = np.mean(observed_arr - template_arr, axis=0)
+        for frame_id in range(n_frames):
+            obs_mask = valid[frame_id]
+            if not obs_mask.any():
+                continue
+            if obs_mask.all():
+                continue
 
-            aligned_template = pitch_template + shift
-            aligned_template[:, 0] = np.clip(aligned_template[:, 0], 0.0, self.config.pitch_length_m)
-            aligned_template[:, 1] = np.clip(aligned_template[:, 1], 0.0, self.config.pitch_width_m)
+            shift = np.mean(
+                np.column_stack([xx[frame_id, obs_mask], yy[frame_id, obs_mask]]) - pitch_template[obs_mask],
+                axis=0,
+            )
+            aligned = pitch_template + shift
+            aligned[:, 0] = np.clip(aligned[:, 0], 0.0, self.config.pitch_length_m)
+            aligned[:, 1] = np.clip(aligned[:, 1], 0.0, self.config.pitch_width_m)
 
-            for idx, slot_name in enumerate(side_slots):
-                row = slot_tracks[slot_name].iloc[frame_id]
-                if np.isfinite(row["x"]) and np.isfinite(row["y"]):
-                    continue
-                slot_tracks[slot_name].loc[frame_id, ["x", "y"]] = aligned_template[idx]
+            nan_mask = ~obs_mask
+            xx[frame_id, nan_mask] = aligned[nan_mask, 0]
+            yy[frame_id, nan_mask] = aligned[nan_mask, 1]
+
+        for idx, slot_name in enumerate(side_slots):
+            slot_tracks[slot_name]["x"] = xx[:, idx]
+            slot_tracks[slot_name]["y"] = yy[:, idx]
 
     def _fill_referee_templates(self, referee_tracks: dict[str, pd.DataFrame]) -> None:
         if not referee_tracks:
             return
         ordered_slots = sorted(referee_tracks.keys())
-        for frame_id in range(len(next(iter(referee_tracks.values())))):
-            observed_xy = []
-            template_xy = []
-            for idx, slot_name in enumerate(ordered_slots):
-                row = referee_tracks[slot_name].iloc[frame_id]
-                if np.isfinite(row["x"]) and np.isfinite(row["y"]):
-                    observed_xy.append([row["x"], row["y"]])
-                    template_xy.append(REFEREE_TEMPLATE[idx])
+        n_frames = len(next(iter(referee_tracks.values())))
+        if n_frames == 0:
+            return
 
-            shift = np.zeros(2, dtype=np.float32)
-            if observed_xy:
-                observed_arr = np.asarray(observed_xy, dtype=np.float32)
-                template_arr = np.asarray(template_xy, dtype=np.float32)
-                shift = np.mean(observed_arr - template_arr, axis=0)
+        n_slots = len(ordered_slots)
+        xx = np.column_stack([referee_tracks[slot]["x"].to_numpy(dtype=np.float32, copy=True) for slot in ordered_slots])
+        yy = np.column_stack([referee_tracks[slot]["y"].to_numpy(dtype=np.float32, copy=True) for slot in ordered_slots])
+        valid = np.isfinite(xx) & np.isfinite(yy)
 
-            aligned_template = REFEREE_TEMPLATE + shift
-            aligned_template[:, 0] = np.clip(aligned_template[:, 0], 0.0, self.config.pitch_length_m)
-            aligned_template[:, 1] = np.clip(aligned_template[:, 1], 0.0, self.config.pitch_width_m)
+        for frame_id in range(n_frames):
+            obs_mask = valid[frame_id]
+            if not obs_mask.any():
+                continue
+            if obs_mask.all():
+                continue
 
-            for idx, slot_name in enumerate(ordered_slots):
-                row = referee_tracks[slot_name].iloc[frame_id]
-                if np.isfinite(row["x"]) and np.isfinite(row["y"]):
-                    continue
-                referee_tracks[slot_name].loc[frame_id, ["x", "y"]] = aligned_template[idx]
+            shift = np.mean(
+                np.column_stack([xx[frame_id, obs_mask], yy[frame_id, obs_mask]]) - REFEREE_TEMPLATE[obs_mask],
+                axis=0,
+            )
+            aligned = REFEREE_TEMPLATE + shift
+            aligned[:, 0] = np.clip(aligned[:, 0], 0.0, self.config.pitch_length_m)
+            aligned[:, 1] = np.clip(aligned[:, 1], 0.0, self.config.pitch_width_m)
+
+            nan_mask = ~obs_mask
+            xx[frame_id, nan_mask] = aligned[nan_mask, 0]
+            yy[frame_id, nan_mask] = aligned[nan_mask, 1]
+
+        for idx, slot_name in enumerate(ordered_slots):
+            referee_tracks[slot_name]["x"] = xx[:, idx]
+            referee_tracks[slot_name]["y"] = yy[:, idx]
 
     def _build_ball_and_carrier_series(
         self,
@@ -979,3 +1038,12 @@ def convert_tracks_json_to_pathcrf(
 ) -> tuple[Path, ConversionSummary]:
     adapter = PathCRFTracksAdapter(config=config)
     return adapter.convert_file(tracks_path=tracks_path, output_path=output_path)
+
+
+def convert_tracks_dict_to_pathcrf(
+    tracks: Mapping[str, Any],
+    output_path: str | Path,
+    config: PathCRFAdapterConfig | None = None,
+) -> tuple[Path, ConversionSummary]:
+    adapter = PathCRFTracksAdapter(config=config)
+    return adapter.convert_tracks(tracks, output_path)

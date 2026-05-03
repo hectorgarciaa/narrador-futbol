@@ -3,10 +3,11 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import tempfile
 import types
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 import torch
@@ -16,7 +17,7 @@ from football_ai.pipeline.paths import sanitize_video_stem
 from football_ai.visualization.pathcrf_drawer import PathCRFDrawer
 
 from .pathcrf_commentary import build_commentary_events_json
-from .pathcrf_adapter import ConversionSummary, PathCRFAdapterConfig, convert_tracks_json_to_pathcrf
+from .pathcrf_adapter import ConversionSummary, PathCRFAdapterConfig, convert_tracks_dict_to_pathcrf, convert_tracks_json_to_pathcrf
 from .pathcrf_setpieces import classify_episode_starts
 from .pathcrf_shot import apply_shot_heuristic
 
@@ -60,6 +61,9 @@ class PathCRFPipelineResult:
     summary_path: Path
     stats: dict[str, Any]
     conversion_summary: ConversionSummary | None = None
+    edge_sequence_df: pd.DataFrame | None = None
+    events_df: pd.DataFrame | None = None
+    tracking_df: pd.DataFrame | None = None
 
 
 def _resolve_repo_path(repo_path: str | Path) -> Path:
@@ -196,19 +200,85 @@ def _ensure_events_schema(events_df: pd.DataFrame) -> pd.DataFrame:
     return result[expected_columns]
 
 
+# Model cache — evita cargar state_dict del disco + build_model en cada checkpoint
+_model_cache: dict[tuple[int, str, str], tuple[Any, tuple[Any, Any, Any]]] = {}
+
+import logging
+_logger = logging.getLogger(__name__)
+
+
+def _clear_model_cache() -> None:
+    """Borra el cache de modelos PathCRF (util para tests o cambio de config)."""
+    _model_cache.clear()
+
+
+def _get_or_load_model(
+    *,
+    trial: int,
+    model_file: str,
+    device: torch.device,
+    repo_path: Path,
+    save_path: Path,
+    trial_args: dict[str, Any],
+):
+    """Carga (o recupera del cache) el modelo PathCRF y sus modulos auxiliares."""
+    cache_key = (trial, model_file, str(device))
+    if cache_key in _model_cache:
+        _logger.debug("PathCRF model cache hit (trial=%d, device=%s)", trial, device)
+        return _model_cache[cache_key]
+
+    _logger.info("PathCRF model cache miss — loading from disk (trial=%d, device=%s)", trial, device)
+    pathcrf_utils, pathcrf_inference_proc, pathcrf_postprocess_proc = _import_pathcrf_modules(repo_path, trial_args)
+
+    model = pathcrf_utils.build_model(trial_args, device=device)
+    model_path = Path(pathcrf_utils.resolve_model_path(str(save_path), model_file)).resolve()
+    state_dict = torch.load(model_path, map_location=device, weights_only=False)
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    modules = (pathcrf_utils, pathcrf_inference_proc, pathcrf_postprocess_proc)
+    _model_cache[cache_key] = (model, modules)
+    return model, modules
+
+    pathcrf_utils, pathcrf_inference_proc, pathcrf_postprocess_proc = _import_pathcrf_modules(repo_path, trial_args)
+
+    model = pathcrf_utils.build_model(trial_args, device=device)
+    model_path = Path(pathcrf_utils.resolve_model_path(str(save_path), model_file)).resolve()
+    state_dict = torch.load(model_path, map_location=device, weights_only=False)
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    modules = (pathcrf_utils, pathcrf_inference_proc, pathcrf_postprocess_proc)
+    _model_cache[cache_key] = (model, modules)
+    return model, modules
+
+
 def run_pathcrf_inference(
-    tracking_path: str | Path,
-    output_dir: str | Path,
+    tracking_path: str | Path | None = None,
+    *,
+    tracking_df: pd.DataFrame | None = None,
+    output_dir: str | Path | None = None,
+    return_df: bool = False,
     config: PathCRFInferenceConfig | None = None,
 ) -> PathCRFPipelineResult:
     inference_config = config or PathCRFInferenceConfig()
-    tracking_path = Path(tracking_path).expanduser().resolve()
-    if not tracking_path.exists():
-        raise FileNotFoundError(f"No existe el parquet de tracking para PathCRF: {tracking_path}")
 
-    output_dir = Path(output_dir).expanduser().resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_stem = _infer_output_stem(tracking_path)
+    if tracking_df is not None:
+        effective_output_dir = Path(output_dir).expanduser().resolve() if output_dir is not None else Path(tempfile.mkdtemp(prefix="pathcrf_infer_"))
+        output_stem = "tracks"
+        resolved_tracking_path = Path(":memory:")
+    elif tracking_path is not None:
+        tracking_path = Path(tracking_path).expanduser().resolve()
+        if not tracking_path.exists():
+            raise FileNotFoundError(f"No existe el parquet de tracking para PathCRF: {tracking_path}")
+        tracking_df = pd.read_parquet(tracking_path)
+        effective_output_dir = Path(output_dir).expanduser().resolve()
+        output_stem = _infer_output_stem(tracking_path)
+        resolved_tracking_path = tracking_path
+    else:
+        raise ValueError("Hay que indicar `tracking_path` o `tracking_df`.")
+
+    effective_output_dir.mkdir(parents=True, exist_ok=True)
 
     repo_path = _resolve_repo_path(inference_config.repo_path)
     save_path = repo_path / "saved" / f"{int(inference_config.trial):03d}"
@@ -218,14 +288,16 @@ def run_pathcrf_inference(
     with (save_path / "args.json").open("r", encoding="utf-8") as f:
         trial_args = json.load(f)
 
-    pathcrf_utils, pathcrf_inference, pathcrf_postprocess = _import_pathcrf_modules(repo_path, trial_args)
     device = _select_device(inference_config.device)
-    model = pathcrf_utils.build_model(trial_args, device=device)
-    model_path = Path(pathcrf_utils.resolve_model_path(str(save_path), inference_config.model_file)).resolve()
-    state_dict = torch.load(model_path, map_location=device, weights_only=False)
-    model.load_state_dict(state_dict)
+    model, (pathcrf_utils, pathcrf_inference, pathcrf_postprocess) = _get_or_load_model(
+        trial=int(inference_config.trial),
+        model_file=str(inference_config.model_file),
+        device=device,
+        repo_path=repo_path,
+        save_path=save_path,
+        trial_args=trial_args,
+    )
 
-    tracking_df = pd.read_parquet(tracking_path)
     effective_fps = (
         float(inference_config.fps)
         if inference_config.fps is not None
@@ -266,25 +338,26 @@ def run_pathcrf_inference(
     )
     events_df = _ensure_events_schema(events_df)
 
-    edge_sequence_path = output_dir / f"{output_stem}_edge_sequence.parquet"
-    events_path = output_dir / f"{output_stem}_events.parquet"
-    macro_prev_path = output_dir / f"{output_stem}_macro_prev.parquet" if macro_prev_df is not None else None
-    macro_next_path = output_dir / f"{output_stem}_macro_next.parquet" if macro_next_df is not None else None
-    summary_path = output_dir / f"{output_stem}_summary.json"
+    edge_sequence_path = effective_output_dir / f"{output_stem}_edge_sequence.parquet"
+    events_path = effective_output_dir / f"{output_stem}_events.parquet"
+    macro_prev_path = effective_output_dir / f"{output_stem}_macro_prev.parquet" if macro_prev_df is not None else None
+    macro_next_path = effective_output_dir / f"{output_stem}_macro_next.parquet" if macro_next_df is not None else None
+    summary_path = effective_output_dir / f"{output_stem}_summary.json"
 
-    _normalize_frame_dataframe(edge_sequence_df).to_parquet(edge_sequence_path, index=False)
-    events_df.to_parquet(events_path, index=False)
-    if macro_prev_df is not None and macro_prev_path is not None:
-        _normalize_frame_dataframe(macro_prev_df).to_parquet(macro_prev_path, index=False)
-    if macro_next_df is not None and macro_next_path is not None:
-        _normalize_frame_dataframe(macro_next_df).to_parquet(macro_next_path, index=False)
+    if not return_df:
+        _normalize_frame_dataframe(edge_sequence_df).to_parquet(edge_sequence_path, index=False)
+        events_df.to_parquet(events_path, index=False)
+        if macro_prev_df is not None and macro_prev_path is not None:
+            _normalize_frame_dataframe(macro_prev_df).to_parquet(macro_prev_path, index=False)
+        if macro_next_df is not None and macro_next_path is not None:
+            _normalize_frame_dataframe(macro_next_df).to_parquet(macro_next_path, index=False)
 
     summary_payload = {
-        "tracking_path": str(tracking_path),
+        "tracking_path": str(resolved_tracking_path),
         "repo_path": str(repo_path),
         "trial": int(inference_config.trial),
         "trial_args": trial_args,
-        "model_path": str(model_path),
+        "model_path": str(save_path / inference_config.model_file),
         "device": str(device),
         "use_crf": bool(inference_config.use_crf),
         "decode": str(inference_config.decode),
@@ -302,11 +375,12 @@ def run_pathcrf_inference(
         "event_rows": int(len(events_df)),
         "stats": stats,
     }
-    _write_summary_json(summary_path, summary_payload)
+    if not return_df:
+        _write_summary_json(summary_path, summary_payload)
 
     return PathCRFPipelineResult(
         tracks_path=None,
-        tracking_path=tracking_path,
+        tracking_path=resolved_tracking_path,
         tracking_summary_path=None,
         edge_sequence_path=edge_sequence_path,
         events_path=events_path,
@@ -318,6 +392,9 @@ def run_pathcrf_inference(
         summary_path=summary_path,
         stats=stats,
         conversion_summary=None,
+        edge_sequence_df=edge_sequence_df if return_df else None,
+        events_df=events_df if return_df else None,
+        tracking_df=tracking_df if return_df else None,
     )
 
 
@@ -325,6 +402,7 @@ def run_pathcrf_pipeline(
     *,
     output_dir: str | Path,
     tracks_path: str | Path | None = None,
+    tracks_dict: Mapping[str, Any] | None = None,
     tracking_path: str | Path | None = None,
     video_path: str | Path | None = None,
     tracking_output_path: str | Path | None = None,
@@ -333,8 +411,8 @@ def run_pathcrf_pipeline(
     render_config: PathCRFRenderConfig | None = None,
     render_output_path: str | Path | None = None,
 ) -> PathCRFPipelineResult:
-    if tracks_path is None and tracking_path is None:
-        raise ValueError("Hay que indicar `tracks_path` o `tracking_path` para ejecutar PathCRF.")
+    if tracks_path is None and tracking_path is None and tracks_dict is None:
+        raise ValueError("Hay que indicar `tracks_path`, `tracks_dict` o `tracking_path` para ejecutar PathCRF.")
 
     output_dir = Path(output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -346,20 +424,34 @@ def run_pathcrf_pipeline(
     tracking_summary_path = None
 
     if resolved_tracking_path is None:
-        if resolved_tracks_path is None or not resolved_tracks_path.exists():
+        if tracks_dict is not None:
+            output_stem = "tracks"
+            resolved_tracking_path = (
+                Path(tracking_output_path).expanduser().resolve()
+                if tracking_output_path is not None
+                else output_dir / f"{output_stem}_tracking.parquet"
+            )
+            resolved_tracking_path, conversion_summary = convert_tracks_dict_to_pathcrf(
+                tracks=tracks_dict,
+                output_path=resolved_tracking_path,
+                config=adapter_config,
+            )
+            tracking_summary_path = resolved_tracking_path.with_suffix(".summary.json")
+        elif resolved_tracks_path is not None and resolved_tracks_path.exists():
+            output_stem = _infer_output_stem(resolved_tracks_path)
+            resolved_tracking_path = (
+                Path(tracking_output_path).expanduser().resolve()
+                if tracking_output_path is not None
+                else output_dir / f"{output_stem}_tracking.parquet"
+            )
+            resolved_tracking_path, conversion_summary = convert_tracks_json_to_pathcrf(
+                tracks_path=resolved_tracks_path,
+                output_path=resolved_tracking_path,
+                config=adapter_config,
+            )
+            tracking_summary_path = resolved_tracking_path.with_suffix(".summary.json")
+        else:
             raise FileNotFoundError(f"No existe el tracks JSON indicado: {resolved_tracks_path}")
-        output_stem = _infer_output_stem(resolved_tracks_path)
-        resolved_tracking_path = (
-            Path(tracking_output_path).expanduser().resolve()
-            if tracking_output_path is not None
-            else output_dir / f"{output_stem}_tracking.parquet"
-        )
-        resolved_tracking_path, conversion_summary = convert_tracks_json_to_pathcrf(
-            tracks_path=resolved_tracks_path,
-            output_path=resolved_tracking_path,
-            config=adapter_config,
-        )
-        tracking_summary_path = resolved_tracking_path.with_suffix(".summary.json")
     else:
         if not resolved_tracking_path.exists():
             raise FileNotFoundError(f"No existe el parquet indicado: {resolved_tracking_path}")
@@ -387,7 +479,7 @@ def run_pathcrf_pipeline(
         asdict(conversion_summary) if conversion_summary is not None else _read_json_if_exists(tracking_summary_path)
     )
     commentary_json_path = None
-    if resolved_tracks_path is not None and conversion_summary_payload is not None:
+    if resolved_tracks_path is not None and resolved_tracks_path.exists() and conversion_summary_payload is not None:
         commentary_json_path = output_dir / f"{output_stem}_commentary_events.json"
         commentary_json_path = build_commentary_events_json(
             events=semantic_events_df,
