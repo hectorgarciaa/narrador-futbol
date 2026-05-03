@@ -30,8 +30,8 @@ ROLE_SLOT_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 LATERAL_ROLE_FAMILIES: dict[str, tuple[str, ...]] = {
-    "LEFT": ("CI", "LI", "MI", "EI"),
-    "RIGHT": ("CD", "LD", "MD", "ED"),
+    "LEFT": ("LI", "MI", "EI"),
+    "RIGHT": ("LD", "MD", "ED"),
 }
 ROLE_TO_LATERAL_FAMILY = {
     role_label: family_name
@@ -39,13 +39,11 @@ ROLE_TO_LATERAL_FAMILY = {
     for role_label in role_labels
 }
 ROLE_SLOT_ANCHORS: dict[str, tuple[float, float]] = {
-    "CI": (0.40, 0.12),
     "LI": (0.26, 0.12),
     "DFC_IZQ": (0.18, 0.34),
     "DFC_CENT": (0.16, 0.50),
     "DFC_DER": (0.18, 0.66),
     "LD": (0.26, 0.88),
-    "CD": (0.40, 0.88),
     "MC": (0.52, 0.50),
     "MI": (0.60, 0.22),
     "MD": (0.60, 0.78),

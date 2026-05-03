@@ -4,7 +4,7 @@ from .lineup_spec import normalize_slot_token
 
 
 DEFAULT_SPECIAL_SEED_CANONICAL_IDS = (1, 2)
-DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = ("CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT")
+DEFAULT_SPECIAL_SEED_DEFENDER_ROLES = ("LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT")
 DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH = "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
 DEFAULT_EXPECTED_ROLES_BY_TEAM = {
     "Real Madrid": ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"],
