@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -57,6 +58,18 @@ class CommentaryHTTPService:
             return None
         return self.audio_pipeline.voice_synthesizer.model_name
 
+    @property
+    def tts_streaming(self) -> bool:
+        if self.audio_pipeline is None:
+            return False
+        return bool(
+            getattr(
+                self.audio_pipeline.voice_synthesizer,
+                "supports_streaming_audio",
+                False,
+            )
+        )
+
     def health_payload(self) -> dict[str, Any]:
         backend_name_getter = getattr(
             self.commentary_generator,
@@ -72,6 +85,7 @@ class CommentaryHTTPService:
             "status": "ok",
             "model": self.model,
             "tts_model": self.tts_model,
+            "tts_streaming": self.tts_streaming,
             "text_only": self.default_text_only,
             "llm_backend": backend_name,
             "llm_reachable": self.commentary_generator.check_health(),
@@ -153,6 +167,48 @@ class CommentaryHTTPService:
             },
         )
         response_payload["manifest_path"] = str(Path(manifest_path).expanduser().resolve())
+
+    def _stream_synthesize_to_file(
+        self,
+        *,
+        text: str,
+        output_path: Path,
+    ):
+        if self.audio_pipeline is None:
+            raise RuntimeError(
+                "El servidor se inicio en modo solo texto y no puede generar audio."
+            )
+        voice_synthesizer = self.audio_pipeline.voice_synthesizer
+        if not bool(getattr(voice_synthesizer, "supports_streaming_audio", False)):
+            audio_path_value = voice_synthesizer.synthesize_to_file(text, output_path)
+            return audio_path_value
+
+        suffix = str(getattr(voice_synthesizer, "output_suffix", "") or "").strip()
+        if suffix and output_path.suffix.lower() != suffix.lower():
+            output_path = output_path.with_suffix(suffix)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_mimetype = str(
+            getattr(voice_synthesizer, "audio_mimetype", "application/octet-stream")
+        )
+        wrote_bytes = False
+        chunk_index = 0
+        with open(output_path, "wb") as f:
+            for chunk in voice_synthesizer.iter_audio_chunks(text):
+                if not chunk:
+                    continue
+                f.write(chunk)
+                f.flush()
+                wrote_bytes = True
+                chunk_index += 1
+                yield "audio_chunk", {
+                    "audio_path": str(output_path),
+                    "content_type": audio_mimetype,
+                    "chunk_index": chunk_index,
+                    "data_base64": base64.b64encode(chunk).decode("ascii"),
+                }
+        if not wrote_bytes:
+            raise RuntimeError("El backend TTS no devolvio audio para la peticion.")
+        return output_path
 
     def _event_identity(self, event: CommentaryEvent) -> tuple[str, str, str]:
         team_scope = event.team_name or event.team_in_favor or ""
@@ -314,12 +370,23 @@ class CommentaryHTTPService:
                             )
                             yield "tts_start", {
                                 "audio_path": str(output_path),
+                                "streaming_audio": bool(
+                                    getattr(
+                                        self.audio_pipeline.voice_synthesizer,
+                                        "supports_streaming_audio",
+                                        False,
+                                    )
+                                ),
                             }
                             tts_start = time.perf_counter()
-                            audio_path_value = self.audio_pipeline.voice_synthesizer.synthesize_to_file(
-                                commentary_result.commentary,
-                                output_path,
+                            audio_path_value = yield from self._stream_synthesize_to_file(
+                                text=commentary_result.commentary,
+                                output_path=output_path,
                             )
+                            if audio_path_value is None:
+                                raise RuntimeError(
+                                    "No se pudo resolver la ruta del audio streaming."
+                                )
                             voice_label = getattr(
                                 self.audio_pipeline.voice_synthesizer,
                                 "last_voice_label",

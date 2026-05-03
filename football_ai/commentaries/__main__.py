@@ -13,6 +13,9 @@ from .generator import (
 )
 from .server import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, create_http_server
 from .voice import (
+    DEFAULT_ELEVENLABS_LANGUAGE_CODE,
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
     DEFAULT_QWEN_CPP_THREADS,
     DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT,
     DEFAULT_QWEN_REFERENCE_TEXT,
@@ -21,6 +24,7 @@ from .voice import (
     DEFAULT_QWEN_VOICE_DESIGN_PROMPT,
     DEFAULT_QWEN_USE_FLASH_ATTENTION,
     DEFAULT_TTS_BACKEND,
+    TTS_BACKEND_CHOICES,
     CommentaryAudioPipeline,
     build_voice_synthesizer,
 )
@@ -58,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--tts-backend",
-        choices=["xtts", "qwen", "qwen_cpp"],
+        choices=TTS_BACKEND_CHOICES,
         default=DEFAULT_TTS_BACKEND,
         help="Backend de voz a usar.",
     )
@@ -168,6 +172,86 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ruta al directorio con los modelos GGUF de qwen3-tts.cpp.",
     )
     parser.add_argument(
+        "--elevenlabs-api-key",
+        default=None,
+        help="API key de ElevenLabs. Si no se indica, usa ELEVENLABS_API_KEY.",
+    )
+    parser.add_argument(
+        "--elevenlabs-voice-id",
+        default=None,
+        help="ID de la voz de ElevenLabs. Si no se indica, usa ELEVENLABS_VOICE_ID.",
+    )
+    parser.add_argument(
+        "--elevenlabs-female-voice-id",
+        default=None,
+        help=(
+            "ID de voz femenina de ElevenLabs para --alternate-voices. "
+            "Si no se indica, usa ELEVENLABS_FEMALE_VOICE_ID."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-model-id",
+        default=None,
+        help=(
+            "Modelo de ElevenLabs para TTS streaming. "
+            f"Default/env: ELEVENLABS_MODEL_ID o {DEFAULT_ELEVENLABS_MODEL_ID}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-output-format",
+        default=None,
+        help=(
+            "Formato de salida para ElevenLabs streaming. "
+            f"Default/env: ELEVENLABS_OUTPUT_FORMAT o {DEFAULT_ELEVENLABS_OUTPUT_FORMAT}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-language-code",
+        default=None,
+        help=(
+            "Codigo de idioma enviado a ElevenLabs. "
+            f"Default/env: ELEVENLABS_LANGUAGE_CODE o {DEFAULT_ELEVENLABS_LANGUAGE_CODE}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-stability",
+        type=float,
+        default=None,
+        help="Voice setting opcional `stability` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-similarity-boost",
+        type=float,
+        default=None,
+        help="Voice setting opcional `similarity_boost` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-style",
+        type=float,
+        default=None,
+        help="Voice setting opcional `style` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-speed",
+        type=float,
+        default=None,
+        help="Voice setting opcional `speed` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-use-speaker-boost",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Activa o desactiva `use_speaker_boost` en ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-optimize-streaming-latency",
+        type=int,
+        choices=range(0, 5),
+        default=None,
+        metavar="{0,1,2,3,4}",
+        help="Optimizacion de latencia streaming de ElevenLabs.",
+    )
+    parser.add_argument(
         "--text-only",
         action="store_true",
         help="Genera solo el comentario, sin convertirlo a audio.",
@@ -270,6 +354,20 @@ def build_runtime(
         qwen_cpp_threads=args.qwen_cpp_threads,
         qwen_cpp_repo_dir=args.qwen_cpp_repo_dir,
         qwen_cpp_model_dir=args.qwen_cpp_model_dir,
+        elevenlabs_api_key=args.elevenlabs_api_key,
+        elevenlabs_voice_id=args.elevenlabs_voice_id,
+        elevenlabs_female_voice_id=args.elevenlabs_female_voice_id,
+        elevenlabs_model_id=args.elevenlabs_model_id,
+        elevenlabs_output_format=args.elevenlabs_output_format,
+        elevenlabs_language_code=args.elevenlabs_language_code,
+        elevenlabs_stability=args.elevenlabs_stability,
+        elevenlabs_similarity_boost=args.elevenlabs_similarity_boost,
+        elevenlabs_style=args.elevenlabs_style,
+        elevenlabs_speed=args.elevenlabs_speed,
+        elevenlabs_use_speaker_boost=args.elevenlabs_use_speaker_boost,
+        elevenlabs_optimize_streaming_latency=(
+            args.elevenlabs_optimize_streaming_latency
+        ),
     )
     pipeline = CommentaryAudioPipeline(
         commentary_generator=generator,

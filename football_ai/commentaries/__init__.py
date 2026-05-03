@@ -28,12 +28,16 @@ from .deferred_media import (
     probe_video_duration_seconds,
 )
 from .experimental import QwenCppSynthesizer, QwenVoiceDesignSynthesizer
+from .elevenlabs_tts import ElevenLabsVoiceSynthesizer
 from .voice import (
     AlternatingVoiceSynthesizer,
     CommentaryAudioPipeline,
     CommentaryAudioResult,
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
     DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT,
     DEFAULT_QWEN_VOICE_DESIGN_PROMPT,
+    TTS_BACKEND_CHOICES,
     XTTSVoiceSynthesizer,
     build_voice_synthesizer,
     discover_default_speaker_wavs,
@@ -64,10 +68,14 @@ __all__ = [
     "AlternatingVoiceSynthesizer",
     "CommentaryAudioPipeline",
     "CommentaryAudioResult",
+    "DEFAULT_ELEVENLABS_MODEL_ID",
+    "DEFAULT_ELEVENLABS_OUTPUT_FORMAT",
     "DEFAULT_QWEN_FEMALE_VOICE_DESIGN_PROMPT",
     "DEFAULT_QWEN_VOICE_DESIGN_PROMPT",
+    "ElevenLabsVoiceSynthesizer",
     "QwenCppSynthesizer",
     "QwenVoiceDesignSynthesizer",
+    "TTS_BACKEND_CHOICES",
     "XTTSVoiceSynthesizer",
     "build_voice_synthesizer",
     "discover_default_speaker_wavs",

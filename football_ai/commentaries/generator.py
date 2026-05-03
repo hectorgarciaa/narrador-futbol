@@ -289,7 +289,7 @@ class CommentaryPromptBuilder:
             ]
             if event.team_name and event.opponent_team_name:
                 rules.append(
-                    f"Si encaja, menciona que hoy juegan {event.team_name} contra {event.opponent_team_name}."
+                    f"Menciona obligatoriamente que hoy juegan {event.team_name} contra {event.opponent_team_name}."
                 )
             elif event.team_name:
                 rules.append(f"Si encaja, menciona a {event.team_name}.")
