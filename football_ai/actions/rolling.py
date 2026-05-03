@@ -207,6 +207,10 @@ class RollingActionsPhase(Phase):
             # Per-frame data (always present)
             "raw_edge": raw_edge or {},
             "confirmed_action": confirmed_action or {},
+            "slot_mappings": {
+                "person_slots": {str(k): str(v) for k, v in (self._last_person_slots or {}).items()},
+                "referee_slots": {str(k): str(v) for k, v in (self._last_referee_slots or {}).items()},
+            },
             "buffer_frames": self._frame_count(),
             "total_checkpoints": self._checkpoint_count,
             "total_emitted_edges": len(self._emitted_edges),

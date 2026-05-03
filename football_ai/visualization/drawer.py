@@ -653,8 +653,21 @@ class Drawer:
 
         raw_src = raw.get("edge_src")
         raw_dst = raw.get("edge_dst")
-        raw_src_tid = raw.get("edge_src_track_id")
-        raw_dst_tid = raw.get("edge_dst_track_id")
+
+        # Build slot<->raw_id mappings from actions_info slot_mappings
+        slot_to_raw: dict[str, str] = {}
+        raw_to_slot: dict[str, str] = {}
+        slot_mappings = actions_info.get("slot_mappings")
+        if isinstance(slot_mappings, dict):
+            for slots_key in ("person_slots", "referee_slots"):
+                slots = slot_mappings.get(slots_key)
+                if isinstance(slots, dict):
+                    for raw_id, slot_name in slots.items():
+                        slot_to_raw[str(slot_name)] = str(raw_id)
+                        raw_to_slot[str(raw_id)] = str(slot_name)
+
+        raw_src_tid = slot_to_raw.get(raw_src) if raw_src else None
+        raw_dst_tid = slot_to_raw.get(raw_dst) if raw_dst else None
 
         post_label = str(post.get("event_type") or "None")
         lines = [
@@ -675,16 +688,14 @@ class Drawer:
             cv2.arrowedLine(frame, src_center, dst_center, (0, 255, 255), 3, cv2.LINE_AA, tipLength=0.18)
 
         # Etiquetas slot sobre cada track cuando exista mapping.
-        merged_slot_map = {}
-        merged_slot_map.update({str(k): str(v) for k, v in slot_map.items()})
-        merged_slot_map.update({str(k): str(v) for k, v in ref_slot_map.items()})
-        for class_name in ("player", "goalkeeper", "referee"):
-            for track_id, payload in frame_tracks.get(class_name, {}).items():
-                slot = merged_slot_map.get(str(track_id))
-                center = self._bbox_center_from_payload(payload)
-                if slot is None or center is None:
-                    continue
-                cv2.putText(frame, slot, (center[0] + 6, center[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+        if raw_to_slot:
+            for class_name in ("player", "goalkeeper", "referee"):
+                for track_id, payload in frame_tracks.get(class_name, {}).items():
+                    slot = raw_to_slot.get(str(track_id))
+                    center = self._bbox_center_from_payload(payload)
+                    if slot is None or center is None:
+                        continue
+                    cv2.putText(frame, slot, (center[0] + 6, center[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
 
     def _draw_possession_banner(self, frame, possession_info, compact=False, top_margin_px=6):
         if not isinstance(possession_info, dict):
