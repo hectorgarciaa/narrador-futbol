@@ -233,7 +233,7 @@ tracking:
     window_seconds: 10.0
 
     # PathCRF model (cacheado en memoria)
-    repo_path: football_ai/actions/repo/pathcrf
+    repo_path: external/pathcrf
     trial: 120
     model_file: state_dict_best_acc.pt
     device: auto

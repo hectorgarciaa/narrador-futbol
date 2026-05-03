@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repo-path",
         type=Path,
-        default=Path("football_ai/actions/repo/pathcrf"),
+        default=Path("external/pathcrf"),
         help="Ruta al repo clonado de PathCRF.",
     )
     parser.add_argument("--trial", type=int, default=120, help="Trial/checkpoint de PathCRF a usar.")

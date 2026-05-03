@@ -373,7 +373,7 @@ class AppLiveCommentaryBridge:
 
     def _process_frame_task(self, task: FrameTask) -> None:
         self._update_identity_cache(task.clean_packet)
-        actions_payload = dict(task.clean_packet.get("actions_incremental") or {})
+        actions_payload = dict(task.clean_packet.get("actions_packet") or {})
         confirmed_action = actions_payload.get("confirmed_action")
         if not isinstance(confirmed_action, dict):
             return

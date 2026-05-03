@@ -398,7 +398,7 @@ def run_tracking_pipeline(args):
                     min_frames_warmup=max(1, int(actions_conf.get("min_frames_warmup", 50))),
                     emit_delay_frames=max(0, int(actions_conf.get("emit_delay_frames", 50))),
                     emit_frames=max(1, int(actions_conf.get("emit_frames", 40))),
-                    repo_path=Path(str(actions_conf.get("repo_path", "football_ai/actions/repo/pathcrf"))),
+                    repo_path=Path(str(actions_conf.get("repo_path", "external/pathcrf"))),
                     trial=int(actions_conf.get("trial", 120)),
                     model_file=str(actions_conf.get("model_file", "state_dict_best_acc.pt")),
                     device=str(actions_conf.get("device", "auto")),
@@ -455,7 +455,7 @@ def run_tracking_pipeline(args):
             "referee": [],
             "ball": [],
             "possession": [],
-            "actions_incremental": [],
+            "actions_packets": [],
         }
         visual_debug_frames = []
 
@@ -493,17 +493,8 @@ def run_tracking_pipeline(args):
             
             possession_info = final_packet["clean"].get("possession", {})
             tracks["possession"].append(dict(possession_info))
-            actions_info = final_packet["clean"].get("actions_incremental", {})
-            actions_trace = final_packet["trace"].get("actions_incremental", {})
-            tracks["actions_incremental"].append(
-                {
-                    "raw_edge": dict(actions_info.get("raw_edge") or {}) if isinstance(actions_info, dict) else {},
-                    "confirmed_action": dict(actions_info.get("confirmed_action") or {}) if isinstance(actions_info, dict) else {},
-                    "action_metadata": dict(actions_info.get("action_metadata") or {}) if isinstance(actions_info, dict) else {},
-                    "person_slot_assignments": dict(actions_trace.get("person_slot_assignments") or {}) if isinstance(actions_trace, dict) else {},
-                    "referee_slot_assignments": dict(actions_trace.get("referee_slot_assignments") or {}) if isinstance(actions_trace, dict) else {},
-                }
-            )
+            actions_pkt = final_packet["clean"].get("actions_packet", {})
+            tracks["actions_packets"].append(dict(actions_pkt))
 
             if four_panel_enabled:
                 trace_debug = final_packet["trace"].get("visual_debug")
@@ -523,9 +514,19 @@ def run_tracking_pipeline(args):
                 total_ms += actions_ms
                 pos_inf = f" | PosInf: {position_ms:.1f}ms" if position_phase else ""
                 act_extra = ""
-                if actions_phase and final_packet.get("trace", {}).get("actions_incremental", {}).get("async_enabled"):
-                    last_infer = final_packet["trace"]["actions_incremental"].get("last_infer_ms", 0)
-                    act_extra = f" (async, last chk: {last_infer:.0f}ms)"
+                if actions_phase:
+                    actions_pkt = final_packet["clean"].get("actions_packet", {})
+                    if actions_pkt.get("checkpoint_completed"):
+                        chk_ms = actions_pkt.get("timings", {}).get("total_checkpoint_ms", 0)
+                        ev_count = len(actions_pkt.get("emitted_events", []))
+                        ed_count = len(actions_pkt.get("emitted_edges", []))
+                        le = actions_pkt.get("latest_event") or {}
+                        ev_type = le.get("event_type", "?")
+                        ev_src = le.get("canonical_src", "?")
+                        ev_dst = le.get("canonical_dst", "?")
+                        act_extra = f" (chk: {chk_ms:.0f}ms, edges={ed_count}, events={ev_count}, event={ev_type} {ev_src}->{ev_dst})"
+                    elif actions_pkt.get("async_pending"):
+                        act_extra = " (async pending)"
                 act_inf = f" | Actions: {actions_ms:.1f}ms{act_extra}" if actions_phase else ""
                 
                 print(
@@ -620,7 +621,7 @@ def run_tracking_pipeline(args):
             except Exception:
                 logger.exception("No se pudieron guardar los artefactos del rolling actions.")
 
-        # Render dedicado PathCRF (single panel) con slots y edges emitidos en vivo
+        # Render dedicado PathCRF (single panel) con edges emitidos y eventos postprocesados
         try:
             actions_conf2 = tracker_conf.get("actions", {}) if isinstance(tracker_conf, dict) else {}
             fps_for_actions = float(actions_conf2.get("fps", 25.0))
@@ -629,12 +630,8 @@ def run_tracking_pipeline(args):
 
             should_render = True
 
-            # Rolling: tracking del builder (incremental) o del ultimo checkpoint (snapshot)
             tracking_df = None
-            builder = actions_phase.builder
-            if builder is not None and builder.is_ready and builder.tracking_df is not None:
-                tracking_df = builder.tracking_df
-            elif hasattr(actions_phase, '_last_tracking_df') and actions_phase._last_tracking_df is not None:
+            if hasattr(actions_phase, '_last_tracking_df') and actions_phase._last_tracking_df is not None:
                 tracking_df = actions_phase._last_tracking_df
             else:
                 logger.warning("PathCRF render skip: no hay tracking disponible.")
@@ -652,21 +649,23 @@ def run_tracking_pipeline(args):
                 if "frame_id" not in edge_df.columns:
                     edge_df["frame_id"] = range(len(edge_df))
 
-                events_df = rolling_artifacts.get("postprocessed_actions_df", pd.DataFrame())
-                if not events_df.empty and "frame_id" not in events_df.columns:
-                    events_df["frame_id"] = range(len(events_df))
+                # Build expanded events df: each event occupies [start_frame, end_frame]
+                postproc_df = rolling_artifacts.get("postprocessed_actions_df", pd.DataFrame())
+                expanded_rows = []
+                if not postproc_df.empty:
+                    for _, ev in postproc_df.iterrows():
+                        sf = int(ev.get("start_frame", ev.get("frame_id", 0)))
+                        ef = int(ev.get("end_frame", ev.get("frame_id", 0)))
+                        for f in range(sf, ef + 1):
+                            expanded_rows.append({**ev.to_dict(), "frame_id": f})
+                events_df = pd.DataFrame(expanded_rows) if expanded_rows else postproc_df
 
                 conversion_payload = {}
-                if builder is not None and hasattr(builder, 'raw_to_slot'):
+                if hasattr(actions_phase, '_last_person_slots'):
                     conversion_payload = {
-                        "person_slot_assignments": dict(builder.raw_to_slot),
-                        "referee_slot_assignments": {},
+                        "person_slot_assignments": dict(actions_phase._last_person_slots),
+                        "referee_slot_assignments": dict(actions_phase._last_referee_slots),
                     }
-                elif hasattr(actions_phase, '_last_person_slots'):
-                        conversion_payload = {
-                            "person_slot_assignments": dict(actions_phase._last_person_slots),
-                            "referee_slot_assignments": dict(actions_phase._last_referee_slots),
-                        }
 
             if should_render:
                 PathCRFDrawer().render_tracking_and_edges(

@@ -49,14 +49,13 @@ Rutas relevantes:
   - `adapter.py` — adaptador tracks → tracking dataframe PathCRF.
   - `inference.py` — ejecucion de inferencia PathCRF (offline + compartido con rolling).
   - `model.py` — cache y carga del modelo PathCRF (load-once, cuda/auto).
-  - `rolling.py` — RollingActionsPhase: pipeline live con snapshot fijo bounded (750 frames), async, postprocess_emit_block.
-  - `offline.py` — re-exporta adapter + inference para flujo offline.
+  - `rolling.py` — RollingActionsPhase: pipeline live con snapshot fijo bounded (750), async, postprocess_emit_block.
   - `postprocess.py` — postprocess_emit_block: edges emitidos → eventos consolidados (temporal, hysteresis, dedup).
-  - `pathcrf_*.py` — semantica, shot, setpieces, commentary (offline).
-  - `repo/pathcrf/` — PathCRF externo (no modificar).
+  - `pathcrf_*.py` — semantica, shot, setpieces, commentary (usados por run_pathcrf_pipeline offline).
   - `pathcrf/` — datos procesados (parquet).
+- `external/pathcrf/` — PathCRF externo (no modificar). Contiene saved/120/model/state_dict_best_acc.pt.
 - `football_ai/pipeline/pipeline.py` — pipeline principal. Solo soporta `mode: rolling`.
-- `scripts/actions/run_pathcrf.py` — offline pipeline (usa `football_ai.actions`).
+- `scripts/actions/run_pathcrf.py` — offline pipeline (importa de `football_ai.actions`).
 - `tests/test_postprocess.py` — tests de postprocess_emit_block.
 
 ## 4) Cómo ejecutar sin romper rutas

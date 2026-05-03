@@ -35,7 +35,7 @@ class RollingActionsConfig:
     min_frames_warmup: int = 50
     emit_delay_frames: int = 50
     emit_frames: int = 40
-    repo_path: Path = Path("football_ai/actions/repo/pathcrf")
+    repo_path: Path = Path("external/pathcrf")
     trial: int = 120
     model_file: str = "state_dict_best_acc.pt"
     device: str = "auto"
@@ -110,6 +110,7 @@ class RollingActionsPhase(Phase):
         self._finalized = False
         self._snapshot_cache: dict[str, Any] | None = None
         self._snapshot_frame_index: int | None = None
+        self._last_checkpoint_result: dict[str, Any] | None = None
 
         if self.config.async_enabled:
             self._executor = ThreadPoolExecutor(max_workers=max(1, int(self.config.max_workers)))
@@ -140,6 +141,7 @@ class RollingActionsPhase(Phase):
         self._finalized = False
         self._snapshot_cache = None
         self._snapshot_frame_index = None
+        self._last_checkpoint_result = None
         reset_postprocess_state()
 
     def execute(self, position_packet: dict) -> dict:
@@ -180,25 +182,44 @@ class RollingActionsPhase(Phase):
         if confirmed_action is None:
             confirmed_action = {}
 
-        clean_out = dict(clean_in)
-        clean_out["actions_incremental"] = {
-            "raw_edge": raw_edge or {},
-            "raw_edge_batch": [],
-            "confirmed_action": confirmed_action or {},
-            "action_metadata": action_metadata,
-        }
-        trace_out = dict(trace_in)
-        trace_out["actions_incremental"] = {
+        # ── Build unified actions_packet ──
+        chk = self._last_checkpoint_result or {}
+        chk_completed = bool(chk.get("checkpoint_completed"))
+
+        actions_packet = {
+            "frame_id": frame_index,
+            "checkpoint_frame": chk.get("checkpoint_frame"),
+            "checkpoint_completed": chk_completed,
             "mode": "rolling",
+            "snapshot_start": chk.get("snapshot_start"),
+            "snapshot_end": chk.get("snapshot_end"),
+            "emit_start": chk.get("emit_start"),
+            "emit_end": chk.get("emit_end"),
+            "emitted_edges": chk.get("emitted_edges") or [],
+            "emitted_events": chk.get("emitted_events") or [],
+            "latest_edge": chk.get("latest_edge"),
+            "latest_event": chk.get("latest_event"),
+            "async_pending": chk.get("async_pending", False),
+            "skipped": chk.get("skipped", False),
+            "dropped": chk.get("dropped", False),
+            "timings": chk.get("timings") or {},
+            "metadata": action_metadata,
+            # Per-frame data (always present)
+            "raw_edge": raw_edge or {},
+            "confirmed_action": confirmed_action or {},
             "buffer_frames": self._frame_count(),
-            "checkpoints": self._checkpoint_count,
-            "emitted_edges": len(self._emitted_edges),
-            "last_inference_frame": self._last_inference_frame,
+            "total_checkpoints": self._checkpoint_count,
+            "total_emitted_edges": len(self._emitted_edges),
+            "total_completed": self._completed_checkpoints,
+            "total_skipped": self._skipped_checkpoints,
             "last_infer_ms": self._last_infer_ms,
             "async_enabled": self.config.async_enabled,
-            "skipped": self._skipped_checkpoints,
-            "completed": self._completed_checkpoints,
         }
+        self._last_checkpoint_result = None
+
+        clean_out = dict(clean_in)
+        clean_out["actions_packet"] = actions_packet
+        trace_out = dict(trace_in)
 
         return make_phase_packet(
             phase_name=PHASE_ACTIONS_DETECTOR,
@@ -299,6 +320,9 @@ class RollingActionsPhase(Phase):
         window_size = cfg.snapshot_window_frames or max(int(cfg.window_seconds * cfg.fps) * 2, 300)
         origin = max(0, full_frames - window_size)
 
+        self._last_snapshot_start = origin
+        self._last_snapshot_end = full_frames - 1
+
         trimmed: dict[str, Any] = {}
         for cls in TRACK_CLASSES:
             data = self._buffer.get(cls, [])
@@ -397,6 +421,28 @@ class RollingActionsPhase(Phase):
             ))
 
             print(f"[rolling] frame {fi} | tracking=full edges={len(edge_df)} emit=[{emit_start},{emit_end}] emitted={emitted_this} infer_ms={timing_ms:.0f}")
+
+            # Populate checkpoint result for the enriched packet
+            latest_event = consolidated[0] if consolidated else None
+            latest_edge_emitted = emit_block_edges[-1] if emit_block_edges else None
+            self._last_checkpoint_result = {
+                "checkpoint_completed": True,
+                "checkpoint_frame": int(fi),
+                "snapshot_start": getattr(self, "_last_snapshot_start", 0),
+                "snapshot_end": getattr(self, "_last_snapshot_end", self._frame_count() - 1),
+                "emit_start": int(emit_start),
+                "emit_end": int(emit_end),
+                "emitted_edges": emit_block_edges,
+                "emitted_events": consolidated,
+                "latest_edge": latest_edge_emitted,
+                "latest_event": latest_event,
+                "async_pending": False,
+                "skipped": False,
+                "dropped": False,
+                "timings": {
+                    "total_checkpoint_ms": round(timing_ms, 1),
+                },
+            }
 
             return raw_edge_for_frame, confirmed_action_for_frame, {
                 "mode": "rolling", "should_infer": True, "frame_id": fi, "checkpoint_frame": fi,

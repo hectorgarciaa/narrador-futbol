@@ -26,7 +26,7 @@ from .pathcrf_shot import apply_shot_heuristic
 
 @dataclass(frozen=True)
 class PathCRFInferenceConfig:
-    repo_path: Path = Path("football_ai/actions/repo/pathcrf")
+    repo_path: Path = Path("external/pathcrf")
     trial: int = 120
     model_file: str = "state_dict_best_acc.pt"
     use_crf: bool = True

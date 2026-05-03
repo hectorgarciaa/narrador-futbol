@@ -606,7 +606,7 @@ class Drawer:
     def _frame_actions_from_tracks(tracks, frame_id):
         if not isinstance(tracks, dict):
             return {}
-        actions_frames = tracks.get("actions_incremental")
+        actions_frames = tracks.get("actions_packets")
         if not isinstance(actions_frames, list) or frame_id >= len(actions_frames):
             return {}
         payload = actions_frames[frame_id]
@@ -650,8 +650,6 @@ class Drawer:
             return
         raw = actions_info.get("raw_edge") if isinstance(actions_info.get("raw_edge"), dict) else {}
         post = actions_info.get("confirmed_action") if isinstance(actions_info.get("confirmed_action"), dict) else {}
-        slot_map = actions_info.get("person_slot_assignments") if isinstance(actions_info.get("person_slot_assignments"), dict) else {}
-        ref_slot_map = actions_info.get("referee_slot_assignments") if isinstance(actions_info.get("referee_slot_assignments"), dict) else {}
 
         raw_src = raw.get("edge_src")
         raw_dst = raw.get("edge_dst")
@@ -662,16 +660,7 @@ class Drawer:
         lines = [
             f"PathCRF raw: {raw_src}->{raw_dst}" if raw_src is not None and raw_dst is not None else "PathCRF raw: None",
             f"PathCRF post: {post_label}",
-            f"raw src/dst track: {raw_src_tid}->{raw_dst_tid}",
-            f"raw src/dst slot: {raw_src}->{raw_dst}",
         ]
-        if isinstance(post, dict) and post:
-            lines.append(
-                f"post src/dst track: {post.get('player_track_id')}->{post.get('receiver_track_id')}"
-            )
-            lines.append(
-                f"post src/dst slot: {post.get('player_slot_id')}->{post.get('receiver_slot_id')}"
-            )
         y = 24
         for text in lines:
             (tw, th), b = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)

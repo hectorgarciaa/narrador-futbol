@@ -79,3 +79,6 @@ recursos_memoria/
 # GGUF models
 models/gguf/
 *.gguf
+
+
+external/

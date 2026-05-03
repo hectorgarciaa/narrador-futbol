@@ -484,17 +484,30 @@ class PathCRFDrawer:
         self._draw_text_box(frame, f"frame {frame_id} | t={timestamp:0.2f}s", (24, 32))
 
         if edge_src is not None and edge_dst is not None:
-            edge_label = f"edge: {edge_src} -> {edge_dst}" if edge_src != edge_dst else f"edge: {edge_src} control"
+            edge_label = f"EDGE: {edge_src} -> {edge_dst}" if edge_src != edge_dst else f"EDGE: {edge_src} control"
             self._draw_text_box(frame, edge_label, (24, 66), bg_color=(30, 45, 60))
 
         if event_row is not None and not event_row.empty:
             event_type = str(event_row.get("event_type") or "").strip() or "evento"
             player_id = str(event_row.get("player_id") or "").strip()
             receiver_id = str(event_row.get("receiver_id") or "").strip()
+            support = event_row.get("support_frames")
+            ratio = event_row.get("support_ratio")
+            run_len = event_row.get("longest_consecutive_run")
             if receiver_id:
-                event_label = f"{event_type}: {player_id} -> {receiver_id}"
+                event_label = f"EVENT: {event_type} {player_id} -> {receiver_id}"
             else:
-                event_label = f"{event_type}: {player_id}"
+                event_label = f"EVENT: {event_type} {player_id}"
+            if support is not None:
+                parts = [event_label]
+                if run_len is not None:
+                    parts.append(f"run={int(run_len)}")
+                if ratio is not None:
+                    parts.append(f"ratio={float(ratio):.2f}")
+                if support is not None:
+                    n_edges = event_row.get("emit_block_last_frame", event_row.get("end_frame", 0)) - event_row.get("emit_block_first_frame", event_row.get("start_frame", 0)) + 1
+                    parts.append(f"sup={int(support)}")
+                event_label = "  ".join(parts)
             self._draw_text_box(
                 frame,
                 event_label,

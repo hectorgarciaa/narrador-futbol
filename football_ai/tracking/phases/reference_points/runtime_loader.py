@@ -33,7 +33,7 @@ class PnLCalibRuntime:
 
 
 PNLCALIB_REPO_URL = "https://github.com/mguti97/PnLCalib"
-PNLCALIB_REPO_DIRNAME = "pnlcalib_repo"
+PNLCALIB_REPO_DIRNAME = "pnlcalib"
 PNLCALIB_WEIGHTS = {
     "SV_kp": "https://github.com/mguti97/PnLCalib/releases/download/v1.0.0/SV_kp",
     "SV_lines": "https://github.com/mguti97/PnLCalib/releases/download/v1.0.0/SV_lines",
@@ -130,11 +130,11 @@ def _ensure_pnlcalib_weights(project_root: Optional[Path] = None) -> Tuple[Path,
 
 def _get_default_pnlcalib_repo_path(project_root: Optional[Path] = None) -> Path:
     root = find_project_root(project_root)
-    return root / "models" / "reference_points" / PNLCALIB_REPO_DIRNAME
+    return root / "external" / PNLCALIB_REPO_DIRNAME
 
 def _get_default_pnlcalib_weights_dir(project_root: Optional[Path] = None) -> Path:
     root = find_project_root(project_root)
-    return root / "models" / "reference_points" / "pnlcalib_weights"
+    return root / "models" / "pnlcalib"
 
 def _get_default_pnlcalib_weight_paths(project_root: Optional[Path] = None) -> Tuple[Path, Path]:
     weights_dir = _get_default_pnlcalib_weights_dir(project_root)

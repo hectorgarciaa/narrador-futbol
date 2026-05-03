@@ -274,6 +274,8 @@ def postprocess_emit_block(
 
         actions.append({
             "frame_id": g.first_frame,
+            "start_frame": g.first_frame,
+            "end_frame": g.last_frame,
             "canonical_src": g.canonical_src,
             "canonical_dst": g.canonical_dst,
             "edge_src": g.edge_src,
@@ -291,6 +293,7 @@ def postprocess_emit_block(
             "longest_consecutive_run": g.longest_consecutive_run,
             "emit_block_first_frame": edges[0].get("frame_id", g.first_frame) if edges else g.first_frame,
             "emit_block_last_frame": edges[-1].get("frame_id", g.last_frame) if edges else g.last_frame,
+            "source": "postprocess_emit_block",
         })
 
         if not allow_multiple:
