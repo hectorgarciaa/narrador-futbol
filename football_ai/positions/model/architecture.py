@@ -107,9 +107,15 @@ class RoleSetTransformer(nn.Module):
         config,
     ) -> None:
         super().__init__()
+        if int(config.objective_num_layers) < 1:
+            raise ValueError("objective_num_layers debe ser >= 1.")
+        objective_hidden_dims = tuple(
+            int(config.objective_hidden_dim)
+            for _ in range(int(config.objective_num_layers))
+        )
         self.objective_encoder = MLP(
             input_dim=int(objective_dim),
-            hidden_dims=(int(config.objective_hidden_dim),),
+            hidden_dims=objective_hidden_dims,
             output_dim=int(config.set_hidden_dim),
             dropout=float(config.dropout),
         )

@@ -82,6 +82,11 @@ def _build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--weight-decay", type=float, default=TrainingConfig.weight_decay)
     train_parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
     train_parser.add_argument("--patience", type=int, default=TrainingConfig.patience)
+    train_parser.add_argument("--label-smoothing", type=float, default=TrainingConfig.label_smoothing)
+    train_parser.add_argument("--objective-num-layers", type=int, default=TrainingConfig.objective_num_layers)
+    train_parser.add_argument("--ff-expansion", type=int, default=TrainingConfig.ff_expansion)
+    train_parser.add_argument("--overfit-patience", type=int, default=TrainingConfig.overfit_patience)
+    train_parser.add_argument("--experiment-group", default=TrainingConfig.experiment_group)
     train_parser.add_argument("--max-train-samples", type=int, default=None)
     train_parser.add_argument("--max-val-samples", type=int, default=None)
     train_parser.add_argument("--max-test-samples", type=int, default=None)
@@ -112,4 +117,9 @@ def _training_config_from_args(args: argparse.Namespace) -> TrainingConfig:
         learning_rate=float(args.learning_rate),
         weight_decay=float(args.weight_decay),
         patience=int(args.patience),
+        label_smoothing=float(args.label_smoothing),
+        objective_num_layers=int(args.objective_num_layers),
+        ff_expansion=int(args.ff_expansion),
+        overfit_patience=int(args.overfit_patience),
+        experiment_group=str(args.experiment_group),
     )
