@@ -31,8 +31,9 @@ class MLP(nn.Module):
 
 
 class SetAttentionBlock(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, dropout: float) -> None:
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float, ff_expansion: int = 2) -> None:
         super().__init__()
+        ff_dim = int(embed_dim) * int(ff_expansion)
         self.attn = nn.MultiheadAttention(
             embed_dim=int(embed_dim),
             num_heads=int(num_heads),
@@ -42,10 +43,10 @@ class SetAttentionBlock(nn.Module):
         self.norm1 = nn.LayerNorm(int(embed_dim))
         self.norm2 = nn.LayerNorm(int(embed_dim))
         self.ff = nn.Sequential(
-            nn.Linear(int(embed_dim), int(embed_dim) * 2),
+            nn.Linear(int(embed_dim), ff_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(embed_dim) * 2, int(embed_dim)),
+            nn.Linear(ff_dim, int(embed_dim)),
             nn.Dropout(float(dropout)),
         )
 
@@ -63,8 +64,9 @@ class SetAttentionBlock(nn.Module):
 
 
 class PoolingMultiheadAttention(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, dropout: float) -> None:
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float, ff_expansion: int = 2) -> None:
         super().__init__()
+        ff_dim = int(embed_dim) * int(ff_expansion)
         self.seed = nn.Parameter(torch.randn(1, 1, int(embed_dim)))
         self.attn = nn.MultiheadAttention(
             embed_dim=int(embed_dim),
@@ -75,10 +77,10 @@ class PoolingMultiheadAttention(nn.Module):
         self.norm1 = nn.LayerNorm(int(embed_dim))
         self.norm2 = nn.LayerNorm(int(embed_dim))
         self.ff = nn.Sequential(
-            nn.Linear(int(embed_dim), int(embed_dim) * 2),
+            nn.Linear(int(embed_dim), ff_dim),
             nn.GELU(),
             nn.Dropout(float(dropout)),
-            nn.Linear(int(embed_dim) * 2, int(embed_dim)),
+            nn.Linear(ff_dim, int(embed_dim)),
             nn.Dropout(float(dropout)),
         )
 
@@ -123,6 +125,7 @@ class RoleSetTransformer(nn.Module):
                     embed_dim=int(config.set_hidden_dim),
                     num_heads=int(config.num_heads),
                     dropout=float(config.dropout),
+                    ff_expansion=int(config.ff_expansion),
                 )
                 for _ in range(int(config.num_set_blocks))
             ]
@@ -131,6 +134,7 @@ class RoleSetTransformer(nn.Module):
             embed_dim=int(config.set_hidden_dim),
             num_heads=int(config.num_heads),
             dropout=float(config.dropout),
+            ff_expansion=int(config.ff_expansion),
         )
         self.classifier = nn.Sequential(
             nn.Linear(int(config.set_hidden_dim) * 2, int(config.fusion_hidden_dim)),
