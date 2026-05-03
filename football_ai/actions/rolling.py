@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from copy import deepcopy
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import perf_counter
@@ -11,21 +10,19 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from football_ai.actions.pathcrf_adapter import PathCRFAdapterConfig, PathCRFTracksAdapter
-from football_ai.actions.pathcrf_wrapper import (
-    PathCRFInferenceConfig,
-    PathCRFRenderConfig,
-    run_pathcrf_inference,
-    run_pathcrf_pipeline,
+from .adapter import PathCRFAdapterConfig, PathCRFTracksAdapter
+from .inference import PathCRFInferenceConfig, run_pathcrf_inference
+from .postprocess import (
+    RealtimeCheckpoint,
+    _classify_event,
+    postprocess_emit_block,
+    reset_postprocess_state,
 )
 from football_ai.core import PHASE_ACTIONS_DETECTOR, Phase, make_phase_packet
 from football_ai.pathcrf_slot_mapping import (
     person_slot_to_canonical_id,
     referee_slot_to_canonical_id,
 )
-
-from .postprocess import RealtimeAction, RealtimeCheckpoint, _classify_event
-from .incremental_tracking_builder import IncrementalTrackingBuilder, IncrementalBuilderConfig
 
 TRACK_CLASSES = ("player", "goalkeeper", "referee", "ball")
 
@@ -34,10 +31,10 @@ TRACK_CLASSES = ("player", "goalkeeper", "referee", "ball")
 class RollingActionsConfig:
     enabled: bool = True
     fps: float = 25.0
-    cadence_frames: int = 10
+    cadence_frames: int = 40
     min_frames_warmup: int = 50
-    emit_delay_frames: int = 100
-    emit_frames: int = 10
+    emit_delay_frames: int = 50
+    emit_frames: int = 40
     repo_path: Path = Path("football_ai/actions/repo/pathcrf")
     trial: int = 120
     model_file: str = "state_dict_best_acc.pt"
@@ -48,19 +45,12 @@ class RollingActionsConfig:
     sample_freq: int = 5
     min_event_duration: int = 10
     smooth_edges: bool = False
-    export_debug: bool = True
+    export_debug: bool = False
     output_dir: str | None = None
-    async_enabled: bool = False
+    async_enabled: bool = True
     max_workers: int = 1
     drop_policy: str = "latest"
-    snapshot_window_frames: int | None = None
-    incremental_tracking: bool = False
-    incremental_tracking_mode: str = "adapter_tail_replace"
-    incremental_recompute_tail_frames: int = 75
-    incremental_tail_overlap_frames: int = 100
-    incremental_validate_every: int = 10
-    incremental_validation_tolerance: float = 1e-3
-    incremental_fallback_on_mismatch: bool = True
+    snapshot_window_frames: int | None = 750
 
 
 def _slot_to_canonical(slot_name: Any) -> str | None:
@@ -124,33 +114,9 @@ class RollingActionsPhase(Phase):
         if self.config.async_enabled:
             self._executor = ThreadPoolExecutor(max_workers=max(1, int(self.config.max_workers)))
 
-        self._builder: IncrementalTrackingBuilder | None = None
-        self._init_builder()
-
     @property
-    def builder(self) -> IncrementalTrackingBuilder | None:
-        return self._builder
-
-    def _init_builder(self) -> None:
-        if not self.config.incremental_tracking:
-            self._builder = None
-            return
-        window = self.config.snapshot_window_frames or max(int(self.config.window_seconds * self.config.fps) * 2, 300)
-        self._builder = IncrementalTrackingBuilder(
-            IncrementalBuilderConfig(
-                fps=float(self.config.fps),
-                snapshot_window_frames=window,
-                recompute_tail_frames=int(self.config.incremental_recompute_tail_frames),
-                tail_overlap_frames=int(self.config.incremental_tail_overlap_frames),
-                mode=str(self.config.incremental_tracking_mode),
-                validate_every=int(self.config.incremental_validate_every),
-                validation_tolerance=float(self.config.incremental_validation_tolerance),
-                fallback_on_mismatch=bool(self.config.incremental_fallback_on_mismatch),
-            )
-        )
-
-    def _origin(self) -> int:
-        return self._builder.origin if self._builder else 0
+    def builder(self) -> None:
+        return None
 
     def reset(self) -> None:
         self._buffer = {}
@@ -174,9 +140,7 @@ class RollingActionsPhase(Phase):
         self._finalized = False
         self._snapshot_cache = None
         self._snapshot_frame_index = None
-        self._init_builder()
-
-    # ── Phase execute ──
+        reset_postprocess_state()
 
     def execute(self, position_packet: dict) -> dict:
         clean_in = dict(position_packet["clean"])
@@ -325,13 +289,7 @@ class RollingActionsPhase(Phase):
             emit_start = emit_end
 
         started = perf_counter()
-        if cfg.incremental_tracking and self._builder is not None and self._builder.is_ready:
-            if cfg.incremental_tracking_mode == "adapter_tail_replace":
-                edge_df = self._run_tail_replace_inference(frame_index)
-            else:
-                edge_df = self._run_incremental_inference(frame_index)
-        else:
-            edge_df = self._run_full_checkpoint(frame_index)
+        edge_df = self._run_full_checkpoint(frame_index)
         timing_ms = (perf_counter() - started) * 1000.0
         return frame_index, edge_df, emit_start, emit_end, timing_ms
 
@@ -352,90 +310,8 @@ class RollingActionsPhase(Phase):
         self._last_person_slots = person_slots
         self._last_referee_slots = referee_slots
 
-        if self._builder is not None:
-            self._builder.init_from_full(tracking_df.copy(), origin, self._buffer, full_frames)
-
         result = run_pathcrf_inference(
             tracking_df=tracking_df,
-            return_df=True,
-            config=PathCRFInferenceConfig(
-                repo_path=cfg.repo_path, trial=int(cfg.trial), model_file=str(cfg.model_file),
-                use_crf=bool(cfg.use_crf), decode=str(cfg.decode),
-                window_seconds=float(cfg.window_seconds), fps=float(cfg.fps),
-                sample_freq=int(cfg.sample_freq), min_event_duration=int(cfg.min_event_duration),
-                device=str(cfg.device),
-            ),
-        )
-        return result.edge_sequence_df
-
-    def _run_incremental_inference(self, frame_index: int) -> pd.DataFrame:
-        cfg = self.config
-        full_frames = self._frame_count()
-
-        if self._builder is not None:
-            self._builder.extend(self._buffer, full_frames)
-
-        # Periodic validation
-        if (self._builder is not None and self._builder.cfg is not None
-                and self._checkpoint_count > 1
-                and self._checkpoint_count % self._builder.cfg.validate_every == 0):
-            full_df, full_origin = self._build_full_tracking_for_validation(frame_index)
-            if full_df is not None:
-                info = self._builder.validate_and_fallback(full_df, full_origin, self._buffer, full_frames)
-                tag = "MISMATCH" if info.get("mismatch") else "OK"
-                print(f"[rolling] frame {frame_index} | validate: {tag} ({info.get('differences',0)} cols diff, max {info.get('max_abs_diff',0):.4f})")
-
-        result = run_pathcrf_inference(
-            tracking_df=self._builder.tracking_df,
-            return_df=True,
-            config=PathCRFInferenceConfig(
-                repo_path=cfg.repo_path, trial=int(cfg.trial), model_file=str(cfg.model_file),
-                use_crf=bool(cfg.use_crf), decode=str(cfg.decode),
-                window_seconds=float(cfg.window_seconds), fps=float(cfg.fps),
-                sample_freq=int(cfg.sample_freq), min_event_duration=int(cfg.min_event_duration),
-                device=str(cfg.device),
-            ),
-        )
-        return result.edge_sequence_df
-
-    def _build_full_tracking_for_validation(self, frame_index: int):
-        cfg = self.config
-        full_frames = self._frame_count()
-        window_size = cfg.snapshot_window_frames or max(int(cfg.window_seconds * cfg.fps) * 2, 300)
-        origin = max(0, full_frames - window_size)
-
-        trimmed = {}
-        for cls in TRACK_CLASSES:
-            data = self._buffer.get(cls, [])
-            trimmed[cls] = data[origin:]
-
-        adapter = PathCRFTracksAdapter(PathCRFAdapterConfig(fps=float(cfg.fps)))
-        return adapter.convert_tracks_to_df(trimmed), origin
-
-    def _run_tail_replace_inference(self, frame_index: int) -> pd.DataFrame:
-        """Run adapter on tail window, merge with cached head. Returns edge_df."""
-        cfg = self.config
-        full_frames = self._frame_count()
-
-        snapshot, snapshot_origin, update_start = self._builder.prepare_tail_snapshot(self._buffer, full_frames)
-
-        adapter = PathCRFTracksAdapter(PathCRFAdapterConfig(fps=float(cfg.fps)))
-        adapter_df = adapter.convert_tracks_to_df(snapshot)
-        self._builder.merge_tail_from_adapter(adapter_df, snapshot_origin, update_start, full_frames)
-
-        # Periodic validation
-        builder_cfg = self._builder.cfg if self._builder else None
-        if (builder_cfg is not None
-                and self._checkpoint_count > 0
-                and (self._checkpoint_count + 1) % builder_cfg.validate_every == 0):
-            full_df, full_origin = self._build_full_tracking_for_validation(frame_index)
-            if full_df is not None:
-                info = self._builder.validate_and_fallback(full_df, full_origin, self._buffer, full_frames)
-                tag = "MISMATCH" if info.get("mismatch") else "OK"
-                print(f"[rolling] frame {frame_index} | validate: {tag} ({info.get('differences',0)} cols diff, max {info.get('max_abs_diff',0):.4f})")
-
-        result = run_pathcrf_inference(
-            tracking_df=self._builder.tracking_df,
             return_df=True,
             config=PathCRFInferenceConfig(
                 repo_path=cfg.repo_path, trial=int(cfg.trial), model_file=str(cfg.model_file),
@@ -471,12 +347,13 @@ class RollingActionsPhase(Phase):
             emitted_this = 0
             raw_edge_for_frame = None
             confirmed_action_for_frame = None
+            emit_block_edges: list[dict[str, Any]] = []
 
             for _, row in edge_df.iterrows():
                 lf = _coerce_int(row.get("frame_id"))
                 if lf is None:
                     continue
-                global_frame = self._origin() + int(lf)
+                global_frame = int(lf)
                 es = str(row.get("edge_src")) if row.get("edge_src") is not None and not pd.isna(row.get("edge_src")) else None
                 ed = str(row.get("edge_dst")) if row.get("edge_dst") is not None and not pd.isna(row.get("edge_dst")) else None
                 cs, cd = _slot_to_canonical(es), _slot_to_canonical(ed)
@@ -495,16 +372,7 @@ class RollingActionsPhase(Phase):
                 emit_rec["latency_frames"] = int(fi) - global_frame
                 emit_rec["latency_seconds"] = float(emit_rec["latency_frames"]) / max(float(self.config.fps), 1e-6)
                 self._emitted_edges.append(emit_rec)
-
-                et = _classify_event(es, ed)
-                act = RealtimeAction(
-                    frame_id=global_frame, edge_src=es, edge_dst=ed, canonical_src=cs, canonical_dst=cd,
-                    event_type=et, player_id=cs, receiver_id=cd if es != ed else None,
-                    timestamp=str(global_frame / max(float(self.config.fps), 1e-6)),
-                    start_x=None, start_y=None, end_x=None, end_y=None, confidence=None,
-                    is_realtime=True, is_final=True,
-                )
-                self._postprocessed_actions.append(asdict(act))
+                emit_block_edges.append(emit_rec)
                 emitted_this += 1
 
                 if global_frame > self._latest_emitted_frame:
@@ -512,9 +380,14 @@ class RollingActionsPhase(Phase):
 
                 if global_frame == fi:
                     raw_edge_for_frame = {"frame_id": global_frame, "edge_src": es, "edge_dst": ed}
-                    confirmed_action_for_frame = {**raw_edge_for_frame, "event_type": et, "player_id": cs,
-                                                  "receiver_id": cd if es != ed else None,
+                    confirmed_action_for_frame = {**raw_edge_for_frame, "event_type": _classify_event(es, ed),
+                                                  "player_id": cs, "receiver_id": cd if es != ed else None,
                                                   "is_realtime": True, "is_final": True}
+
+            # Consolidar acciones del bloque emitido con postprocesado temporal
+            emit_frame_count = int(self.config.emit_frames)
+            consolidated = postprocess_emit_block(emit_block_edges, emit_frame_count)
+            self._postprocessed_actions.extend(consolidated)
 
             self._checkpoints.append(RealtimeCheckpoint(
                 checkpoint_frame=int(fi), snapshot_frames=self._frame_count(),
@@ -523,8 +396,7 @@ class RollingActionsPhase(Phase):
                 total_emitted_so_far=len(self._emitted_edges),
             ))
 
-            tracking_len = len(self._builder.tracking_df) if self._builder and self._builder.tracking_df is not None else "full"
-            print(f"[rolling] frame {fi} | tracking={tracking_len} edges={len(edge_df)} emit=[{emit_start},{emit_end}] emitted={emitted_this} infer_ms={timing_ms:.0f}")
+            print(f"[rolling] frame {fi} | tracking=full edges={len(edge_df)} emit=[{emit_start},{emit_end}] emitted={emitted_this} infer_ms={timing_ms:.0f}")
 
             return raw_edge_for_frame, confirmed_action_for_frame, {
                 "mode": "rolling", "should_infer": True, "frame_id": fi, "checkpoint_frame": fi,
@@ -572,7 +444,7 @@ class RollingActionsPhase(Phase):
         result: dict[str, Any] = {
             "emitted_edges_df": emitted_df,
             "postprocessed_actions_df": postproc_df,
-            "emitted_edges": output_dir / "emitted_edges.parquet",    # keep path for backward compat
+            "emitted_edges": output_dir / "emitted_edges.parquet",
             "rolling_edges": output_dir / "rolling_edges_per_frame.parquet",
             "postprocessed_actions": output_dir / "postprocessed_actions.parquet",
             "checkpoints": output_dir / "runtime_checkpoints.json",
@@ -584,13 +456,12 @@ class RollingActionsPhase(Phase):
             rolling_df.to_parquet(result["rolling_edges"], index=False)
             postproc_df.to_parquet(result["postprocessed_actions"], index=False)
 
-            builder_stats = self._builder.stats() if self._builder else {}
             chk_recs = [asdict(cp) for cp in self._checkpoints]
             times = [c.infer_ms for c in self._checkpoints]
             import numpy as np
             with result["checkpoints"].open("w") as f:
                 json.dump({
-                    "mode": "rolling", "incremental": self.config.incremental_tracking,
+                    "mode": "rolling",
                     "config": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(self.config).items()},
                     "checkpoints": chk_recs, "checkpoint_count": len(chk_recs),
                     "completed": self._completed_checkpoints, "skipped": self._skipped_checkpoints,
@@ -601,12 +472,11 @@ class RollingActionsPhase(Phase):
                     "p95_infer_ms": round(float(np.percentile(times, 95)), 1) if times else 0,
                     "max_infer_ms": round(float(np.max(times)), 1) if times else 0,
                     "latest_emitted_frame": self._latest_emitted_frame,
-                    "builder_stats": builder_stats,
                 }, f, ensure_ascii=False, indent=2)
 
             with result["summary"].open("w") as f:
                 json.dump({
-                    "mode": "rolling", "incremental": self.config.incremental_tracking,
+                    "mode": "rolling",
                     "config": {"fps": float(self.config.fps), "cadence_frames": self.config.cadence_frames,
                                "emit_delay_frames": self.config.emit_delay_frames, "emit_frames": self.config.emit_frames,
                                "async_enabled": self.config.async_enabled},
@@ -614,12 +484,6 @@ class RollingActionsPhase(Phase):
                     "total_emitted_edges": len(self._emitted_edges),
                     "total_rolling_edges": len(self._rolling_edges),
                     "avg_infer_ms": round(self._total_infer_ms / max(1, self._completed_checkpoints), 1),
-                    "builder_stats": builder_stats,
                 }, f, ensure_ascii=False, indent=2)
 
         return result
-
-    def _checkpoint_output_dir(self) -> Path:
-        if self.config.output_dir:
-            return Path(self.config.output_dir) / "snapshots"
-        return Path("output/actions/rolling_online/snapshots")

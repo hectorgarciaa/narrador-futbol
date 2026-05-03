@@ -17,7 +17,7 @@ from typing import Any, Callable
 from urllib import error, request
 
 from football_ai.commentaries.voice import probe_audio_duration_seconds
-from football_ai.actions_incremental.pathcrf_semantics import PITCH_LENGTH_M, team_attacks_right, team_id_from_player_id
+from football_ai.actions.pathcrf_semantics import PITCH_LENGTH_M, team_attacks_right, team_id_from_player_id
 
 
 logger = logging.getLogger(__name__)
