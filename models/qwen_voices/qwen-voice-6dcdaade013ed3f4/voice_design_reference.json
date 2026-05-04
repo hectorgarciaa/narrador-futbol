@@ -1,0 +1,9 @@
+{
+  "clone_model_name": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+  "design_model_name": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+  "language": "Spanish",
+  "prompt_cache_path": "/home/cmantill/narrador-futbol/output/commentaries/qwen_voices/qwen-voice-6dcdaade013ed3f4/voice_clone_prompt.pt",
+  "reference_audio_path": "/home/cmantill/narrador-futbol/output/commentaries/qwen_voices/qwen-voice-6dcdaade013ed3f4/voice_design_reference.wav",
+  "reference_text": "Buenas tardes, bienvenidos a una gran noche de futbol. Ya rueda la emocion y tenemos un partidazo por delante.",
+  "voice_design_prompt": "Design a voice for a professional football commentator speaking in Spanish from Spain. Male adult voice, warm, clear, charismatic, and emotionally expressive. The voice should sound like a live match narrator: energetic, passionate, and intense, with natural excitement, quick rhythm, short pauses, and rising emotion during dangerous plays. He should sound confident, vivid, and engaging, like a real TV sports broadcaster, but never cartoonish or overacted. Prioritize emotional delivery, expressive prosody, dynamic pacing, and natural realism."
+}

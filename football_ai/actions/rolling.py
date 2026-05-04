@@ -372,6 +372,10 @@ class RollingActionsPhase(Phase):
                 elif "frame_id" not in edge_df.columns:
                     edge_df["frame_id"] = range(len(edge_df))
 
+            person_slots_inv = {str(v): str(k) for k, v in (self._last_person_slots or {}).items()}
+            referee_slots_inv = {str(v): str(k) for k, v in (self._last_referee_slots or {}).items()}
+            slots_inv = {**person_slots_inv, **referee_slots_inv}
+
             emitted_this = 0
             raw_edge_for_frame = None
             confirmed_action_for_frame = None
@@ -399,6 +403,8 @@ class RollingActionsPhase(Phase):
                 emit_rec["emit_end_frame"] = int(emit_end)
                 emit_rec["latency_frames"] = int(fi) - global_frame
                 emit_rec["latency_seconds"] = float(emit_rec["latency_frames"]) / max(float(self.config.fps), 1e-6)
+                emit_rec["player_track_id"] = slots_inv.get(str(es)) if es else None
+                emit_rec["receiver_track_id"] = slots_inv.get(str(ed)) if ed else None
                 self._emitted_edges.append(emit_rec)
                 emit_block_edges.append(emit_rec)
                 emitted_this += 1
@@ -407,14 +413,30 @@ class RollingActionsPhase(Phase):
                     self._latest_emitted_frame = global_frame
 
                 if global_frame == fi:
+                    player_tid = slots_inv.get(str(es)) if es else None
+                    receiver_tid = slots_inv.get(str(ed)) if ed else None
                     raw_edge_for_frame = {"frame_id": global_frame, "edge_src": es, "edge_dst": ed}
                     confirmed_action_for_frame = {**raw_edge_for_frame, "event_type": _classify_event(es, ed),
                                                   "player_id": cs, "receiver_id": cd if es != ed else None,
+                                                  "player_track_id": player_tid, "receiver_track_id": receiver_tid if es != ed else None,
                                                   "is_realtime": True, "is_final": True}
 
             # Consolidar acciones del bloque emitido con postprocesado temporal
             emit_frame_count = int(self.config.emit_frames)
             consolidated = postprocess_emit_block(emit_block_edges, emit_frame_count)
+
+            for ev in consolidated:
+                src = str(ev.get("canonical_src") or "")
+                dst = str(ev.get("canonical_dst") or "")
+                match = next(
+                    (r for r in emit_block_edges
+                     if str(r.get("canonical_src") or "") == src and str(r.get("canonical_dst") or "") == dst),
+                    None,
+                )
+                if match:
+                    ev["player_track_id"] = match.get("player_track_id")
+                    ev["receiver_track_id"] = match.get("receiver_track_id")
+
             self._postprocessed_actions.extend(consolidated)
 
             self._checkpoints.append(RealtimeCheckpoint(

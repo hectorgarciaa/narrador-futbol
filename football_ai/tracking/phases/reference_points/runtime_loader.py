@@ -75,8 +75,8 @@ def load_pnlcalib_runtime(device: Optional[str] = None) -> PnLCalibRuntime:
     with open(cfg_l_path, "r", encoding="utf-8") as file_handle:
         cfg_l = yaml.safe_load(file_handle)
 
-    loaded_state_kp = torch.load(resolved_kp_path, map_location=resolved_device)
-    loaded_state_line = torch.load(resolved_line_path, map_location=resolved_device)
+    loaded_state_kp = torch.load(resolved_kp_path, map_location=resolved_device, weights_only=False)
+    loaded_state_line = torch.load(resolved_line_path, map_location=resolved_device, weights_only=False)
 
     model_kp = imported["get_cls_net"](cfg)
     model_kp.load_state_dict(loaded_state_kp)

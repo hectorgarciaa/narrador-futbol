@@ -411,6 +411,18 @@ class OnlineSpecialSeedRoleAssigner:
                                 "role_stabilized_at_frame": int(frame_id),
                             }
                         )
+                        if self.lineup_matcher is not None:
+                            gk_state = {
+                                "display_role_slot": "POR",
+                                "majority_expected_role_slot": "POR",
+                                "majority_role": "POR",
+                            }
+                            resolved_slot, player_name = self.lineup_matcher.resolve_player_name(
+                                track_data.get("team"), "POR", "POR", "POR"
+                            )
+                            if resolved_slot and player_name:
+                                track_data["lineup_slot"] = str(resolved_slot)
+                                track_data["player_name"] = str(player_name)
 
     def process_tracks_frame(self, tracks_frame, frame_id):
         self.stats["processed_frames"] += 1
@@ -429,6 +441,7 @@ class OnlineSpecialSeedRoleAssigner:
 
         visible_player_df = player_predictions_df.copy()
         self._assign_special_seed_frame_teams(tracks_frame, visible_player_df)
+        self._annotate_special_goalkeepers(tracks_frame, frame_id)
         active_segments_by_team = {}
         roles_applied = False
         for row in visible_player_df.itertuples(index=False):

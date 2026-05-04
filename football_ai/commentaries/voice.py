@@ -26,7 +26,7 @@ from .elevenlabs_tts import (
 from .generator import (
     CommentaryEvent,
     CommentaryGenerationResult,
-    OllamaCommentaryGenerator,
+    CommentaryGenerator,
 )
 
 
@@ -34,7 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMMENTARIES_ROOT = Path(__file__).resolve().parent
 DEFAULT_AUDIO_OUTPUT_DIR = PROJECT_ROOT / "output" / "commentaries" / "audio"
 DEFAULT_VOICE_CACHE_DIR = PROJECT_ROOT / "output" / "commentaries" / "voices"
-DEFAULT_QWEN_VOICE_CACHE_DIR = PROJECT_ROOT / "output" / "commentaries" / "qwen_voices"
+DEFAULT_QWEN_VOICE_CACHE_DIR = PROJECT_ROOT / "models" / "qwen_voices"
 DEFAULT_QWEN_CPP_RUNTIME_DIR = PROJECT_ROOT / "output" / "commentaries" / "qwen_cpp_runtime"
 DEFAULT_QWEN_CPP_MODEL_DIR = DEFAULT_QWEN_CPP_RUNTIME_DIR / "models"
 DEFAULT_QWEN_CPP_THREADS = 6
@@ -182,6 +182,28 @@ def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False, sort_keys=True)
+
+
+def _patch_xtts_torch_safe_globals() -> None:
+    try:
+        import torch
+        original_load = torch.load
+        def _patched_load(*args, **kwargs):
+            kwargs.setdefault("weights_only", False)
+            return original_load(*args, **kwargs)
+        torch.load = _patched_load
+    except Exception:
+        pass
+
+    try:
+        from transformers.generation.utils import GenerationMixin
+        _original_validate = GenerationMixin._validate_model_kwargs
+        def _patched_validate(self, model_kwargs):
+            model_kwargs.pop("voice_dirs", None)
+            return _original_validate(self, model_kwargs)
+        GenerationMixin._validate_model_kwargs = _patched_validate
+    except Exception:
+        pass
 
 
 def _patch_xtts_audio_loading() -> None:
@@ -381,7 +403,7 @@ def resolve_speaker_wavs(
 def _resolve_optional_speaker_wavs(
     speaker_wavs: Sequence[str | Path] | str | Path | None = None,
 ) -> tuple[Path, ...] | None:
-    if speaker_wavs is None:
+    if not speaker_wavs:
         return None
     return resolve_speaker_wavs(speaker_wavs)
 
@@ -461,6 +483,7 @@ class XTTSVoiceSynthesizer:
             ) from exc
 
         _patch_xtts_audio_loading()
+        _patch_xtts_torch_safe_globals()
         model = TTS(self.model_name)
         if hasattr(model, "to"):
             model = model.to("cuda" if self.use_gpu else "cpu")
@@ -505,10 +528,11 @@ class XTTSVoiceSynthesizer:
         self.voice_cache_dir.mkdir(parents=True, exist_ok=True)
         speaker_id = self._voice_cache_speaker_id(resolved_speaker_wavs)
         voice_cache_path = self.voice_cache_dir / f"{speaker_id}.pth"
-        tts_kwargs = {
+        speaker_wav_paths = [str(path) for path in resolved_speaker_wavs]
+
+        base_kwargs = {
             "text": clean_text,
             "file_path": str(output_path),
-            "speaker": speaker_id,
             "voice_dir": str(self.voice_cache_dir),
             "language": (language or self.language),
             "split_sentences": (
@@ -517,22 +541,22 @@ class XTTSVoiceSynthesizer:
                 else bool(split_sentences)
             ),
         }
-        speaker_wav_paths = [str(path) for path in resolved_speaker_wavs]
-        try:
-            if voice_cache_path.exists():
+        if voice_cache_path.exists():
+            try:
                 model.tts_to_file(
                     speaker_wav=None,
-                    **tts_kwargs,
+                    speaker=speaker_id,
+                    **base_kwargs,
                 )
-            else:
+            except Exception:
                 model.tts_to_file(
                     speaker_wav=speaker_wav_paths,
-                    **tts_kwargs,
+                    **base_kwargs,
                 )
-        except Exception:
+        else:
             model.tts_to_file(
                 speaker_wav=speaker_wav_paths,
-                **tts_kwargs,
+                **base_kwargs,
             )
         if not output_path.exists():
             raise RuntimeError(
@@ -704,7 +728,7 @@ def build_voice_synthesizer(
     if backend == "xtts":
         primary = XTTSVoiceSynthesizer(
             model_name=tts_model,
-            speaker_wavs=speaker_wavs,
+            speaker_wavs=speaker_wavs if speaker_wavs else None,
             language=tts_language,
             use_gpu=use_gpu,
             split_sentences=split_sentences,
@@ -863,11 +887,11 @@ def build_voice_synthesizer(
 class CommentaryAudioPipeline:
     def __init__(
         self,
-        commentary_generator: OllamaCommentaryGenerator | None = None,
+        commentary_generator: CommentaryGenerator | None = None,
         voice_synthesizer: Any | None = None,
         output_dir: str | Path = DEFAULT_AUDIO_OUTPUT_DIR,
     ) -> None:
-        self.commentary_generator = commentary_generator or OllamaCommentaryGenerator()
+        self.commentary_generator = commentary_generator or CommentaryGenerator()
         self.voice_synthesizer = voice_synthesizer or build_voice_synthesizer()
         self.output_dir = Path(output_dir).expanduser().resolve()
 
