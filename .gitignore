@@ -84,3 +84,6 @@ models/gguf/
 
 
 external/
+
+# Temporary downloads
+tmp_downloads/
