@@ -31,7 +31,7 @@ from .paths import (
     build_tracks_output_paths,
     resolve_video_path,
 )
-from .live_commentary import compose_frame_hooks, create_app_live_commentary_bridge_from_env
+from football_ai.commentaries.phase import CommentaryPhase, CommentaryPhaseConfig
 from .persistence import save_debug_frames, save_result, save_summary, upsert_tracking_metrics_dataset
 
 
@@ -183,19 +183,6 @@ def _resolve_pnlcalib_device(tracking_phase):
         return "cpu (pnlcalib disabled)"
     runtime = getattr(field_projector, "runtime", None)
     runtime_device = getattr(runtime, "device", "cpu")
-    return _resolve_runtime_device_label(runtime_device)
-
-
-def _resolve_frame_hook_device(frame_hook):
-    if frame_hook is None:
-        return "cpu (frame_hook disabled)"
-    hook_owner = getattr(frame_hook, "__self__", None)
-    role_session = getattr(hook_owner, "role_session", None)
-    if role_session is None:
-        role_session = getattr(frame_hook, "role_session", None)
-    if role_session is None:
-        return "cpu (frame_hook sin backend torch)"
-    runtime_device = getattr(role_session, "device", "cpu")
     return _resolve_runtime_device_label(runtime_device)
 
 
@@ -421,12 +408,66 @@ def run_tracking_pipeline(args):
             )
             )
 
-        online_commentary_bridge = create_app_live_commentary_bridge_from_env()
-        if online_commentary_bridge is not None:
-            logger.info("Actions live commentary bridge activado para esta ejecución.")
-        frame_hook = compose_frame_hooks(
-            (online_commentary_bridge.on_frame if online_commentary_bridge is not None else None),
+        commentary_phase = None
+        commentary_conf = dict(tracker_conf.get("commentary") or {})
+        commentary_enabled = bool(commentary_conf.get("enabled", False))
+        commentary_enabled = (
+            commentary_enabled
+            or bool(getattr(args, "commentary", False))
         )
+        if getattr(args, "no_commentary", False):
+            commentary_enabled = False
+        if commentary_enabled:
+            from football_ai.commentaries.launcher import ensure_llama_server_running
+
+            llama_base_url = ensure_llama_server_running()
+            if llama_base_url:
+                logger.info("Commentary LLM backend: %s", llama_base_url)
+                if not commentary_conf.get("llm_base_url"):
+                    commentary_conf["llm_base_url"] = llama_base_url
+
+            commentary_output_dir = str(rolling_output_dir / "commentary")
+            commentary_phase = CommentaryPhase(CommentaryPhaseConfig(
+                enabled=True,
+                generate_text=bool(commentary_conf.get("generate_text", True)),
+                generate_audio=bool(
+                    getattr(args, "commentary_audio", None)
+                    if hasattr(args, "commentary_audio") and getattr(args, "commentary_audio", None) is not None
+                    else commentary_conf.get("generate_audio", True)
+                ),
+                llm_model=str(getattr(args, "commentary_llm_model", None) or commentary_conf.get("llm_model", "gemma4-q4ks-text")),
+                llm_base_url=commentary_conf.get("llm_base_url"),
+                llm_temperature=float(commentary_conf.get("llm_temperature", 0.7)),
+                tts_backend=str(getattr(args, "commentary_tts_backend", None) or commentary_conf.get("tts_backend", "xtts")),
+                speaker_wavs=list(commentary_conf.get("speaker_wavs") or []),
+                female_speaker_wavs=list(commentary_conf.get("female_speaker_wavs") or []),
+                alternate_voices=bool(commentary_conf.get("alternate_voices", False)),
+                elevenlabs_api_key=commentary_conf.get("elevenlabs_api_key"),
+                elevenlabs_voice_id=commentary_conf.get("elevenlabs_voice_id"),
+                elevenlabs_female_voice_id=commentary_conf.get("elevenlabs_female_voice_id"),
+                elevenlabs_model_id=commentary_conf.get("elevenlabs_model_id"),
+                elevenlabs_output_format=commentary_conf.get("elevenlabs_output_format"),
+                elevenlabs_language_code=commentary_conf.get("elevenlabs_language_code"),
+                elevenlabs_stability=commentary_conf.get("elevenlabs_stability"),
+                elevenlabs_similarity_boost=commentary_conf.get("elevenlabs_similarity_boost"),
+                elevenlabs_style=commentary_conf.get("elevenlabs_style"),
+                elevenlabs_speed=commentary_conf.get("elevenlabs_speed"),
+                elevenlabs_use_speaker_boost=commentary_conf.get("elevenlabs_use_speaker_boost"),
+                elevenlabs_optimize_streaming_latency=commentary_conf.get("elevenlabs_optimize_streaming_latency"),
+                fps=float(actions_conf.get("fps", 25.0)),
+                output_dir=str(commentary_output_dir),
+                max_workers=max(1, int(commentary_conf.get("max_workers", 2))),
+                drop_policy=str(commentary_conf.get("drop_policy", "latest")),
+                max_queue_size=max(1, int(commentary_conf.get("max_queue_size", 8))),
+                skip_event_types=list(commentary_conf.get("skip_event_types", ["out", "unknown"])),
+                deduplicate_consecutive=bool(commentary_conf.get("deduplicate_consecutive", True)),
+            ))
+            logger.info("Commentary phase enabled (mode: %s, audio: %s, tts: %s)",
+                        "online", commentary_phase.config.generate_audio, commentary_phase.config.tts_backend)
+        else:
+            logger.info("Commentary phase disabled.")
+
+        frame_hook = None
 
         if bool(tracker_conf.get("print_runtime_devices", True)):
             print(
@@ -438,7 +479,7 @@ def run_tracking_pipeline(args):
                 flush=True,
             )
             print(
-                f"[runtime] frame_hook: {_resolve_frame_hook_device(frame_hook)}",
+                f"[runtime] commentary: {'enabled' if commentary_phase else 'disabled'}",
                 flush=True,
             )
 
@@ -456,6 +497,7 @@ def run_tracking_pipeline(args):
             "ball": [],
             "possession": [],
             "actions_packets": [],
+            "commentary_packets": [],
         }
         visual_debug_frames = []
 
@@ -465,6 +507,8 @@ def run_tracking_pipeline(args):
             position_phase.reset()
         if actions_phase:
             actions_phase.reset()
+        if commentary_phase:
+            commentary_phase.reset()
 
         for frame_index, frame_time_ms, frame_bgr in iter_video_frames(video_path, getattr(args, "max_frames", None)):
             tracking_packet, tracking_ms = tracking_phase.process(
@@ -486,6 +530,11 @@ def run_tracking_pipeline(args):
             if actions_phase:
                 actions_packet, actions_ms = actions_phase.process(final_packet)
                 final_packet = actions_packet
+
+            commentary_ms = 0.0
+            if commentary_phase:
+                commentary_packet, commentary_ms = commentary_phase.process(final_packet)
+                final_packet = commentary_packet
             
             tracks_frame = final_packet["clean"]["tracks_frame"]
             for cls in ["player", "goalkeeper", "referee", "ball"]:
@@ -495,6 +544,8 @@ def run_tracking_pipeline(args):
             tracks["possession"].append(dict(possession_info))
             actions_pkt = final_packet["clean"].get("actions_packet", {})
             tracks["actions_packets"].append(dict(actions_pkt))
+            commentary_pkt = final_packet["clean"].get("commentary_packet", {})
+            tracks["commentary_packets"].append(dict(commentary_pkt))
 
             if four_panel_enabled:
                 trace_debug = final_packet["trace"].get("visual_debug")
@@ -511,7 +562,7 @@ def run_tracking_pipeline(args):
                 c_ms = prof.get("canon_ms", 0.0)
                 
                 total_ms = tracking_ms + posession_ms + position_ms
-                total_ms += actions_ms
+                total_ms += actions_ms + commentary_ms
                 pos_inf = f" | PosInf: {position_ms:.1f}ms" if position_phase else ""
                 act_extra = ""
                 if actions_phase:
@@ -528,17 +579,20 @@ def run_tracking_pipeline(args):
                     elif actions_pkt.get("async_pending"):
                         act_extra = " (async pending)"
                 act_inf = f" | Actions: {actions_ms:.1f}ms{act_extra}" if actions_phase else ""
+                com_inf = ""
+                if commentary_phase:
+                    com_pkt = final_packet["clean"].get("commentary_packet", {})
+                    com_inf = f" | Commentary: {commentary_ms:.1f}ms (q={com_pkt.get('queued',0)} r={com_pkt.get('running',0)} ok={com_pkt.get('completed',0)} fail={com_pkt.get('failed',0)})"
                 
                 print(
                     f"[frame {frame_index:04d}] "
                     f"Detect: {d_ms:.1f}ms | Proj: {p_ms:.1f}ms | Filter: {f_ms:.1f}ms | "
                     f"Id: {i_ms:.1f}ms | Byte: {b_ms:.1f}ms | Canon: {c_ms:.1f}ms | "
-                    f"Poss: {posession_ms:.1f}ms{pos_inf}{act_inf} || Total AI: {total_ms:.1f}ms",
+                    f"Poss: {posession_ms:.1f}ms{pos_inf}{act_inf}{com_inf} || Total AI: {total_ms:.1f}ms",
                     flush=True
                 )
 
-            if frame_hook is not None:
-                frame_hook(frame_index, frame_bgr, final_packet)
+            # frame_hook removed — commentary now handled by CommentaryPhase
 
         # Config required max tracks for drawing
         max_tracks_per_class = {
@@ -698,15 +752,42 @@ def run_tracking_pipeline(args):
             for key, value in role_postprocess_result.items():
                 summary[f"special_seed_{key}"] = value
 
+        if commentary_phase is not None:
+            try:
+                commentary_summary = commentary_phase.summary()
+                logger.info("Commentary summary: %s", commentary_summary)
+                summary["commentary"] = commentary_summary
+            except Exception:
+                logger.exception("No se pudo generar el summary de commentary.")
+            try:
+                commentary_artifacts = commentary_phase.build_result(
+                    rolling_output_dir / "commentary"
+                )
+                logger.info("Commentary artifacts: %s", commentary_artifacts)
+            except Exception:
+                logger.exception("No se pudieron guardar los artefactos de commentary.")
+            try:
+                manifest_path = rolling_output_dir / "commentary" / "commentary_manifest.jsonl"
+                if manifest_path.exists() and manifest_path.stat().st_size > 0:
+                    from football_ai.commentaries.deferred_media import assemble_deferred_commentary_video
+                    commentary_audio_path = rolling_output_dir / "commentary" / "commentary_track.wav"
+                    commentary_video_out = Path(output).with_name(f"{Path(output).stem}_commentary.mp4")
+                    assembly = assemble_deferred_commentary_video(
+                        str(manifest_path),
+                        str(video_path),
+                        str(commentary_audio_path),
+                        str(commentary_video_out),
+                    )
+                    logger.info("Commentary video saved to: %s (events=%d, duration=%.1fs)",
+                                assembly.output_video_path, assembly.event_count, assembly.video_duration_seconds)
+                    summary["commentary_video"] = str(assembly.output_video_path)
+            except Exception:
+                logger.exception("No se pudo ensamblar el video con comentarios.")
+
         # Save tracks JSON
         save_result(tracks, output_path_named, logger)
         if output_path_legacy != output_path_named:
             save_result(tracks, output_path_legacy, logger)
-        if online_commentary_bridge is not None:
-            try:
-                online_commentary_bridge.finalize(output_path_named)
-            except Exception:
-                logger.exception("Fallo en el flush final del bridge PathCRF live.")
         if position_phase is not None and position_phase.enabled:
             role_frame_df, role_player_df, role_greedy_df = (
                 position_phase.build_role_export_dataframes(tracks)

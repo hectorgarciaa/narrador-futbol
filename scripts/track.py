@@ -116,6 +116,40 @@ def parse_args():
         action="store_false",
         help="Oculta nombres de equipos y distancias en el video anotado.",
     )
+    parser.add_argument(
+        "--commentary",
+        action="store_true",
+        default=None,
+        help="Activa generacion de comentarios (LLM + TTS) como fase del pipeline.",
+    )
+    parser.add_argument(
+        "--no-commentary",
+        dest="commentary",
+        action="store_false",
+        help="Desactiva generacion de comentarios.",
+    )
+    parser.add_argument(
+        "--commentary-audio",
+        action="store_true",
+        default=None,
+        help="Activa generacion de audio TTS en la fase de comentarios.",
+    )
+    parser.add_argument(
+        "--no-commentary-audio",
+        dest="commentary_audio",
+        action="store_false",
+        help="Desactiva generacion de audio TTS (solo texto).",
+    )
+    parser.add_argument(
+        "--commentary-tts-backend",
+        default=None,
+        help="Backend TTS para comentarios (xtts, qwen, elevenlabs).",
+    )
+    parser.add_argument(
+        "--commentary-llm-model",
+        default=None,
+        help="Modelo LLM para comentarios (default: gemma4:e2b).",
+    )
     return parser.parse_args()
 
 
