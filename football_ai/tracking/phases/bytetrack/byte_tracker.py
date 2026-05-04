@@ -20,32 +20,6 @@ class ByteTrack(
     ByteTrackNewTrackFilter,
     ByteTrackPipelineSteps,
 ):
-    """
-    Initialize the ByteTrack object.
-
-    <video controls>
-        <source src="https://media.roboflow.com/supervision/video-examples/how-to/track-objects/annotate-video-with-traces.mp4" type="video/mp4">
-    </video>
-
-    Parameters:
-        track_activation_threshold (float): Detection confidence threshold
-            for track activation. Increasing track_activation_threshold improves accuracy
-            and stability but might miss true detections. Decreasing it increases
-            completeness but risks introducing noise and instability.
-        lost_track_buffer (int): Number of frames to buffer when a track is lost.
-            Increasing lost_track_buffer enhances occlusion handling, significantly
-            reducing the likelihood of track fragmentation or disappearance caused
-            by brief detection gaps.
-        minimum_matching_threshold (float): Threshold for matching tracks with detections.
-            Increasing minimum_matching_threshold improves accuracy but risks fragmentation.
-            Decreasing it improves completeness but risks false positives and drift.
-        frame_rate (int): The frame rate of the video.
-        minimum_consecutive_frames (int): Number of consecutive frames that an object must
-            be tracked before it is considered a 'valid' track.
-            Increasing minimum_consecutive_frames prevents the creation of accidental tracks from
-            false detection or double detection, but risks missing shorter tracks.
-    """  # noqa: E501 // docs
-
     def __init__(
         self,
         track_activation_threshold: float = 0.25,
@@ -189,69 +163,19 @@ class ByteTrack(
         self.last_detection_debug_by_raw_idx = {}
         self.last_unconfirmed_association_debug = []
 
-    def update_with_detections(
-        self,
-        detections: Detections,
-        team_labels=None,
-        class_labels=None,
-        field_positions=None,
-        yolo_class_labels=None,
-        shirt_colors=None,
-    ) -> Detections:
-        """
-        Updates the tracker with the provided detections and returns the updated
-        detection results.
-
-        Args:
-            detections (Detections): The detections to pass through the tracker.
-
-        Example:
-            ```python
-            import supervision as sv
-            from ultralytics import YOLO
-
-            model = YOLO(<MODEL_PATH>)
-            tracker = sv.ByteTrack()
-
-            box_annotator = sv.BoxAnnotator()
-            label_annotator = sv.LabelAnnotator()
-
-            def callback(frame: np.ndarray, index: int) -> np.ndarray:
-                results = model(frame)[0]
-                detections = sv.Detections.from_ultralytics(results)
-                detections = tracker.update_with_detections(detections)
-
-                labels = [f"#{tracker_id}" for tracker_id in detections.tracker_id]
-
-                annotated_frame = box_annotator.annotate(
-                    scene=frame.copy(), detections=detections)
-                annotated_frame = label_annotator.annotate(
-                    scene=annotated_frame, detections=detections, labels=labels)
-                return annotated_frame
-
-            sv.process_video(
-                source_path=<SOURCE_VIDEO_PATH>,
-                target_path=<TARGET_VIDEO_PATH>,
-                callback=callback
-            )
-            ```
-        """
+    def update_with_detections(self, detections: Detections) -> Detections:
         tensors = np.hstack(
             (
                 detections.xyxy,
                 detections.confidence[:, np.newaxis],
             )
         )
-        if team_labels is None and detections.data is not None:
-            team_labels = detections.data.get("team")
-        if class_labels is None and detections.data is not None:
-            class_labels = detections.data.get("class_td")
-        if yolo_class_labels is None and detections.data is not None:
-            yolo_class_labels = detections.data.get("class_yolo")
-        if field_positions is None and detections.data is not None:
-            field_positions = detections.data.get("field_position")
-        if shirt_colors is None and detections.data is not None:
-            shirt_colors = detections.data.get("shirt_color")
+        
+        team_labels = detections.data.get("team")
+        class_labels = detections.data.get("class_td")
+        yolo_class_labels = detections.data.get("class_yolo")
+        field_positions = detections.data.get("field_position")
+        shirt_colors = detections.data.get("shirt_color")
         raw_det_indices = detections.data.get("raw_det_idx") if detections.data is not None else None
         raw_det_indices = (
             np.asarray(raw_det_indices, dtype=np.int32).reshape(-1)

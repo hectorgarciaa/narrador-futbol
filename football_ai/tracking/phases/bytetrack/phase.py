@@ -54,13 +54,11 @@ class ByteTrackPhase(Phase):
 
     @staticmethod
     def _build_detections(clean):
-        num_detections = int(clean["num_detections"])
         boxes = np.asarray(clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4)
         confidences = np.asarray(clean["confidence"], dtype=np.float32).reshape(-1)
         detections = sv.Detections(
             xyxy=boxes,
             confidence=confidences,
-            class_id=np.zeros(num_detections, dtype=np.int32),
         )
         detections.data = {
             "team": np.asarray(clean["team"], dtype=object),

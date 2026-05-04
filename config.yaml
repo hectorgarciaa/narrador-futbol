@@ -109,6 +109,7 @@ team_detector:
 tracking:
   lineup_spec: "output/interfaz/runs/10246f76b26d/lineup_spec.json"  # Fallback de --lineup-spec (ruta relativa a la raiz del proyecto)
   print_runtime_devices: true  # Si true, imprime el dispositivo efectivo real de PnLCalib y frame hook (cuda/cpu)
+
   projector:
     enabled: true     # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching
     classes: ["player", "goalkeeper"]
@@ -281,10 +282,6 @@ tracking:
     skip_event_types: ["out", "unknown"]
     deduplicate_consecutive: true
 
-  
-  
-  
-  
   reassign_motion_factor: 0.75  # Factor de penalización de distancia para reasignación
   reassign_min_distance: 10.0  # Distancia mínima en metros para considerar una reasignación de ID
   reassign_min_samples: 3  # Muestras mínimas para considerar una reasign
