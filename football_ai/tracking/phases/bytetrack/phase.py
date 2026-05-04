@@ -43,12 +43,7 @@ class ByteTrackPhase(Phase):
         clean_in = identification_packet["clean"]
         detections = self._build_detections(clean_in)
         setattr(self.tracker, "collect_internal_matching_debug", bool(collect_visual_debug))
-        tracked = self.tracker.update_with_detections(
-            detections,
-            np.asarray(clean_in["team"], dtype=object),
-            np.asarray(clean_in["class_name_td"], dtype=object),
-            yolo_class_labels=np.asarray(clean_in["class_name"], dtype=object),
-        )
+        tracked = self.tracker.update_with_detections(detections)
         return self._build_packet(identification_packet, tracked)
 
     def track_packet(self, identification_packet, *, collect_visual_debug=False):
@@ -69,14 +64,10 @@ class ByteTrackPhase(Phase):
         )
         detections.data = {
             "team": np.asarray(clean["team"], dtype=object),
-            "class": np.asarray(clean["class_name_td"], dtype=object),
-            "class_name_td": np.asarray(clean["class_name_td"], dtype=object),
+            "class_td": np.asarray(clean["class_td"], dtype=object),
             "class_yolo": np.asarray(clean["class_name"], dtype=object),
             "distances": np.asarray(clean["distances"], dtype=object),
             "shirt_color": np.asarray(clean["shirt_color"], dtype=object),
-            "bbox_size": np.asarray(clean["bbox_size"], dtype=np.float32),
-            "referee_reassign_gate": np.asarray(clean["referee_reassign_gate"], dtype=object),
-            "goalkeeper_reassign_gate": np.asarray(clean["goalkeeper_reassign_gate"], dtype=object),
             "field_position": np.asarray(clean["field_positions_m"], dtype=np.float32),
             "ground_point_image": np.asarray(clean["ground_points_image_original"], dtype=np.float32),
             "raw_det_idx": np.asarray(clean["det_id"], dtype=np.int32),
@@ -111,7 +102,7 @@ class ByteTrackPhase(Phase):
                     "bbox_xyxy": _serialize_value(bbox),
                     "confidence": float(confidence),
                     "class_tracker": class_trackers[index],
-                    "class_name_td": metadata.get("class_name_td") or metadata.get("class"),
+                    "class_td": metadata.get("class_td"),
                     "class_name": metadata.get("class_yolo"),
                     "team": metadata.get("team"),
                     "field_position": _serialize_value(metadata.get("field_position")),
@@ -119,8 +110,6 @@ class ByteTrackPhase(Phase):
                     "distances": _serialize_value(metadata.get("distances")),
                     "shirt_color": _serialize_value(metadata.get("shirt_color")),
                     "bbox_size": _serialize_value(metadata.get("bbox_size")),
-                    "referee_reassign_gate": _serialize_value(metadata.get("referee_reassign_gate")),
-                    "goalkeeper_reassign_gate": _serialize_value(metadata.get("goalkeeper_reassign_gate")),
                 }
             )
 

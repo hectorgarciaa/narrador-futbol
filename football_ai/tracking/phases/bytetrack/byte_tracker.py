@@ -192,7 +192,7 @@ class ByteTrack(
     def update_with_detections(
         self,
         detections: Detections,
-        team_labels,
+        team_labels=None,
         class_labels=None,
         field_positions=None,
         yolo_class_labels=None,
@@ -242,10 +242,10 @@ class ByteTrack(
                 detections.confidence[:, np.newaxis],
             )
         )
+        if team_labels is None and detections.data is not None:
+            team_labels = detections.data.get("team")
         if class_labels is None and detections.data is not None:
-            class_labels = detections.data.get("class_name_td")
-            if class_labels is None:
-                class_labels = detections.data.get("class")
+            class_labels = detections.data.get("class_td")
         if yolo_class_labels is None and detections.data is not None:
             yolo_class_labels = detections.data.get("class_yolo")
         if field_positions is None and detections.data is not None:

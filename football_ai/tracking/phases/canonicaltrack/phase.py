@@ -542,7 +542,7 @@ class CanonicalTrackPhase(
                 bbox = clean_in["bbox_xyxy"][det_index] if det_index < len(clean_in["bbox_xyxy"]) else None
                 confidence = clean_in["confidence"][det_index] if det_index < len(clean_in["confidence"]) else None
                 class_yolo = clean_in["class_name"][det_index] if det_index < len(clean_in["class_name"]) else None
-                class_td = clean_in["class_name_td"][det_index] if det_index < len(clean_in["class_name_td"]) else None
+                class_td = clean_in["class_td"][det_index] if det_index < len(clean_in["class_td"]) else None
                 team = clean_in["team"][det_index] if det_index < len(clean_in["team"]) else None
                 distances = clean_in["distances"][det_index] if det_index < len(clean_in["distances"]) else None
                 detection_payload_by_raw_idx[raw_idx_int] = {
@@ -551,7 +551,7 @@ class CanonicalTrackPhase(
                     "confidence": (float(confidence) if confidence is not None else None),
                     "class_name": class_yolo,
                     "class_yolo": class_yolo,
-                    "class_name_td": class_td,
+                    "class_td": class_td,
                     "class_relabel": class_td,
                     "team": team,
                     "distances": distances,

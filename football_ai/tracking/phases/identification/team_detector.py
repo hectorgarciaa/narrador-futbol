@@ -56,13 +56,11 @@ class TeamDetector:
         )
         clean = {
             **filtering_clean,
-            "class_name_td": [entry["class_name_td"] for entry in entries],
+            "class_td": [entry["class_td"] for entry in entries],
             "team": [entry["team"] for entry in entries],
             "shirt_color": [entry["shirt_color"] for entry in entries],
             "distances": [entry["distances"] for entry in entries],
             "bbox_size": [entry["bbox_size"] for entry in entries],
-            "referee_reassign_gate": [entry["referee_reassign_gate"] for entry in entries],
-            "goalkeeper_reassign_gate": [entry["goalkeeper_reassign_gate"] for entry in entries],
         }
         return make_phase_packet(
             phase_name=PHASE_IDENTIFICATION,
@@ -176,18 +174,16 @@ class TeamDetector:
             trace["relabel"] = {
                 "reason": "non_candidate_class",
                 "class_name_input": class_name,
-                "class_name_td": class_name,
+                "class_td": class_name,
                 "team": None,
                 "distances": None,
             }
             return {
-                "class_name_td": class_name,
+                "class_td": class_name,
                 "team": None,
                 "shirt_color": None,
                 "distances": None,
                 "bbox_size": bbox_size,
-                "referee_reassign_gate": None,
-                "goalkeeper_reassign_gate": None,
                 "trace": trace,
             }, None
 
@@ -246,18 +242,16 @@ class TeamDetector:
         trace["relabel"] = {
             **relabel_trace,
             "class_name_input": effective_class,
-            "class_name_td": final_class,
+            "class_td": final_class,
             "team": team,
             "distances": serialized_distances,
         }
         return {
-            "class_name_td": final_class,
+            "class_td": final_class,
             "team": team,
             "shirt_color": serialized_color,
             "distances": serialized_distances,
             "bbox_size": bbox_size,
-            "referee_reassign_gate": relabel_trace["referee_reassign_gate"],
-            "goalkeeper_reassign_gate": relabel_trace["goalkeeper_reassign_gate"],
             "trace": trace,
         }, cluster_event
 
@@ -271,71 +265,44 @@ class TeamDetector:
         can_be_goalkeeper,
     ):
         team, distances = self.color_model.assign_team(shirt_color)
-        referee_gate = {
-            "field_position_available": field_position is not None,
-            "can_be_referee": bool(can_be_ref),
-            "is_middle_referee": bool(is_middle_ref),
-            "team_from_color": team,
-        }
-        goalkeeper_gate = {
-            "field_position_available": field_position is not None,
-            "can_be_goalkeeper": bool(can_be_goalkeeper),
-            "team_from_color": team,
-        }
 
         if team == "referee":
             if class_name == "referee":
-                return "referee", None, distances, self._relabel_trace("referee_confirmed", referee_gate, goalkeeper_gate)
+                return "referee", None, distances, self._relabel_trace("referee_confirmed")
             if field_position is None:
                 return class_name, self.color_model.nearest_outfield_team(distances), distances, self._relabel_trace(
                     "referee_color_without_field_position",
-                    referee_gate,
-                    goalkeeper_gate,
                 )
             if can_be_ref:
                 return "referee", None, distances, self._relabel_trace(
                     "relabel_to_referee_by_color_and_position",
-                    referee_gate,
-                    goalkeeper_gate,
                 )
             if can_be_goalkeeper:
                 return "goalkeeper", None, distances, self._relabel_trace(
                     "relabel_to_goalkeeper_after_referee_color_check",
-                    referee_gate,
-                    goalkeeper_gate,
                 )
             return class_name, self.color_model.nearest_outfield_team(distances), distances, self._relabel_trace(
                 "fallback_to_nearest_outfield_team",
-                referee_gate,
-                goalkeeper_gate,
             )
 
         if team in self.team_colors and class_name == "goalkeeper" and (field_position is None or can_be_goalkeeper):
-            return "goalkeeper", None, distances, self._relabel_trace("goalkeeper_confirmed", referee_gate, goalkeeper_gate)
+            return "goalkeeper", None, distances, self._relabel_trace("goalkeeper_confirmed")
 
         if team in self.team_colors and (self.updated["player"] or len(self.outfield_team_distance_stats) >= 2):
             if self.color_model.matches_outfield_cluster(distances):
                 return "player", team, distances, self._relabel_trace(
                     "relabel_to_player_by_outfield_cluster",
-                    referee_gate,
-                    goalkeeper_gate,
                 )
             if field_position is None or can_be_goalkeeper:
                 return "goalkeeper", None, distances, self._relabel_trace(
                     "relabel_to_goalkeeper_by_outlier_and_position",
-                    referee_gate,
-                    goalkeeper_gate,
                 )
 
-        return class_name, team, distances, self._relabel_trace("keep_current_class", referee_gate, goalkeeper_gate)
+        return class_name, team, distances, self._relabel_trace("keep_current_class")
 
     @staticmethod
-    def _relabel_trace(reason, referee_gate, goalkeeper_gate):
-        return {
-            "reason": reason,
-            "referee_reassign_gate": referee_gate,
-            "goalkeeper_reassign_gate": goalkeeper_gate,
-        }
+    def _relabel_trace(reason):
+        return {"reason": reason}
 
     def _summary(self, entries):
         return {
@@ -352,6 +319,6 @@ class TeamDetector:
             "relabelled_detections": sum(
                 1
                 for entry in entries
-                if entry["trace"]["relabel"]["class_name_td"] != entry["trace"]["class_name_yolo"]
+                if entry["trace"]["relabel"]["class_td"] != entry["trace"]["class_name_yolo"]
             ),
         }

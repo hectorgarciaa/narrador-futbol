@@ -123,7 +123,7 @@ class CanonicalSeedMixin:
             "shirt_color": None,
             "bbox_size": bbox_size,
             "class_tracker": "goalkeeper",
-            "class_name_td": "goalkeeper",
+            "class_td": "goalkeeper",
             "class_yolo": "goalkeeper",
             "source_raw_tracker_id": None,
             "canonical_assignment_mode": "reserved_seed",

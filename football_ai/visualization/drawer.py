@@ -147,7 +147,7 @@ class Drawer:
         return None
 
     def _resolve_debug_detection_class_name(self, det):
-        for key in ("class_name", "class_tracker", "class_name_td", "class_relabel", "class_team_detector", "class_yolo", "class"):
+        for key in ("class_name", "class_tracker", "class_td", "class_relabel", "class_team_detector", "class_yolo"):
             value = det.get(key)
             if value:
                 return value
@@ -162,10 +162,9 @@ class Drawer:
             data.get("class_yolo")
         )
         class_team_detector = (
-            data.get("class_name_td")
+            data.get("class_td")
             or data.get("class_relabel")
             or data.get("class_team_detector")
-            or data.get("class")
         )
         return class_tracker, class_yolo, class_team_detector
 

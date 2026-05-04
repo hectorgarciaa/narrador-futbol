@@ -159,7 +159,7 @@ class CanonicalBallMixin:
             "distances": metadata.get("distances"),
             "shirt_color": metadata.get("shirt_color"),
             "class_tracker": "ball",
-            "class_name_td": "ball",
+            "class_td": "ball",
             "class_yolo": "ball",
             "bbox_size": metadata.get("bbox_size"),
             "source_raw_tracker_id": None,

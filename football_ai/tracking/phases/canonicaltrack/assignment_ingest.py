@@ -17,7 +17,7 @@ class CanonicalAssignmentIngestMixin:
     @classmethod
     def _detection_class_candidates_from_metadata(cls, metadata):
         candidates = []
-        for key in ("class_tracker", "class_name_td", "class", "class_yolo"):
+        for key in ("class_tracker", "class_td", "class_yolo"):
             value = metadata.get(key)
             if not value or value in candidates:
                 continue
@@ -41,14 +41,11 @@ class CanonicalAssignmentIngestMixin:
                 "raw_det_idx": item["raw_det_idx"],
                 "shirt_color": item["shirt_color"],
                 "class_tracker": item["class_tracker"],
-                "class_name_td": item["class_name_td"],
-                "class": item["class_name_td"],
+                "class_td": item["class_td"],
                 "class_yolo": item["class_name"],
                 "distances": item["distances"],
                 "bbox_size": item["bbox_size"],
                 "ground_point_image": item["ground_point_image"],
-                "referee_reassign_gate": item["referee_reassign_gate"],
-                "goalkeeper_reassign_gate": item["goalkeeper_reassign_gate"],
             }
             tracked.append(
                 (
