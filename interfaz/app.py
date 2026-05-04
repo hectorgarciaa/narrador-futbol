@@ -45,7 +45,15 @@ from football_ai.commentaries.server import (
     DEFAULT_SERVER_PORT as DEFAULT_COMMENTARY_PORT,
     create_http_server,
 )
-from football_ai.commentaries.voice import CommentaryAudioPipeline, build_voice_synthesizer
+from football_ai.commentaries.voice import (
+    DEFAULT_ELEVENLABS_LANGUAGE_CODE,
+    DEFAULT_ELEVENLABS_MODEL_ID,
+    DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
+    DEFAULT_TTS_BACKEND,
+    TTS_BACKEND_CHOICES,
+    CommentaryAudioPipeline,
+    build_voice_synthesizer,
+)
 from football_ai.positions import (
     LineupSpecError,
     get_formation_catalog,
@@ -59,12 +67,17 @@ from football_ai.pipeline.paths import (
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+if load_dotenv is not None:
+    load_dotenv(PROJECT_ROOT / ".env")
+
 RUNS_ROOT = PROJECT_ROOT / "output" / "interfaz" / "runs"
 RUNS_ROOT.mkdir(parents=True, exist_ok=True)
 COMMENTARY_CACHE_ROOT = PROJECT_ROOT / "output" / "interfaz" / "commentary_cache"
 COMMENTARY_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-STARTUP_INTRO_AUDIO_PATH = COMMENTARY_CACHE_ROOT / "startup_intro.wav"
-STARTUP_INTRO_META_PATH = COMMENTARY_CACHE_ROOT / "startup_intro.json"
 OLLAMA_SERVE_LOG_PATH = COMMENTARY_CACHE_ROOT / "ollama_serve.log"
 LLAMA_CPP_CONFIG_PATH = PROJECT_ROOT / "llama.cpp" / "config.yaml"
 LLAMA_CPP_SERVER_LOG_PATH = COMMENTARY_CACHE_ROOT / "llama_cpp_server.log"
@@ -76,14 +89,6 @@ RUNS_LOCK = threading.Lock()
 DEFAULT_COMMENTARY_MODE = "live"
 COMMENTARY_MODE_CHOICES = {"live", "deferred"}
 COMMENTARY_SERVER_MANAGER = None
-STARTUP_INTRO_LOCK = threading.Lock()
-STARTUP_INTRO_STATE = {
-    "status": "idle",
-    "started_at_utc": None,
-    "finished_at_utc": None,
-    "error": None,
-    "thread_name": None,
-}
 
 APP_LIVE_COMMENTARY_ENV = "NARRADOR_APP_ENABLE_LIVE_COMMENTARY"
 APP_COMMENTARY_SERVICE_URL_ENV = "NARRADOR_APP_COMMENTARY_SERVICE_URL"
@@ -146,17 +151,6 @@ def normalize_commentary_mode(value):
             f"Opciones: {', '.join(sorted(COMMENTARY_MODE_CHOICES))}."
         )
     return mode
-
-
-def get_startup_intro_state():
-    with STARTUP_INTRO_LOCK:
-        return dict(STARTUP_INTRO_STATE)
-
-
-def update_startup_intro_state(**changes):
-    with STARTUP_INTRO_LOCK:
-        STARTUP_INTRO_STATE.update(changes)
-        return dict(STARTUP_INTRO_STATE)
 
 
 def _resolve_optional_local_path(base_dir, value):
@@ -273,6 +267,19 @@ class CommentaryServerManager:
         temperature=DEFAULT_COMMENTARY_TEMPERATURE,
         base_url=None,
         llama_cpp_config=None,
+        tts_backend=DEFAULT_TTS_BACKEND,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
+        elevenlabs_female_voice_id=None,
+        elevenlabs_model_id=None,
+        elevenlabs_output_format=None,
+        elevenlabs_language_code=None,
+        elevenlabs_stability=None,
+        elevenlabs_similarity_boost=None,
+        elevenlabs_style=None,
+        elevenlabs_speed=None,
+        elevenlabs_use_speaker_boost=None,
+        elevenlabs_optimize_streaming_latency=None,
     ):
         self.host = str(host).strip() or DEFAULT_COMMENTARY_HOST
         self.port = int(port)
@@ -282,6 +289,33 @@ class CommentaryServerManager:
         self.temperature = float(temperature)
         self.base_url = str(base_url).strip() if base_url else None
         self.llama_cpp_config = dict(llama_cpp_config or {})
+        self.tts_backend = str(tts_backend or DEFAULT_TTS_BACKEND).strip().lower()
+        self.elevenlabs_api_key = (
+            str(elevenlabs_api_key).strip() if elevenlabs_api_key else None
+        )
+        self.elevenlabs_voice_id = (
+            str(elevenlabs_voice_id).strip() if elevenlabs_voice_id else None
+        )
+        self.elevenlabs_female_voice_id = (
+            str(elevenlabs_female_voice_id).strip()
+            if elevenlabs_female_voice_id
+            else None
+        )
+        self.elevenlabs_model_id = (
+            str(elevenlabs_model_id).strip() if elevenlabs_model_id else None
+        )
+        self.elevenlabs_output_format = (
+            str(elevenlabs_output_format).strip() if elevenlabs_output_format else None
+        )
+        self.elevenlabs_language_code = (
+            str(elevenlabs_language_code).strip() if elevenlabs_language_code else None
+        )
+        self.elevenlabs_stability = elevenlabs_stability
+        self.elevenlabs_similarity_boost = elevenlabs_similarity_boost
+        self.elevenlabs_style = elevenlabs_style
+        self.elevenlabs_speed = elevenlabs_speed
+        self.elevenlabs_use_speaker_boost = elevenlabs_use_speaker_boost
+        self.elevenlabs_optimize_streaming_latency = elevenlabs_optimize_streaming_latency
         self._start_lock = threading.Lock()
         self._ready_event = threading.Event()
         self._thread = None
@@ -524,6 +558,26 @@ class CommentaryServerManager:
             base_url=self.base_url,
         )
 
+    def build_voice_synthesizer(self, *, alternate_voices=True):
+        return build_voice_synthesizer(
+            tts_backend=self.tts_backend,
+            alternate_voices=bool(alternate_voices),
+            elevenlabs_api_key=self.elevenlabs_api_key,
+            elevenlabs_voice_id=self.elevenlabs_voice_id,
+            elevenlabs_female_voice_id=self.elevenlabs_female_voice_id,
+            elevenlabs_model_id=self.elevenlabs_model_id,
+            elevenlabs_output_format=self.elevenlabs_output_format,
+            elevenlabs_language_code=self.elevenlabs_language_code,
+            elevenlabs_stability=self.elevenlabs_stability,
+            elevenlabs_similarity_boost=self.elevenlabs_similarity_boost,
+            elevenlabs_style=self.elevenlabs_style,
+            elevenlabs_speed=self.elevenlabs_speed,
+            elevenlabs_use_speaker_boost=self.elevenlabs_use_speaker_boost,
+            elevenlabs_optimize_streaming_latency=(
+                self.elevenlabs_optimize_streaming_latency
+            ),
+        )
+
     def start(self):
         with self._start_lock:
             if self._thread is not None or self._reused_external:
@@ -547,7 +601,7 @@ class CommentaryServerManager:
     def _serve(self):
         try:
             generator = self.build_commentary_generator()
-            voice_synthesizer = build_voice_synthesizer(alternate_voices=True)
+            voice_synthesizer = self.build_voice_synthesizer(alternate_voices=True)
             pipeline = CommentaryAudioPipeline(
                 commentary_generator=generator,
                 voice_synthesizer=voice_synthesizer,
@@ -693,24 +747,37 @@ class CommentaryServerManager:
         self._close_ollama_log_handle()
 
 
-def build_startup_intro_event():
-    return {
+def build_intro_event(team_name=None, opponent_team_name=None):
+    event = {
         "action": "intro",
         "event_time_s": 0.0,
         "player_name": "",
         "player_position": "",
     }
+    team_name = str(team_name or "").strip()
+    opponent_team_name = str(opponent_team_name or "").strip()
+    if team_name:
+        event["team_name"] = team_name
+    if opponent_team_name:
+        event["opponent_team_name"] = opponent_team_name
+    return event
 
 
-def build_startup_intro_compat_event():
-    return {
-        "action": "intro",
-        "event_time_s": 0.0,
-        # Compatibilidad con servidores viejos que seguian validando
-        # `player_name` y `player_position` incluso en intros.
-        "player_name": "_",
-        "player_position": "_",
-    }
+def build_match_intro_event(lineup_spec):
+    teams = list((lineup_spec or {}).get("teams") or [])
+    team_names = [
+        str(team.get("team_name") or "").strip()
+        for team in teams[:2]
+        if str(team.get("team_name") or "").strip()
+    ]
+    if len(team_names) >= 2:
+        return build_intro_event(
+            team_name=team_names[0],
+            opponent_team_name=team_names[1],
+        )
+    if team_names:
+        return build_intro_event(team_name=team_names[0])
+    return build_intro_event()
 
 
 def _looks_like_bad_intro_commentary(commentary):
@@ -730,21 +797,37 @@ def _looks_like_bad_intro_commentary(commentary):
     return "_" in text
 
 
-def _fallback_startup_intro_text():
+def _fallback_intro_text(event=None):
+    event = dict(event or {})
+    team_name = str(event.get("team_name") or "").strip()
+    opponent_team_name = str(event.get("opponent_team_name") or "").strip()
+    if team_name and opponent_team_name:
+        return (
+            f"Bienvenidos, ya esta todo preparado para disfrutar del partido entre "
+            f"{team_name} y {opponent_team_name}."
+        )
+    if team_name:
+        return (
+            f"Bienvenidos, ya esta todo preparado para disfrutar de un partido con "
+            f"{team_name} como protagonista."
+        )
     return (
         "Bienvenidos, ya esta todo preparado para disfrutar de un partido que "
         "promete emociones fuertes."
     )
 
 
-def generate_startup_intro_commentary_locally():
+def generate_intro_commentary_locally(event, audio_path):
     global COMMENTARY_SERVER_MANAGER
     if COMMENTARY_SERVER_MANAGER is None:
         raise RuntimeError("El servidor de comentarios no esta configurado.")
 
-    event = build_startup_intro_event()
+    event = dict(event or {})
+    audio_path = Path(audio_path)
     generator = COMMENTARY_SERVER_MANAGER.build_commentary_generator()
-    voice_synthesizer = build_voice_synthesizer(alternate_voices=True)
+    voice_synthesizer = COMMENTARY_SERVER_MANAGER.build_voice_synthesizer(
+        alternate_voices=True,
+    )
     voice_synthesizer.prepare()
     pipeline = CommentaryAudioPipeline(
         commentary_generator=generator,
@@ -754,7 +837,7 @@ def generate_startup_intro_commentary_locally():
     try:
         result = pipeline.generate_to_file(
             event,
-            audio_path=STARTUP_INTRO_AUDIO_PATH,
+            audio_path=audio_path,
         )
         if _looks_like_bad_intro_commentary(result.commentary):
             raise RuntimeError(
@@ -771,11 +854,11 @@ def generate_startup_intro_commentary_locally():
             "total_seconds": round(result.total_seconds or 0.0, 3),
         }
     except Exception:
-        fallback_text = _fallback_startup_intro_text()
+        fallback_text = _fallback_intro_text(event)
         tts_start = time.perf_counter()
         audio_path = voice_synthesizer.synthesize_to_file(
             fallback_text,
-            STARTUP_INTRO_AUDIO_PATH,
+            audio_path,
         )
         tts_seconds = time.perf_counter() - tts_start
         return {
@@ -790,18 +873,19 @@ def generate_startup_intro_commentary_locally():
         }
 
 
-def prepare_startup_intro_commentary():
+def generate_intro_commentary_payload(event, audio_path, *, timeout=300.0):
     global COMMENTARY_SERVER_MANAGER
     if COMMENTARY_SERVER_MANAGER is None:
         raise RuntimeError("El servidor de comentarios no esta configurado.")
 
+    audio_path = Path(audio_path)
     payload = {
-        "event": build_startup_intro_event(),
-        "audio_out": str(STARTUP_INTRO_AUDIO_PATH),
+        "event": event,
+        "audio_out": str(audio_path),
     }
     status_code, response_payload = COMMENTARY_SERVER_MANAGER.process_payload(
         payload,
-        timeout=300.0,
+        timeout=timeout,
     )
     if status_code != int(HTTPStatus.OK):
         error_text = str(response_payload.get("error") or "")
@@ -810,74 +894,31 @@ def prepare_startup_intro_commentary():
             or "`player_position` no puede ir vacio." in error_text
         )
         if needs_legacy_intro_retry:
-            response_payload = generate_startup_intro_commentary_locally()
+            response_payload = generate_intro_commentary_locally(
+                event,
+                audio_path,
+            )
             status_code = int(HTTPStatus.OK)
     if status_code != int(HTTPStatus.OK):
         raise RuntimeError(
             response_payload.get("error") or "No se pudo generar el intro inicial."
         )
-    if _looks_like_bad_intro_commentary(response_payload.get("commentary")):
-        response_payload = generate_startup_intro_commentary_locally()
+    if (
+        response_payload.get("skip_reason")
+        or not response_payload.get("commentary")
+        or not response_payload.get("audio_path")
+        or _looks_like_bad_intro_commentary(response_payload.get("commentary"))
+    ):
+        response_payload = generate_intro_commentary_locally(
+            event,
+            audio_path,
+        )
 
-    intro_payload = {
+    return {
         "generated_at_utc": now_iso(),
-        "event": build_startup_intro_event(),
+        "event": event,
         **response_payload,
     }
-    write_json(STARTUP_INTRO_META_PATH, intro_payload)
-    return intro_payload
-
-
-def read_startup_intro_commentary():
-    payload = read_json(STARTUP_INTRO_META_PATH, default=None)
-    if payload is None:
-        return None
-    audio_path = payload.get("audio_path")
-    if not audio_path or not Path(audio_path).exists():
-        return None
-    return payload
-
-
-def start_startup_intro_preparation_background():
-    current_state = get_startup_intro_state()
-    if current_state.get("status") == "starting":
-        return False
-
-    def _worker():
-        thread_name = threading.current_thread().name
-        update_startup_intro_state(
-            status="starting",
-            started_at_utc=now_iso(),
-            finished_at_utc=None,
-            error=None,
-            thread_name=thread_name,
-        )
-        try:
-            prepare_startup_intro_commentary()
-        except Exception as exc:  # pragma: no cover - defensivo
-            update_startup_intro_state(
-                status="failed",
-                finished_at_utc=now_iso(),
-                error=str(exc),
-                thread_name=thread_name,
-            )
-            print(f"No se pudo precalentar el intro en segundo plano: {exc}")
-        else:
-            update_startup_intro_state(
-                status="ready",
-                finished_at_utc=now_iso(),
-                error=None,
-                thread_name=thread_name,
-            )
-            print(f"Intro precalentado en segundo plano en {STARTUP_INTRO_AUDIO_PATH}")
-
-    worker = threading.Thread(
-        target=_worker,
-        name="startup-intro-warmup",
-        daemon=True,
-    )
-    worker.start()
-    return True
 
 
 def build_run_paths(run_id):
@@ -1025,49 +1066,51 @@ def resolve_result_video_path_from_status(status):
     return None
 
 
-def attach_cached_intro_to_run(run_id, commentary_mode):
+def attach_intro_to_run(run_id, lineup_spec, commentary_mode):
     run_paths = build_run_paths(run_id)
     run_paths["commentary_audio_dir"].mkdir(parents=True, exist_ok=True)
-    cached_intro = read_startup_intro_commentary()
-    if cached_intro is None:
-        intro_state = get_startup_intro_state()
-        intro_status = str(intro_state.get("status") or "pending").strip().lower()
-        if intro_status == "ready":
-            intro_status = "pending"
-        if intro_status == "idle":
-            start_startup_intro_preparation_background()
-            intro_status = "starting"
+
+    intro_event = build_match_intro_event(lineup_spec)
+    has_team_intro = bool(
+        str(intro_event.get("team_name") or "").strip()
+        and str(intro_event.get("opponent_team_name") or "").strip()
+    )
+    if not has_team_intro:
         payload = {
             **initial_commentary_payload(run_id, run_paths, commentary_mode),
-            "intro_status": "failed" if intro_status == "failed" else intro_status,
+            "intro_status": "pending",
+            "intro_error": "La intro necesita los nombres de los dos equipos.",
         }
-        if intro_state.get("error"):
-            payload["intro_error"] = str(intro_state["error"])
         return payload
 
-    cached_audio_path = Path(cached_intro["audio_path"]).expanduser().resolve()
-    shutil.copy2(cached_audio_path, run_paths["commentary_intro_audio_path"])
+    intro_audio_path = run_paths["commentary_intro_audio_path"]
+    intro_payload = generate_intro_commentary_payload(
+        intro_event,
+        intro_audio_path,
+        timeout=300.0,
+    )
+    generated_audio_path = Path(intro_payload["audio_path"]).expanduser().resolve()
+    if generated_audio_path.suffix.lower() != intro_audio_path.suffix.lower():
+        intro_audio_path = intro_audio_path.with_suffix(generated_audio_path.suffix)
+        if generated_audio_path != intro_audio_path:
+            shutil.copy2(generated_audio_path, intro_audio_path)
+            intro_payload["audio_path"] = str(intro_audio_path)
 
-    intro_payload = {
-        **cached_intro,
-        "copied_at_utc": now_iso(),
-        "audio_path": str(run_paths["commentary_intro_audio_path"]),
-    }
     write_json(run_paths["commentary_intro_meta_path"], intro_payload)
     append_jsonl(
         run_paths["commentary_manifest_path"],
         {
             "generated_at_utc": intro_payload.get("generated_at_utc") or now_iso(),
-            "event": intro_payload.get("event") or build_startup_intro_event(),
+            "event": intro_payload.get("event") or intro_event,
             "mode": commentary_mode,
             "metadata": {
                 "run_id": str(run_id),
                 "source": "interfaz",
                 "event_kind": "intro",
-                "prebuilt_on_interface_startup": True,
+                "team_specific_intro": True,
             },
             "commentary": intro_payload.get("commentary"),
-            "audio_path": str(run_paths["commentary_intro_audio_path"]),
+            "audio_path": intro_payload.get("audio_path"),
             "model": intro_payload.get("model"),
             "tts_model": intro_payload.get("tts_model"),
             "voice_label": intro_payload.get("voice_label"),
@@ -1075,6 +1118,7 @@ def attach_cached_intro_to_run(run_id, commentary_mode):
             "llm_seconds": intro_payload.get("llm_seconds"),
             "tts_seconds": intro_payload.get("tts_seconds"),
             "total_seconds": intro_payload.get("total_seconds"),
+            "audio_duration_seconds": intro_payload.get("audio_duration_seconds"),
         },
     )
 
@@ -1090,6 +1134,8 @@ def attach_cached_intro_to_run(run_id, commentary_mode):
         "intro_audio_url": intro_audio_url,
         "intro_event_index": 0,
         "intro_generated_at_utc": intro_payload.get("generated_at_utc"),
+        "intro_team_name": intro_event.get("team_name"),
+        "intro_opponent_team_name": intro_event.get("opponent_team_name"),
         "llm_seconds": intro_payload.get("llm_seconds"),
         "tts_seconds": intro_payload.get("tts_seconds"),
         "total_seconds": intro_payload.get("total_seconds"),
@@ -1383,13 +1429,7 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             }
         else:
             payload = COMMENTARY_SERVER_MANAGER.health_payload()
-        payload["startup_intro"] = get_startup_intro_state()
-        cached_intro = read_startup_intro_commentary()
-        payload["startup_intro"]["cache_ready"] = cached_intro is not None
-        if cached_intro is not None:
-            payload["startup_intro"]["generated_at_utc"] = cached_intro.get(
-                "generated_at_utc"
-            )
+        payload["intro_policy"] = "team_names_required"
         self._send_json(payload, include_body=include_body)
 
     def _handle_get_run_artifact(self, run_id, relative_path, include_body=True):
@@ -1581,8 +1621,9 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
                 commentary_mode=commentary_mode,
             )
             try:
-                commentary_payload = attach_cached_intro_to_run(
+                commentary_payload = attach_intro_to_run(
                     run_id,
+                    lineup_spec,
                     commentary_mode,
                 )
             except Exception as exc:
@@ -1661,6 +1702,95 @@ def parse_args():
         help="URL base del backend LLM para el servidor de comentarios.",
     )
     parser.add_argument(
+        "--commentary-tts-backend",
+        choices=TTS_BACKEND_CHOICES,
+        default=os.environ.get("NARRADOR_COMMENTARY_TTS_BACKEND", DEFAULT_TTS_BACKEND),
+        help=(
+            "Backend de voz para el servidor de comentarios. "
+            "`xtts` mantiene el flujo local; `elevenlabs` usa la API streaming."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-api-key",
+        default=None,
+        help="API key de ElevenLabs. Si no se indica, usa ELEVENLABS_API_KEY.",
+    )
+    parser.add_argument(
+        "--elevenlabs-voice-id",
+        default=None,
+        help="ID de la voz de ElevenLabs. Si no se indica, usa ELEVENLABS_VOICE_ID.",
+    )
+    parser.add_argument(
+        "--elevenlabs-female-voice-id",
+        default=None,
+        help=(
+            "ID de voz femenina de ElevenLabs para alternar comentaristas. "
+            "Si no se indica, usa ELEVENLABS_FEMALE_VOICE_ID."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-model-id",
+        default=None,
+        help=(
+            "Modelo de ElevenLabs para TTS streaming. "
+            f"Default/env: ELEVENLABS_MODEL_ID o {DEFAULT_ELEVENLABS_MODEL_ID}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-output-format",
+        default=None,
+        help=(
+            "Formato de audio de ElevenLabs. "
+            f"Default/env: ELEVENLABS_OUTPUT_FORMAT o {DEFAULT_ELEVENLABS_OUTPUT_FORMAT}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-language-code",
+        default=None,
+        help=(
+            "Codigo de idioma enviado a ElevenLabs. "
+            f"Default/env: ELEVENLABS_LANGUAGE_CODE o {DEFAULT_ELEVENLABS_LANGUAGE_CODE}."
+        ),
+    )
+    parser.add_argument(
+        "--elevenlabs-stability",
+        type=float,
+        default=None,
+        help="Voice setting opcional `stability` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-similarity-boost",
+        type=float,
+        default=None,
+        help="Voice setting opcional `similarity_boost` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-style",
+        type=float,
+        default=None,
+        help="Voice setting opcional `style` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-speed",
+        type=float,
+        default=None,
+        help="Voice setting opcional `speed` de ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-use-speaker-boost",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Activa o desactiva `use_speaker_boost` en ElevenLabs.",
+    )
+    parser.add_argument(
+        "--elevenlabs-optimize-streaming-latency",
+        type=int,
+        choices=range(0, 5),
+        default=None,
+        metavar="{0,1,2,3,4}",
+        help="Optimizacion de latencia streaming de ElevenLabs.",
+    )
+    parser.add_argument(
         "--llama-cpp-config",
         default=str(LLAMA_CPP_CONFIG_PATH),
         help="Ruta al config YAML usado para lanzar `llama-server`.",
@@ -1680,9 +1810,29 @@ def main():
         temperature=args.commentary_temperature,
         base_url=commentary_runtime["base_url"],
         llama_cpp_config=commentary_runtime["llama_cpp_config"],
+        tts_backend=args.commentary_tts_backend,
+        elevenlabs_api_key=args.elevenlabs_api_key,
+        elevenlabs_voice_id=args.elevenlabs_voice_id,
+        elevenlabs_female_voice_id=args.elevenlabs_female_voice_id,
+        elevenlabs_model_id=args.elevenlabs_model_id,
+        elevenlabs_output_format=args.elevenlabs_output_format,
+        elevenlabs_language_code=args.elevenlabs_language_code,
+        elevenlabs_stability=args.elevenlabs_stability,
+        elevenlabs_similarity_boost=args.elevenlabs_similarity_boost,
+        elevenlabs_style=args.elevenlabs_style,
+        elevenlabs_speed=args.elevenlabs_speed,
+        elevenlabs_use_speaker_boost=args.elevenlabs_use_speaker_boost,
+        elevenlabs_optimize_streaming_latency=(
+            args.elevenlabs_optimize_streaming_latency
+        ),
     )
     server = ThreadingHTTPServer((args.host, args.port), InterfaceRequestHandler)
-    warmup_started = start_startup_intro_preparation_background()
+    commentary_start_thread = threading.Thread(
+        target=COMMENTARY_SERVER_MANAGER.start,
+        name="commentary-server-startup",
+        daemon=True,
+    )
+    commentary_start_thread.start()
     print(
         f"Interfaz disponible en http://{args.host}:{args.port} "
         f"(Python: {sys.executable})"
@@ -1700,6 +1850,10 @@ def main():
         "API del backend LLM apuntando a "
         f"{COMMENTARY_SERVER_MANAGER.llm_base_url}"
     )
+    print(
+        "Backend TTS de comentarios: "
+        f"{COMMENTARY_SERVER_MANAGER.tts_backend}"
+    )
     if COMMENTARY_SERVER_MANAGER.backend == "llama_cpp":
         print(
             "Config local de llama.cpp: "
@@ -1710,13 +1864,10 @@ def main():
             f"La interfaz ha lanzado `{COMMENTARY_SERVER_MANAGER.backend_display_name}` "
             f"automaticamente. Log: {COMMENTARY_SERVER_MANAGER.managed_backend_log_path}"
         )
-    cached_intro = read_startup_intro_commentary()
-    if cached_intro is not None:
-        print(f"Intro cacheado disponible en {STARTUP_INTRO_AUDIO_PATH}")
-    if warmup_started:
-        print("Precalentando intro y servidor de comentarios en segundo plano...")
-    else:
-        print("El precalentado del intro ya estaba en marcha.")
+    print(
+        "Preparando servidor/modelos de comentarios en segundo plano. "
+        "La intro se generara al lanzar un run con los dos equipos."
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

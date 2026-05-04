@@ -121,11 +121,18 @@ class AppLiveCommentaryBridge:
         self._worker.start()
 
     def _initial_intro_audio_duration(self) -> float:
-        intro_audio_path = self.audio_dir / "000_intro.wav"
-        intro_duration_seconds = probe_audio_duration_seconds(intro_audio_path)
-        if intro_duration_seconds is None or intro_duration_seconds <= 0.0:
-            return 0.0
-        return float(intro_duration_seconds)
+        candidates = [self.audio_dir / "000_intro.wav"]
+        candidates.extend(sorted(self.audio_dir.glob("000_intro.*")))
+        seen: set[Path] = set()
+        for intro_audio_path in candidates:
+            resolved_path = intro_audio_path.expanduser().resolve()
+            if resolved_path in seen or not resolved_path.exists():
+                continue
+            seen.add(resolved_path)
+            intro_duration_seconds = probe_audio_duration_seconds(resolved_path)
+            if intro_duration_seconds is not None and intro_duration_seconds > 0.0:
+                return float(intro_duration_seconds)
+        return 0.0
 
     def _initial_audio_busy_until(self, intro_duration_seconds: float) -> float:
         if intro_duration_seconds <= 0.0:

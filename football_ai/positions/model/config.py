@@ -29,12 +29,17 @@ class TrainingConfig:
     fusion_hidden_dim: int = 128
     num_heads: int = 4
     num_set_blocks: int = 2
+    ff_expansion: int = 2
     patience: int = 5
+    overfit_patience: int = 0
     max_teammates: int = DEFAULT_MAX_TEAMMATES
     train_size_per_group_split: float = 0.75
     val_size_per_group_split: float = 0.125
     test_size_per_group_split: float = 0.125
     num_workers: int = 0
+    label_smoothing: float = 0.0
+    objective_num_layers: int = 1
+    experiment_group: str = "default"
 
 
 @dataclass(frozen=True)

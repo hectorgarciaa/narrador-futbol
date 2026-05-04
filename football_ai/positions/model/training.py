@@ -91,7 +91,10 @@ def train_position_model(
         classes=np.arange(len(dataset.label_names)),
         y=labels_idx[used_indices["train_idx"]],
     )
-    criterion = nn.CrossEntropyLoss(weight=torch.as_tensor(class_weights, dtype=torch.float32, device=device))
+    criterion = nn.CrossEntropyLoss(
+        weight=torch.as_tensor(class_weights, dtype=torch.float32, device=device),
+        label_smoothing=float(config.label_smoothing),
+    )
     model = RoleSetTransformer(
         objective_dim=int(dataset.objective.shape[1]),
         teammate_dim=int(dataset.teammates.shape[2]),
@@ -106,25 +109,36 @@ def train_position_model(
 
     history_rows: list[dict[str, Any]] = []
     best_val_macro_f1 = -np.inf
+    best_val_loss = math.inf
     best_state: dict[str, Any] | None = None
     best_epoch = -1
     no_improve = 0
+    overfit_count = 0
+    stop_reason = "max_epochs"
     for epoch in range(1, int(config.epochs) + 1):
         train_epoch = _run_epoch(model, train_loader, criterion, device, optimizer)
         val_epoch = _run_epoch(model, val_loader, criterion, device, None)
         train_metrics = _classification_metrics(train_epoch["y_true"], train_epoch["y_pred"], dataset.label_names)
         val_metrics = _classification_metrics(val_epoch["y_true"], val_epoch["y_pred"], dataset.label_names)
+        train_loss = float(train_epoch["loss"])
+        val_loss = float(val_epoch["loss"])
         history_rows.append(
             {
                 "epoch": int(epoch),
-                "train_loss": float(train_epoch["loss"]),
+                "train_loss": train_loss,
                 "train_accuracy": float(train_metrics["accuracy"]),
                 "train_macro_f1": float(train_metrics["macro_f1"]),
-                "val_loss": float(val_epoch["loss"]),
+                "val_loss": val_loss,
                 "val_accuracy": float(val_metrics["accuracy"]),
                 "val_macro_f1": float(val_metrics["macro_f1"]),
+                "generalization_gap_loss": float(val_loss - train_loss),
             }
         )
+        if val_loss < best_val_loss - 1e-6:
+            best_val_loss = val_loss
+            overfit_count = 0
+        else:
+            overfit_count += 1
         if float(val_metrics["macro_f1"]) > float(best_val_macro_f1):
             best_val_macro_f1 = float(val_metrics["macro_f1"])
             best_state = copy.deepcopy(model.state_dict())
@@ -133,7 +147,11 @@ def train_position_model(
         else:
             no_improve += 1
             if no_improve >= int(config.patience):
+                stop_reason = f"early_stopping_macro_f1_patience_{int(config.patience)}"
                 break
+        if int(config.overfit_patience) > 0 and overfit_count >= int(config.overfit_patience):
+            stop_reason = f"early_stopping_val_loss_patience_{int(config.overfit_patience)}"
+            break
 
     if best_state is None:
         raise RuntimeError("El entrenamiento no produjo ningún checkpoint válido.")
@@ -160,6 +178,9 @@ def train_position_model(
         "created_at": datetime.now().isoformat(),
         "device": str(device),
         "best_epoch": int(best_epoch),
+        "stop_reason": stop_reason,
+        "best_val_macro_f1_during_training": float(best_val_macro_f1),
+        "best_val_loss_during_training": float(best_val_loss),
         "num_classes_trained": int(len(dataset.label_names)),
         "trained_labels": list(dataset.label_names),
         "missing_known_labels": [label for label in ROLE_LABELS_V1 if label not in set(dataset.label_names)],

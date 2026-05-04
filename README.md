@@ -30,6 +30,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - El pipeline visual y de tracking encadena seis packets por frame: `DETECTOR`, `REFERENCE_POINTS`, `FILTERING`, `IDENTIFICATION`, `BYTETRACK` y `CANONICALTRACK`. `clean` se usa para la lógica del pipeline y `trace` para JSON/debug/drawer.
 - `FILTERING` sí elimina detecciones en `clean`: conserva el mismo esquema que `REFERENCE_POINTS`, pero solo con las detecciones aceptadas. El detalle de aceptadas/rechazadas y su `reject_code` queda separado en `trace`.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
+- Inferencia online de roles futbolísticos con Set Transformer. El modelo trabaja con 11 roles tras fusionar carrileros con laterales (`CI -> LI`, `CD -> LD`); en alineaciones y `expected_roles_by_team` deben usarse directamente `LI` y `LD`.
 - `IDENTIFICATION` consume `FILTERING.clean` y devuelve un `clean` enriquecido con `class_name_td`, `team`, `shirt_color`, `distances`, `bbox_size` y las gates de relabel que usan fases posteriores, manteniendo además la clase YOLO original en `class_name`. Su `trace` incluye el detalle por detección, motivos de relabel y estado/eventos de clustering.
 - `BYTETRACK` consume `IDENTIFICATION.clean` como fase independiente y devuelve un `clean` que conserva las señales de entrada y añade `tracker_id`, `class_tracker`, `tracked_mask` y `tracked_detections`; el `trace` contiene el debug por detección y la traza de asociaciones tentativas.
 - `CANONICALTRACK` consume exclusivamente `BYTETRACK.clean`, aplica canonización/relink/absorción forzada/seeds/selección de balón y devuelve `tracks_frame` por clase junto a trazas de descarte y diagnóstico (`pending_assignments_debug`, `discard_reason_by_raw_idx`, `forced_absorption_debug`, `ball_selection_debug`).
@@ -942,9 +943,9 @@ tracking:
   special_seed_role_team_assignment_enabled: true
   # La capa canónica preserva el mismo ID si ByteTrack mantiene el mismo
   # raw_tracker_id y la continuidad geométrica básica sigue siendo válida.
-  special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
+  special_seed_role_model_path: "models/positions/20260427_002133/best_model.pt"
   special_seed_canonical_ids: [1, 2]
-  special_seed_defender_roles: ["CD", "CI", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
+  special_seed_defender_roles: ["LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   expected_roles_by_team:
     Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]

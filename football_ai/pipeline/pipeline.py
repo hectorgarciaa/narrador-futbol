@@ -598,6 +598,7 @@ def run_tracking_pipeline(args):
                 four_panel=four_panel_enabled,
                 debug_frames=(visual_debug_frames if four_panel_enabled else None),
                 expected_counts=max_tracks_per_class,
+                print_equipos=bool(getattr(args, "print_equipos", True)),
             )
             logger.info(f"Video with tracks saved to: {output}")
         else:

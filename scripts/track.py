@@ -103,6 +103,19 @@ def parse_args():
         default=None,
         help="Maximo numero de frames a procesar (util para pruebas rapidas).",
     )
+    parser.add_argument(
+        "--print-equipos",
+        dest="print_equipos",
+        action="store_true",
+        default=True,
+        help="Muestra nombres de equipos y distancias en el video anotado.",
+    )
+    parser.add_argument(
+        "--no-print-equipos",
+        dest="print_equipos",
+        action="store_false",
+        help="Oculta nombres de equipos y distancias en el video anotado.",
+    )
     return parser.parse_args()
 
 
