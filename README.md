@@ -943,7 +943,7 @@ tracking:
   special_seed_role_team_assignment_enabled: true
   # La capa canónica preserva el mismo ID si ByteTrack mantiene el mismo
   # raw_tracker_id y la continuidad geométrica básica sigue siendo válida.
-  special_seed_role_model_path: "models/positions/set_transformer/20260317_211507/set_transformer_checkpoint.pt"
+  special_seed_role_model_path: "models/positions/20260427_002133/best_model.pt"
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   expected_roles_by_team:

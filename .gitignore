@@ -46,6 +46,8 @@ models/reference_points/
 models/finetuning/**/*.pt
 models/finetuning-balon/**/*.pt
 models/yolo/**/*.pt
+models/positions/grid_search_outputs/
+models/positions/final_train_val/
 yolo11m-seg.pt
 
 # Output files
