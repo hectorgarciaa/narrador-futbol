@@ -1,24 +1,11 @@
-"""Synthetic football commentary generation on top of Ollama, llama.cpp or Transformers."""
+"""Synthetic football commentary generation using llama.cpp (Gemma 4 GGUF)."""
 
 from .generator import (
     CommentaryEvent,
     CommentaryGenerationResult,
+    CommentaryGenerator,
     CommentaryLLMRunResult,
     CommentaryPromptBuilder,
-    OllamaCommentaryGenerator,
-)
-from .llama_cpp_backend import LlamaCppCommentaryGenerator
-from .transformers_backend import (
-    DEFAULT_HYMBA_MODEL,
-    TransformersCommentaryGenerator,
-)
-from .server import (
-    DEFAULT_SERVER_HOST,
-    DEFAULT_SERVER_PORT,
-    CommentaryHTTPServer,
-    CommentaryHTTPService,
-    CommentaryServiceResult,
-    create_http_server,
 )
 from .deferred_media import (
     DeferredCommentaryAssemblyResult,
@@ -50,16 +37,7 @@ __all__ = [
     "CommentaryGenerationResult",
     "CommentaryLLMRunResult",
     "CommentaryPromptBuilder",
-    "OllamaCommentaryGenerator",
-    "LlamaCppCommentaryGenerator",
-    "DEFAULT_HYMBA_MODEL",
-    "TransformersCommentaryGenerator",
-    "DEFAULT_SERVER_HOST",
-    "DEFAULT_SERVER_PORT",
-    "CommentaryHTTPServer",
-    "CommentaryHTTPService",
-    "CommentaryServiceResult",
-    "create_http_server",
+    "CommentaryGenerator",
     "DeferredCommentaryAssemblyResult",
     "assemble_deferred_commentary_video",
     "build_commentary_track_from_manifest",

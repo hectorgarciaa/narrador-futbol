@@ -9,9 +9,8 @@ from typing import Any
 from .generator import (
     DEFAULT_COMMENTARY_TEMPERATURE,
     CommentaryEvent,
-    OllamaCommentaryGenerator,
+    CommentaryGenerator,
 )
-from .server import DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, create_http_server
 from .voice import (
     DEFAULT_ELEVENLABS_LANGUAGE_CODE,
     DEFAULT_ELEVENLABS_MODEL_ID,
@@ -32,7 +31,7 @@ from .voice import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Genera un comentario simulado de futbol usando Ollama."
+        description="Genera un comentario simulado de futbol usando llama.cpp con Gemma 4 GGUF."
     )
     parser.add_argument(
         "--event-json",
@@ -46,8 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        default="gemma4:e2b",
-        help="Modelo de Ollama a usar.",
+        default="gemma4-q4ks-text",
+        help="Alias del modelo servido por llama.cpp.",
     )
     parser.add_argument(
         "--temperature",
@@ -58,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="URL base del servidor de Ollama. Si no se indica, usa OLLAMA_HOST o 127.0.0.1:11434.",
+        help="URL base del servidor llama.cpp. Si no se indica, usa LLAMA_CPP_BASE_URL o 127.0.0.1:8001.",
     )
     parser.add_argument(
         "--tts-backend",
@@ -281,22 +280,6 @@ def build_parser() -> argparse.ArgumentParser:
             "desde stdin. Devuelve una linea JSON por evento."
         ),
     )
-    parser.add_argument(
-        "--http-server",
-        action="store_true",
-        help="Arranca un servidor HTTP local para recibir eventos via POST.",
-    )
-    parser.add_argument(
-        "--host",
-        default=DEFAULT_SERVER_HOST,
-        help="Host para el servidor HTTP local.",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=DEFAULT_SERVER_PORT,
-        help="Puerto para el servidor HTTP local.",
-    )
     return parser
 
 
@@ -321,11 +304,11 @@ def load_event(args: argparse.Namespace) -> CommentaryEvent:
 def build_runtime(
     args: argparse.Namespace,
 ) -> tuple[
-    OllamaCommentaryGenerator,
+    CommentaryGenerator,
     Any | None,
     CommentaryAudioPipeline | None,
 ]:
-    generator = OllamaCommentaryGenerator(
+    generator = CommentaryGenerator(
         model=args.model,
         temperature=args.temperature,
         base_url=args.base_url,
@@ -389,25 +372,6 @@ def main() -> None:
         speaker_wavs = getattr(voice_synthesizer, "speaker_wavs", ()) or ()
         for index, speaker_wav in enumerate(speaker_wavs, start=1):
             print(f"SPEAKER_WAV_{index}={speaker_wav}")
-        return
-
-    if args.http_server:
-        if pipeline is not None:
-            pipeline.prepare()
-        else:
-            generator.prepare()
-        server = create_http_server(
-            commentary_generator=generator,
-            audio_pipeline=pipeline,
-            host=args.host,
-            port=args.port,
-            text_only=args.text_only,
-        )
-        print(
-            f"Commentaries HTTP server listening on http://{args.host}:{args.port}",
-            flush=True,
-        )
-        server.serve_forever()
         return
 
     if args.jsonl_stdin:

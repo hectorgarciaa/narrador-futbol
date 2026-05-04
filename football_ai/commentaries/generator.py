@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 from dataclasses import asdict, dataclass
@@ -27,38 +26,6 @@ OPPONENT_TEAM_NAME_REQUIRED_ACTIONS = {
     "gol",
 }
 
-ACTION_TONE_GUIDANCE = {
-    "tiro": (
-        "Suena vertical, afilado y con sensacion de peligro, sin inventar si entra o no."
-    ),
-    "robo": (
-        "Pon el foco en la anticipacion, la agresividad defensiva y el cambio de posesion."
-    ),
-    "control": (
-        "Hazlo mas tecnico o elegante, con pausa, calidad o temple."
-    ),
-    "pase alto": (
-        "Puede sonar como cambio de orientacion, balon al area o envio largo con intencion."
-    ),
-    "pase largo": (
-        "Debe sonar a envio largo o cambio de juego. El jugador mencionado es quien da el pase. "
-        "Usa verbos como lanza, mete, abre o cambia, no despeja."
-    ),
-    "fuera de banda": (
-        "Debe quedar claro que el balon sale y que equipo reanuda."
-    ),
-    "saque de puerta": (
-        "Debe sonar a reanudacion desde atras y dejar claro para que equipo es."
-    ),
-    "corner": (
-        "Tiene que respirar peligro o balon parado importante y dejar claro el equipo a favor."
-    ),
-    "gol": (
-        "Tiene que sonar claramente a gol, con energia, dejando claro que equipo marca y que equipo lo encaja."
-    ),
-}
-
-DEFAULT_OLLAMA_KEEP_ALIVE = "30m"
 DEFAULT_COMMENTARY_TEMPERATURE = 0.7
 
 
@@ -76,10 +43,10 @@ def _normalize_action(value: str) -> str:
     return action.lower()
 
 
-def _default_ollama_base_url() -> str:
-    host = _clean_text(os.environ.get("OLLAMA_HOST"))
+def _default_llama_base_url() -> str:
+    host = _clean_text(os.environ.get("LLAMA_CPP_BASE_URL"))
     if host is None:
-        return "http://127.0.0.1:11434"
+        return "http://127.0.0.1:8001"
     if re.match(r"^https?://", host, flags=re.IGNORECASE):
         return host.rstrip("/")
     return f"http://{host}".rstrip("/")
@@ -229,7 +196,6 @@ class CommentaryLLMRunResult:
     raw_commentary: str
     cleaned_commentary: str
     final_commentary: str
-    used_fallback: bool
     total_duration_seconds: float | None = None
 
 
@@ -400,30 +366,33 @@ class CommentaryPromptBuilder:
         )
 
 
-class OllamaCommentaryGenerator:
+class CommentaryGenerator:
     def __init__(
         self,
-        model: str = "gemma4:e2b",
+        model: str = "gemma4-q4ks-text",
         base_url: str | None = None,
         temperature: float = DEFAULT_COMMENTARY_TEMPERATURE,
         top_p: float = 0.95,
         timeout_s: float = 90.0,
-        keep_alive: str | int | None = DEFAULT_OLLAMA_KEEP_ALIVE,
+        max_tokens: int = 80,
         prompt_builder: CommentaryPromptBuilder | None = None,
     ) -> None:
-        self.model = _clean_text(model) or "gemma4:e2b"
-        self.base_url = (_clean_text(base_url) or _default_ollama_base_url()).rstrip("/")
+        self.model = _clean_text(model) or "gemma4-q4ks-text"
+        self.base_url = (_clean_text(base_url) or _default_llama_base_url()).rstrip("/")
         self.temperature = float(temperature)
         self.top_p = float(top_p)
         self.timeout_s = float(timeout_s)
-        self.keep_alive = keep_alive
+        self.max_tokens = int(max_tokens)
         self.prompt_builder = prompt_builder or CommentaryPromptBuilder()
 
     def _backend_display_name(self) -> str:
-        return "Ollama"
+        return "llama.cpp"
 
     def _backend_start_hint(self) -> str:
-        return "Asegurate de que `ollama serve` este corriendo."
+        return (
+            "Asegurate de que `llama-server` este corriendo "
+            f"y escuchando en {self.base_url}."
+        )
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
@@ -451,20 +420,23 @@ class OllamaCommentaryGenerator:
 
     def _normalize_raw_response(self, raw_response: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(raw_response)
-        for key in (
-            "total_duration",
-            "load_duration",
-            "prompt_eval_duration",
-            "eval_duration",
-        ):
-            value = normalized.get(key)
-            if isinstance(value, (int, float)):
-                normalized[f"{key}_seconds"] = float(value) / 1_000_000_000.0
+        timings = normalized.get("timings")
+        if isinstance(timings, dict):
+            prompt_ms = timings.get("prompt_ms")
+            predicted_ms = timings.get("predicted_ms")
+            if isinstance(prompt_ms, (int, float)):
+                normalized["prompt_eval_duration_seconds"] = float(prompt_ms) / 1000.0
+            if isinstance(predicted_ms, (int, float)):
+                normalized["eval_duration_seconds"] = float(predicted_ms) / 1000.0
+            if isinstance(prompt_ms, (int, float)) or isinstance(predicted_ms, (int, float)):
+                normalized["total_duration_seconds"] = (
+                    float(prompt_ms or 0.0) + float(predicted_ms or 0.0)
+                ) / 1000.0
         return normalized
 
     def check_health(self) -> bool:
         try:
-            with request.urlopen(f"{self.base_url}/api/tags", timeout=5.0) as response:
+            with request.urlopen(f"{self.base_url}/v1/models", timeout=5.0) as response:
                 return response.status == 200
         except Exception:
             return False
@@ -492,22 +464,17 @@ class OllamaCommentaryGenerator:
         return commentary_event, system_prompt, user_prompt
 
     def build_chat_payload(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        payload = {
+        return {
             "model": self.model,
             "stream": False,
-            "think": False,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "options": {
-                "temperature": self.temperature,
-                "top_p": self.top_p,
-            },
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_tokens,
         }
-        if self.keep_alive is not None:
-            payload["keep_alive"] = self.keep_alive
-        return payload
 
     def chat(
         self,
@@ -517,15 +484,9 @@ class OllamaCommentaryGenerator:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         payload = self.build_chat_payload(system_prompt, user_prompt)
         raw_response = self._normalize_raw_response(
-            self._post_json("/api/chat", payload)
+            self._post_json("/v1/chat/completions", payload)
         )
         return payload, raw_response
-
-    def prepare(
-        self,
-        warmup_event: CommentaryEvent | dict[str, Any] | None = None,
-    ) -> CommentaryGenerationResult:
-        return self.generate(warmup_event or build_default_warmup_event())
 
     def _clean_commentary(self, raw_text: str) -> str:
         text = str(raw_text or "").strip()
@@ -547,151 +508,11 @@ class OllamaCommentaryGenerator:
         text = re.sub(r"^¡gol\b", "¡Gol", text, flags=re.IGNORECASE)
         return text
 
-    def _looks_like_prompt_leakage(self, commentary: str) -> bool:
-        if not commentary:
-            return True
-        normalized = commentary.lower()
-        leakage_patterns = (
-            r"\bjson\b",
-            r"\binstrucciones?\b",
-            r"\bevento\b",
-            r"\bdevuelve\b",
-            r"\bcomentario final\b",
-            r"\bthinking\b",
-            r"\bprocess\b",
-        )
-        return any(re.search(pattern, normalized) for pattern in leakage_patterns)
-
-    def _should_use_fallback(self, commentary: str, event: CommentaryEvent) -> bool:
-        if self._looks_like_prompt_leakage(commentary):
-            return True
-
-        normalized = commentary.lower()
-        words = re.findall(r"\b\w+\b", commentary, flags=re.UNICODE)
-        if len(words) < 4 or len(words) > 30:
-            return True
-        if len(commentary) > 220:
-            return True
-        if any(token in commentary for token in ("{", "}", "[", "]", "\n", "\r")):
-            return True
-        if commentary.count(":") > 1:
-            return True
-        if commentary.count('"') > 0 or commentary.count("'") > 2:
-            return True
-        if commentary.count(" - ") > 0:
-            return True
-        if event.player_name.lower() not in normalized:
-            return True
-        if event.action == "gol" and event.team_name:
-            if event.team_name.lower() not in normalized:
-                return True
-            if "gol" not in normalized:
-                return True
-        if event.action in SPECIAL_TEAM_FAVOR_ACTIONS and event.team_in_favor:
-            if event.team_in_favor.lower() not in normalized:
-                return True
-        if event.should_mention_minute and event.match_minute_text.lower() not in normalized:
-            return True
-        if not event.should_mention_minute and "minuto " in normalized:
-            return True
-        return False
-
-    def _fallback_commentary(self, event: CommentaryEvent) -> str:
-        minute_prefix = ""
-        if event.should_mention_minute:
-            minute_prefix = f"En el {event.match_minute_text}, "
-
-        zone_suffix = ""
-        if event.field_zone:
-            zone_suffix = f" en {event.field_zone}"
-
-        def pick(options: list[str]) -> str:
-            seed = "|".join(
-                [
-                    event.action,
-                    event.player_name,
-                    event.player_position,
-                    event.team_name or "",
-                    event.team_in_favor or "",
-                    event.field_zone or "",
-                    str(int(event.event_time_s)),
-                    str(event.action_index or 0),
-                ]
-            )
-            digest = hashlib.md5(seed.encode("utf-8")).hexdigest()
-            return options[int(digest, 16) % len(options)]
-
-        if event.action == "tiro":
-            return pick(
-                [
-                    f"{minute_prefix}{event.player_name} encuentra espacio{zone_suffix} y suelta un tiro con mucho veneno",
-                    f"{minute_prefix}{event.player_name} se fabrica el hueco{zone_suffix} y prueba un disparo con intencion",
-                    f"{minute_prefix}{event.player_name} pisa la zona{zone_suffix} y arma un tiro seco buscando sorprender",
-                ]
-            )
-        if event.action == "robo":
-            return pick(
-                [
-                    f"{minute_prefix}{event.player_name} muerde arriba{zone_suffix} y firma un robo que cambia la jugada",
-                    f"{minute_prefix}{event.player_name} llega con toda la fe{zone_suffix} y recupera una pelota importantisima",
-                    f"{minute_prefix}{event.player_name} lee la accion{zone_suffix} y roba justo cuando la jugada pedia mando",
-                ]
-            )
-        if event.action == "control":
-            return pick(
-                [
-                    f"{minute_prefix}{event.player_name} doma la pelota{zone_suffix} con un control lleno de calma",
-                    f"{minute_prefix}{event.player_name} baja el balon{zone_suffix} con una finura tremenda",
-                    f"{minute_prefix}{event.player_name} se acomoda{zone_suffix} con un control de mucha clase",
-                ]
-            )
-        if event.action == "pase alto":
-            return pick(
-                [
-                    f"{minute_prefix}{event.player_name} levanta la cabeza{zone_suffix} y dibuja un pase alto con intencion",
-                    f"{minute_prefix}{event.player_name} ve la maniobra{zone_suffix} y cuelga un balon alto con mucha idea",
-                    f"{minute_prefix}{event.player_name} cambia el registro{zone_suffix} con un envio alto muy bien pensado",
-                ]
-            )
-        if event.action == "corner" and event.team_in_favor:
-            return pick(
-                [
-                    f"{minute_prefix}corner a favor de {event.team_in_favor}, con {event.player_name} preparando el envio{zone_suffix}",
-                    f"{minute_prefix}{event.player_name} aparece en el corner a favor de {event.team_in_favor}{zone_suffix} y ya mira al area",
-                    f"{minute_prefix}balon parado para {event.team_in_favor}, corner con {event.player_name} listo para cargarlo{zone_suffix}",
-                ]
-            )
-        if event.action == "fuera de banda" and event.team_in_favor:
-            return pick(
-                [
-                    f"{minute_prefix}fuera de banda a favor de {event.team_in_favor}, con {event.player_name} listo para reanudar{zone_suffix}",
-                    f"{minute_prefix}{event.player_name} ya coloca el saque de banda para {event.team_in_favor}{zone_suffix}",
-                    f"{minute_prefix}reanudacion para {event.team_in_favor}, fuera de banda con {event.player_name} al mando{zone_suffix}",
-                ]
-            )
-        if event.action == "saque de puerta" and event.team_in_favor:
-            return pick(
-                [
-                    f"{minute_prefix}saque de puerta para {event.team_in_favor}, con {event.player_name} ordenando la salida{zone_suffix}",
-                    f"{minute_prefix}{event.player_name} se toma un respiro en el saque de puerta para {event.team_in_favor}{zone_suffix}",
-                    f"{minute_prefix}vuelve a arrancar la jugada para {event.team_in_favor}, saque de puerta con {event.player_name}{zone_suffix}",
-                ]
-            )
-        if event.action == "gol" and event.team_name:
-            return pick(
-                [
-                    f"{minute_prefix}gol de {event.team_name}, lo firma {event.player_name}{zone_suffix} y desata la locura",
-                    f"{minute_prefix}{event.player_name} la manda dentro{zone_suffix} y convierte para {event.team_name}",
-                    f"{minute_prefix}{event.player_name} encuentra premio{zone_suffix} y marca el gol de {event.team_name}",
-                ]
-            )
-        return pick(
-            [
-                f"{minute_prefix}{event.player_name} deja una accion de mucho peso en la jugada",
-                f"{minute_prefix}{event.player_name} aparece{zone_suffix} y le mete caracter a la accion",
-                f"{minute_prefix}{event.player_name} interviene{zone_suffix} con una jugada de mucha personalidad",
-            ]
-        )
+    def prepare(
+        self,
+        warmup_event: CommentaryEvent | dict[str, Any] | None = None,
+    ) -> CommentaryGenerationResult:
+        return self.generate(warmup_event or build_default_warmup_event())
 
     def run_llm(
         self,
@@ -711,13 +532,15 @@ class OllamaCommentaryGenerator:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
-        raw_commentary = ((raw_response.get("message", {}) or {}).get("content", ""))
+        choices = raw_response.get("choices") or []
+        first_choice = choices[0] if choices else {}
+        message = (first_choice.get("message") or {}) if isinstance(first_choice, dict) else {}
+        raw_commentary = str(message.get("content") or "")
         cleaned_commentary = self._clean_commentary(raw_commentary)
-        used_fallback = False
         final_commentary = cleaned_commentary
         if not final_commentary:
             raise RuntimeError(
-                f"Ollama devolvio una respuesta vacia: {json.dumps(raw_response, ensure_ascii=False)}"
+                f"llama.cpp devolvio una respuesta vacia: {json.dumps(raw_response, ensure_ascii=False)}"
             )
         return CommentaryLLMRunResult(
             model=self.model,
@@ -729,7 +552,6 @@ class OllamaCommentaryGenerator:
             raw_commentary=raw_commentary,
             cleaned_commentary=cleaned_commentary,
             final_commentary=final_commentary,
-            used_fallback=used_fallback,
             total_duration_seconds=raw_response.get("total_duration_seconds"),
         )
 
