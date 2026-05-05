@@ -631,6 +631,27 @@ def _resolve_video_path_from_candidates(*candidates):
     return None
 
 
+def _video_created_for_run(candidate, status):
+    resolved_path = _resolve_video_path_from_candidates(candidate)
+    if resolved_path is None:
+        return None
+    started_at_raw = str(
+        status.get("started_at_utc")
+        or status.get("created_at_utc")
+        or ""
+    ).strip()
+    if not started_at_raw:
+        return resolved_path
+    try:
+        started_at = datetime.fromisoformat(started_at_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return resolved_path
+    file_mtime = datetime.fromtimestamp(resolved_path.stat().st_mtime, tz=timezone.utc)
+    if file_mtime >= started_at:
+        return resolved_path
+    return None
+
+
 def resolve_all_result_video_paths(status):
     if not isinstance(status, dict):
         return None, None, None
@@ -640,19 +661,19 @@ def resolve_all_result_video_paths(status):
     is_done = str(status.get("status") or "").strip().lower() not in {"queued", "running"}
 
     tracking = None
-    pathcrf = _resolve_video_path_from_candidates(status.get("pathcrf_video_path"))
+    pathcrf = _video_created_for_run(status.get("pathcrf_video_path"), status)
     commentary_video = None
 
     if commentary_mode == "deferred":
         if deferred_status == "ready":
-            tracking = _resolve_video_path_from_candidates(commentary.get("deferred_video_path"))
+            tracking = _video_created_for_run(commentary.get("deferred_video_path"), status)
         elif deferred_status == "failed":
-            tracking = _resolve_video_path_from_candidates(status.get("output_video_path"))
+            tracking = _video_created_for_run(status.get("output_video_path"), status)
     elif is_done:
-        tracking = _resolve_video_path_from_candidates(status.get("output_video_path"))
+        tracking = _video_created_for_run(status.get("output_video_path"), status)
 
     if is_done:
-        commentary_video = _resolve_video_path_from_candidates(status.get("commentary_video_path"))
+        commentary_video = _video_created_for_run(status.get("commentary_video_path"), status)
 
     return tracking, pathcrf, commentary_video
 

@@ -19,6 +19,7 @@ Interfaz web ligera para preparar alineaciones y lanzar el tracking del partido.
 - obliga a completar primero los dos nombres de equipo antes de desbloquear vídeo, modo de comentarios, colores, formación y jugadores
 - no recrea las tarjetas mientras escribes el segundo nombre, para que el formulario no se desbloquee ni te robe el foco a mitad de la edición
 - muestra el vídeo final dentro de la propia interfaz cuando el MP4 ya está listo
+- al resolver los vídeos de resultado (`tracking`, `PathCRF`, `commentary`), solo enseña archivos generados o actualizados por la propia run; si una ejecución no regenera `*_pathcrf.mp4`, la interfaz no reutiliza un PathCRF viejo de otra ejecución anterior del mismo vídeo
 - si la ejecución nace desde la interfaz, activa un bridge incremental `tracking -> PathCRF -> servidor de comentarios` en segundo plano, sin afectar a `scripts/track.py` cuando se ejecuta suelto
 - muestra el estado del proceso y el log en vivo
 

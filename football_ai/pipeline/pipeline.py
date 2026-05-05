@@ -236,8 +236,10 @@ def _build_rolling_output_dir(config, video_path) -> Path:
 
 def resolve_lineup_spec(args, config):
     lineup_spec = getattr(args, "lineup_spec", None)
+    lineup_spec_source = "cli"
     if not lineup_spec:
         lineup_spec = config.get("tracking", "lineup_spec", default=None)
+        lineup_spec_source = "config"
     lineup_matcher = None
     lineup_expected_roles_by_team = None
     lineup_team_colors_raw = {}
@@ -247,8 +249,14 @@ def resolve_lineup_spec(args, config):
         lineup_matcher = LineupSlotMatcher(lineup_spec)
         lineup_expected_roles_by_team = build_expected_roles_by_team(lineup_spec)
         lineup_team_colors_raw = build_team_colors_by_team(lineup_spec)
-    
-    return lineup_spec, lineup_matcher, lineup_expected_roles_by_team, lineup_team_colors_raw
+
+    return (
+        lineup_spec,
+        lineup_matcher,
+        lineup_expected_roles_by_team,
+        lineup_team_colors_raw,
+        lineup_spec_source if lineup_spec else None,
+    )
 
 
 def run_tracking_pipeline(args):
@@ -266,7 +274,8 @@ def run_tracking_pipeline(args):
             lineup_spec,
             lineup_matcher,
             lineup_expected_roles_by_team,
-            lineup_team_colors_raw
+            lineup_team_colors_raw,
+            lineup_spec_source,
         ) = resolve_lineup_spec(args, config)
 
         # Get paths and parameters from config
@@ -360,6 +369,16 @@ def run_tracking_pipeline(args):
         )
         logger.info(f"Video source: {video_source}")
         logger.info(f"Experiment label: {experiment_label}")
+        if lineup_spec is not None:
+            logger.info(
+                "Resolved lineup spec (%s): %s",
+                lineup_spec_source,
+                lineup_spec.get("spec_path"),
+            )
+            logger.info(
+                "Lineup expected roles override: %s",
+                lineup_expected_roles_by_team,
+            )
         logger.info(f"Named tracks JSON output: {output_path_named}")
         logger.info(f"Legacy tracks JSON output: {output_path_legacy}")
         logger.info(f"Summary JSON output: {summary_path}")
