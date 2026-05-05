@@ -543,14 +543,21 @@ class CommentaryPhase(Phase):
                     self._pending_job = None
             self._maybe_dispatch_next()
 
+    def _drain_queue(self) -> None:
+        while True:
+            self._collect_completed_jobs()
+            if self._pending_job is not None:
+                try:
+                    self._pending_job.result(timeout=120)
+                except Exception:
+                    pass
+                self._pending_job = None
+            self._maybe_dispatch_next()
+            if self._pending_job is None and not self._queue:
+                break
+
     def summary(self) -> dict:
-        self._collect_completed_jobs()
-        if self._pending_job is not None:
-            try:
-                self._pending_job.result(timeout=120)
-            except Exception:
-                pass
-            self._pending_job = None
+        self._drain_queue()
         if self._executor is not None:
             self._executor.shutdown(wait=True)
             self._executor = None
@@ -594,12 +601,8 @@ class CommentaryPhase(Phase):
         if self._finalized:
             return
         self._finalized = True
+        self._drain_queue()
         if self._executor is not None:
-            if self._pending_job is not None and not self._pending_job.done():
-                try:
-                    self._pending_job.result(timeout=120)
-                except Exception:
-                    pass
             self._executor.shutdown(wait=True)
             self._executor = None
         self._pending_job = None

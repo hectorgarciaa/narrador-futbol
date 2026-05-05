@@ -6,6 +6,7 @@ Interfaz web ligera para introducir alineaciones y lanzar `scripts/track.py`.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import mimetypes
 import os
@@ -32,9 +33,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from football_ai.core import get_config
-from football_ai.commentaries.deferred_media import (
-    assemble_deferred_commentary_video,
-)
 from football_ai.commentaries.generator import (
     CommentaryGenerator,
     DEFAULT_COMMENTARY_TEMPERATURE,
@@ -104,8 +102,13 @@ def read_json(path, default=None):
     path = Path(path)
     if not path.exists():
         return default
+    if path.stat().st_size == 0:
+        return default
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return default
 
 
 def append_jsonl(path, payload):
@@ -252,6 +255,7 @@ class CommentaryConfig:
     def __init__(
         self,
         *,
+        backend="auto",
         model="gemma4-q4ks-text",
         temperature=DEFAULT_COMMENTARY_TEMPERATURE,
         base_url=None,
@@ -269,6 +273,8 @@ class CommentaryConfig:
         elevenlabs_use_speaker_boost=None,
         elevenlabs_optimize_streaming_latency=None,
     ):
+        self.backend = str(backend).strip().lower() or "auto"
+        self.llama_cpp_config = None
         self.model = str(model).strip() or "gemma4-q4ks-text"
         self.temperature = float(temperature)
         self.base_url = str(base_url).strip() if base_url else None
@@ -288,7 +294,9 @@ class CommentaryConfig:
 
     @property
     def backend_display_name(self):
-        return "llama.cpp"
+        if self.backend == "llama_cpp":
+            return "llama.cpp"
+        return self.backend
 
     def build_commentary_generator(self):
         return CommentaryGenerator(
@@ -328,7 +336,8 @@ class CommentaryConfig:
 
 def commentary_config_from_args(args):
     commentary_runtime = resolve_commentary_runtime_settings(args)
-    return CommentaryConfig(
+    config = CommentaryConfig(
+        backend=commentary_runtime["backend"],
         model=commentary_runtime["model"],
         temperature=args.commentary_temperature,
         base_url=commentary_runtime["base_url"],
@@ -346,6 +355,8 @@ def commentary_config_from_args(args):
         elevenlabs_use_speaker_boost=args.elevenlabs_use_speaker_boost,
         elevenlabs_optimize_streaming_latency=args.elevenlabs_optimize_streaming_latency,
     )
+    config.llama_cpp_config = commentary_runtime.get("llama_cpp_config")
+    return config
 
 
 def build_intro_event(team_name=None, opponent_team_name=None):
@@ -545,6 +556,16 @@ def resolve_tracking_output_video_path(video_source):
     return Path(build_output_video_path(config, resolved_video_path)).resolve()
 
 
+def resolve_pathcrf_output_video_path(video_source):
+    tracking_path = resolve_tracking_output_video_path(video_source)
+    return tracking_path.with_name(f"{tracking_path.stem}_pathcrf.mp4")
+
+
+def resolve_commentary_output_video_path(video_source):
+    tracking_path = resolve_tracking_output_video_path(video_source)
+    return tracking_path.with_name(f"{tracking_path.stem}_commentary.mp4")
+
+
 def build_artifact_url(run_id, artifact_path):
     run_paths = build_run_paths(run_id)
     resolved_path = Path(artifact_path).expanduser().resolve()
@@ -600,22 +621,7 @@ def initial_commentary_payload(run_id, run_paths, commentary_mode):
     }
 
 
-def resolve_result_video_path_from_status(status):
-    if not isinstance(status, dict):
-        return None
-    commentary = dict(status.get("commentary") or {})
-    commentary_mode = str(commentary.get("mode") or "").strip().lower()
-    deferred_status = str(commentary.get("deferred_mux_status") or "").strip().lower()
-
-    candidates = []
-    if commentary_mode == "deferred":
-        if deferred_status == "ready":
-            candidates.append(commentary.get("deferred_video_path"))
-        elif deferred_status == "failed":
-            candidates.append(status.get("output_video_path"))
-    elif str(status.get("status") or "").strip().lower() not in {"queued", "running"}:
-        candidates.append(status.get("output_video_path"))
-
+def _resolve_video_path_from_candidates(*candidates):
     for candidate in candidates:
         if not candidate:
             continue
@@ -623,6 +629,32 @@ def resolve_result_video_path_from_status(status):
         if resolved_path.exists() and resolved_path.is_file():
             return resolved_path
     return None
+
+
+def resolve_all_result_video_paths(status):
+    if not isinstance(status, dict):
+        return None, None, None
+    commentary = dict(status.get("commentary") or {})
+    commentary_mode = str(commentary.get("mode") or "").strip().lower()
+    deferred_status = str(commentary.get("deferred_mux_status") or "").strip().lower()
+    is_done = str(status.get("status") or "").strip().lower() not in {"queued", "running"}
+
+    tracking = None
+    pathcrf = _resolve_video_path_from_candidates(status.get("pathcrf_video_path"))
+    commentary_video = None
+
+    if commentary_mode == "deferred":
+        if deferred_status == "ready":
+            tracking = _resolve_video_path_from_candidates(commentary.get("deferred_video_path"))
+        elif deferred_status == "failed":
+            tracking = _resolve_video_path_from_candidates(status.get("output_video_path"))
+    elif is_done:
+        tracking = _resolve_video_path_from_candidates(status.get("output_video_path"))
+
+    if is_done:
+        commentary_video = _resolve_video_path_from_candidates(status.get("commentary_video_path"))
+
+    return tracking, pathcrf, commentary_video
 
 
 def attach_intro_to_run(run_id, lineup_spec, commentary_mode):
@@ -707,9 +739,13 @@ def initial_status_payload(run_id, lineup_spec, run_paths, commentary_mode):
     video_source = str(lineup_spec.get("video_source") or "").strip()
     video_stem = sanitize_video_stem(video_source) if video_source else None
     output_video_path = None
+    pathcrf_video_path = None
+    commentary_video_path = None
     if video_source:
         try:
             output_video_path = str(resolve_tracking_output_video_path(video_source))
+            pathcrf_video_path = str(resolve_pathcrf_output_video_path(video_source))
+            commentary_video_path = str(resolve_commentary_output_video_path(video_source))
         except Exception:
             output_video_path = None
     return {
@@ -720,6 +756,8 @@ def initial_status_payload(run_id, lineup_spec, run_paths, commentary_mode):
         "video_source": video_source,
         "video_stem_hint": video_stem,
         "output_video_path": output_video_path,
+        "pathcrf_video_path": pathcrf_video_path,
+        "commentary_video_path": commentary_video_path,
         "teams": [
             {
                 "team_name": str(team["team_name"]),
@@ -786,6 +824,7 @@ def launch_tracking_process(run_id, lineup_spec, commentary_mode=DEFAULT_COMMENT
         str(run_paths["spec_path"]),
         "--commentary",
         "--commentary-audio",
+        "--profile-phases",
     ]
     process_env = dict(os.environ)
     process_env.update(
@@ -850,28 +889,16 @@ def launch_tracking_process(run_id, lineup_spec, commentary_mode=DEFAULT_COMMENT
         if final_status != "completed":
             return
 
+        # Commentary video is already assembled by the pipeline (from tracking video + audio).
+        # Just update the status to reflect completion.
         try:
-            assembly_result = assemble_deferred_commentary_video(
-                run_paths["commentary_manifest_path"],
-                output_video_path,
-                run_paths["commentary_track_audio_path"],
-                output_video_path,
-            )
-            update_commentary_payload(
-                run_id,
-                deferred_mux_status="ready",
-                commentary_track_path=str(assembly_result.commentary_track_path),
-                deferred_video_path=str(assembly_result.output_video_path),
-                deferred_event_count=int(assembly_result.event_count),
-                deferred_video_duration_seconds=round(
-                    float(assembly_result.video_duration_seconds),
-                    3,
-                ),
-            )
-            update_status_file(
-                run_id,
-                output_video_path=str(assembly_result.output_video_path),
-            )
+            commentary_video_path = str(resolve_commentary_output_video_path(video_source))
+            if Path(commentary_video_path).exists():
+                update_commentary_payload(
+                    run_id,
+                    deferred_mux_status="ready",
+                    deferred_video_path=commentary_video_path,
+                )
         except Exception as exc:
             update_commentary_payload(
                 run_id,
@@ -968,11 +995,21 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             )
             return
         status["log_tail"] = tail_log(run_paths["log_path"])
-        result_video_path = resolve_result_video_path_from_status(status)
-        status["result_video_path"] = str(result_video_path) if result_video_path is not None else None
+        tracking_path, pathcrf_path, commentary_path = resolve_all_result_video_paths(status)
+        status["result_video_path"] = str(tracking_path) if tracking_path is not None else None
         status["result_video_url"] = (
             f"/api/runs/{run_id}/result-video"
-            if result_video_path is not None
+            if tracking_path is not None
+            else None
+        )
+        status["pathcrf_video_url"] = (
+            f"/api/runs/{run_id}/pathcrf-video"
+            if pathcrf_path is not None
+            else None
+        )
+        status["commentary_video_url"] = (
+            f"/api/runs/{run_id}/commentary-video"
+            if commentary_path is not None
             else None
         )
         self._send_json(status, include_body=include_body)
@@ -1000,6 +1037,25 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_file(artifact_path, include_body=include_body)
 
+    def _send_video_file(self, video_path_candidate, include_body=True):
+        if not video_path_candidate:
+            self._send_json(
+                {"error": "El vídeo todavía no está disponible."},
+                status=HTTPStatus.NOT_FOUND,
+                include_body=include_body,
+            )
+            return
+        resolved = Path(video_path_candidate).expanduser().resolve()
+        project_root = PROJECT_ROOT.resolve()
+        if project_root not in resolved.parents and resolved != project_root:
+            self._send_json(
+                {"error": "Ruta de vídeo no permitida."},
+                status=HTTPStatus.FORBIDDEN,
+                include_body=include_body,
+            )
+            return
+        self._send_file(resolved, include_body=include_body)
+
     def _handle_get_run_result_video(self, run_id, include_body=True):
         run_paths = build_run_paths(run_id)
         status = read_json(run_paths["status_path"], default=None)
@@ -1010,23 +1066,34 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
                 include_body=include_body,
             )
             return
-        result_video_path = resolve_result_video_path_from_status(status)
-        if result_video_path is None:
+        tracking_path, _, _ = resolve_all_result_video_paths(status)
+        self._send_video_file(tracking_path, include_body=include_body)
+
+    def _handle_get_run_pathcrf_video(self, run_id, include_body=True):
+        run_paths = build_run_paths(run_id)
+        status = read_json(run_paths["status_path"], default=None)
+        if status is None:
             self._send_json(
-                {"error": "El vídeo final todavía no está disponible."},
+                {"error": f"No existe la ejecución {run_id}."},
                 status=HTTPStatus.NOT_FOUND,
                 include_body=include_body,
             )
             return
-        project_root = PROJECT_ROOT.resolve()
-        if project_root not in result_video_path.parents and result_video_path != project_root:
+        _, pathcrf_path, _ = resolve_all_result_video_paths(status)
+        self._send_video_file(pathcrf_path, include_body=include_body)
+
+    def _handle_get_run_commentary_video(self, run_id, include_body=True):
+        run_paths = build_run_paths(run_id)
+        status = read_json(run_paths["status_path"], default=None)
+        if status is None:
             self._send_json(
-                {"error": "Ruta de vídeo no permitida."},
-                status=HTTPStatus.FORBIDDEN,
+                {"error": f"No existe la ejecución {run_id}."},
+                status=HTTPStatus.NOT_FOUND,
                 include_body=include_body,
             )
             return
-        self._send_file(result_video_path, include_body=include_body)
+        _, _, commentary_path = resolve_all_result_video_paths(status)
+        self._send_video_file(commentary_path, include_body=include_body)
 
     def _handle_get_commentary_events(self, run_id, query, include_body=True):
         run_paths = build_run_paths(run_id)
@@ -1097,6 +1164,30 @@ class InterfaceRequestHandler(BaseHTTPRequestHandler):
                     )
                     return
                 self._handle_get_run_result_video(run_id, include_body=include_body)
+                return
+
+            if path.endswith("/pathcrf-video"):
+                run_id = path.rsplit("/pathcrf-video", 1)[0].split("/api/runs/", 1)[1].strip("/")
+                if not run_id:
+                    self._send_json(
+                        {"error": "Run id inválido."},
+                        status=HTTPStatus.BAD_REQUEST,
+                        include_body=include_body,
+                    )
+                    return
+                self._handle_get_run_pathcrf_video(run_id, include_body=include_body)
+                return
+
+            if path.endswith("/commentary-video"):
+                run_id = path.rsplit("/commentary-video", 1)[0].split("/api/runs/", 1)[1].strip("/")
+                if not run_id:
+                    self._send_json(
+                        {"error": "Run id inválido."},
+                        status=HTTPStatus.BAD_REQUEST,
+                        include_body=include_body,
+                    )
+                    return
+                self._handle_get_run_commentary_video(run_id, include_body=include_body)
                 return
 
             if "/artifacts/" in path:
@@ -1353,19 +1444,36 @@ def parse_args():
     return parser.parse_args()
 
 
+def create_http_server(host, port, handler_class, max_port_tries=50):
+    last_error = None
+    for candidate_port in range(port, port + max_port_tries + 1):
+        try:
+            return ThreadingHTTPServer((host, candidate_port), handler_class)
+        except OSError as exc:
+            last_error = exc
+            if exc.errno != errno.EADDRINUSE:
+                raise
+    raise OSError(
+        errno.EADDRINUSE,
+        f"No se pudo encontrar un puerto libre desde {host}:{port} tras {max_port_tries + 1} intentos.",
+    ) from last_error
+
+
 def main():
     global COMMENTARY_CONFIG
     args = parse_args()
     COMMENTARY_CONFIG = commentary_config_from_args(args)
-    server = ThreadingHTTPServer((args.host, args.port), InterfaceRequestHandler)
+    server = create_http_server(args.host, args.port, InterfaceRequestHandler)
+    bound_host, bound_port = server.server_address[:2]
     print(
-        f"Interfaz disponible en http://{args.host}:{args.port} "
+        f"Interfaz disponible en http://{bound_host}:{bound_port} "
         f"(Python: {sys.executable})"
     )
     if COMMENTARY_CONFIG.backend == "llama_cpp":
+        llama_cfg = COMMENTARY_CONFIG.llama_cpp_config or {}
         print(
             "Config local de llama.cpp: "
-            f"{COMMENTARY_CONFIG.llama_cpp_config.get('config_path') or LLAMA_CPP_CONFIG_PATH}"
+            f"{llama_cfg.get('config_path') or LLAMA_CPP_CONFIG_PATH}"
         )
     print(
         "Comentarios activados via fase CommentaryPhase del pipeline. "

@@ -38,6 +38,7 @@ paths:
 
     ucl: "data/partidoPrueba/ucl_final.mp4"
     ucl_30s: "data/partidoPrueba/ucl_final_5-5.mp4"
+    ucl_5m: "data/partidoPrueba/ucl_final_2-10.mp4"
 
     # Clips para dataset de posiciones (data/partidosPosiciones)
     video_test_1: "data/partidosPosiciones/test (1).mp4"

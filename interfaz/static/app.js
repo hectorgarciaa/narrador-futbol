@@ -32,11 +32,23 @@ const runSummary = document.getElementById("run-summary");
 const runLog = document.getElementById("run-log");
 const launchButton = document.getElementById("launch-run");
 const nameGateBanner = document.getElementById("name-gate-banner");
-const resultVideo = document.getElementById("result-video");
-const resultVideoEmpty = document.getElementById("result-video-empty");
 const teamTemplate = document.getElementById("team-card-template");
-const DEFAULT_RESULT_VIDEO_EMPTY_TEXT =
-  "El vídeo final aparecerá aquí cuando termine la ejecución y la interfaz tenga el MP4 listo.";
+
+function getResultVideoElements() {
+  return {
+    tracking: document.querySelector('video[data-video="tracking"]'),
+    pathcrf: document.querySelector('video[data-video="pathcrf"]'),
+    commentary: document.querySelector('video[data-video="commentary"]'),
+  };
+}
+
+function getResultVideoPlaceholders() {
+  return {
+    tracking: document.querySelector('.result-video-placeholder[data-video="tracking"]'),
+    pathcrf: document.querySelector('.result-video-placeholder[data-video="pathcrf"]'),
+    commentary: document.querySelector('.result-video-placeholder[data-video="commentary"]'),
+  };
+}
 
 function normalizedTeamName(teamState) {
   return String(teamState?.team_name || "").trim();
@@ -64,27 +76,74 @@ function syncFormAvailability() {
   nameGateBanner.classList.add("is-hidden");
 }
 
-function setResultVideoPlaceholder(message = DEFAULT_RESULT_VIDEO_EMPTY_TEXT) {
-  resultVideoEmpty.textContent = message;
+function renderSingleVideo(videoEl, placeholderEl, urlOrNull, defaultPlaceholder, cacheBuster) {
+  if (!videoEl || !placeholderEl) return;
+
+  if (!urlOrNull) {
+    videoEl.pause();
+    videoEl.removeAttribute("src");
+    videoEl.dataset.src = "";
+    videoEl.load();
+    videoEl.hidden = true;
+    placeholderEl.hidden = false;
+    placeholderEl.textContent = defaultPlaceholder;
+    return;
+  }
+
+  const videoUrl = `${urlOrNull}?v=${cacheBuster}`;
+  if (videoEl.dataset.src !== videoUrl) {
+    videoEl.pause();
+    placeholderEl.hidden = false;
+    placeholderEl.textContent = "Cargando...";
+    videoEl.src = videoUrl;
+    videoEl.dataset.src = videoUrl;
+    videoEl.load();
+  }
+  videoEl.hidden = false;
+  placeholderEl.hidden = true;
 }
 
-function describeResultVideoError() {
-  const mediaError = resultVideo.error;
-  if (!mediaError) {
-    return "El navegador no ha podido reproducir el vídeo final.";
-  }
+function describeVideoError(videoEl) {
+  if (!videoEl) return "Vídeo no disponible.";
+  const mediaError = videoEl.error;
+  if (!mediaError) return "El navegador no ha podido reproducir el vídeo.";
   switch (mediaError.code) {
     case MediaError.MEDIA_ERR_ABORTED:
-      return "La carga del vídeo final se ha cancelado antes de terminar.";
+      return "La carga del vídeo se ha cancelado antes de terminar.";
     case MediaError.MEDIA_ERR_NETWORK:
-      return "Ha fallado la descarga del vídeo final desde la interfaz.";
+      return "Ha fallado la descarga del vídeo desde la interfaz.";
     case MediaError.MEDIA_ERR_DECODE:
-      return "El navegador ha rechazado el MP4 final al intentar decodificarlo.";
+      return "El navegador ha rechazado el MP4 al intentar decodificarlo.";
     case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-      return "El navegador no soporta el formato del MP4 final servido por la interfaz.";
+      return "El navegador no soporta el formato del MP4 servido por la interfaz.";
     default:
-      return "El navegador no ha podido reproducir el vídeo final.";
+      return "El navegador no ha podido reproducir el vídeo.";
   }
+}
+
+function renderResultVideos(statusPayload) {
+  const videos = getResultVideoElements();
+  const placeholders = getResultVideoPlaceholders();
+  const cacheBuster = encodeURIComponent(statusPayload?.updated_at_utc || Date.now());
+
+  renderSingleVideo(
+    videos.tracking, placeholders.tracking,
+    statusPayload?.result_video_url || null,
+    "El vídeo de tracking aparecerá aquí cuando termine la ejecución.",
+    cacheBuster,
+  );
+  renderSingleVideo(
+    videos.pathcrf, placeholders.pathcrf,
+    statusPayload?.pathcrf_video_url || null,
+    "El vídeo PathCRF con slots y mapa 2D aparecerá aquí cuando esté listo.",
+    cacheBuster,
+  );
+  renderSingleVideo(
+    videos.commentary, placeholders.commentary,
+    statusPayload?.commentary_video_url || null,
+    "El vídeo con audio de comentarios aparecerá aquí cuando esté listo.",
+    cacheBuster,
+  );
 }
 
 function ensureSlots(teamState) {
@@ -298,38 +357,12 @@ function setRunStatus(status, text) {
   runBadge.textContent = text;
 }
 
-function renderResultVideo(statusPayload) {
-  const resultVideoUrl = statusPayload?.result_video_url || "";
-  if (!resultVideoUrl) {
-    resultVideo.pause();
-    resultVideo.removeAttribute("src");
-    resultVideo.dataset.src = "";
-    resultVideo.load();
-    resultVideo.hidden = true;
-    setResultVideoPlaceholder();
-    resultVideoEmpty.hidden = false;
-    return;
-  }
-
-  const cacheBuster = encodeURIComponent(statusPayload?.updated_at_utc || Date.now());
-  const videoUrl = `${resultVideoUrl}?v=${cacheBuster}`;
-  if (resultVideo.dataset.src !== videoUrl) {
-    resultVideo.pause();
-    setResultVideoPlaceholder("Cargando el vídeo final...");
-    resultVideo.src = videoUrl;
-    resultVideo.dataset.src = videoUrl;
-    resultVideo.load();
-  }
-  resultVideo.hidden = false;
-  resultVideoEmpty.hidden = true;
-}
-
 function renderRunStatus(statusPayload) {
   if (!statusPayload) {
     setRunStatus("idle", "Sin lanzar");
     runSummary.textContent = "Todavía no hay ninguna ejecución activa.";
     runLog.textContent = "Esperando ejecución...";
-    renderResultVideo(null);
+    renderResultVideos(null);
     return;
   }
 
@@ -352,7 +385,7 @@ function renderRunStatus(statusPayload) {
     <strong>Manifest:</strong> ${commentary.manifest_path || "-"}
   `;
   runLog.textContent = (statusPayload.log_tail || []).join("\n") || "Sin salida todavía.";
-  renderResultVideo(statusPayload);
+  renderResultVideos(statusPayload);
 }
 
 function resetCommentaryPlayback() {
@@ -562,16 +595,21 @@ videoSelect.addEventListener("change", () => {
   syncFormAvailability();
 });
 
-resultVideo.addEventListener("loadeddata", () => {
-  resultVideo.hidden = false;
-  resultVideoEmpty.hidden = true;
-});
-
-resultVideo.addEventListener("error", () => {
-  resultVideo.pause();
-  resultVideo.hidden = true;
-  setResultVideoPlaceholder(describeResultVideoError());
-  resultVideoEmpty.hidden = false;
+const allResultVideos = document.querySelectorAll(".result-video");
+allResultVideos.forEach((videoEl) => {
+  const placeholderEl = videoEl.parentElement.querySelector(".result-video-placeholder");
+  videoEl.addEventListener("loadeddata", () => {
+    videoEl.hidden = false;
+    if (placeholderEl) placeholderEl.hidden = true;
+  });
+  videoEl.addEventListener("error", () => {
+    videoEl.pause();
+    videoEl.hidden = true;
+    if (placeholderEl) {
+      placeholderEl.hidden = false;
+      placeholderEl.textContent = describeVideoError(videoEl);
+    }
+  });
 });
 
 loadBootstrapData().catch((error) => {

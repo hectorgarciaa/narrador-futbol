@@ -35,7 +35,7 @@ La asignación online ya no congela roles ni usa snapshots de estabilización. E
 1. El modelo predice probabilidades para los tracks activos.
 2. `Tier 1`: se aplica Húngaro a nivel frame contra los slots esperados del equipo y eso genera un voto limpio por track en ese frame.
 3. Cada track acumula esos votos dentro de su segmento activo. Si aparece una señal fuerte de relink o salto estructural, se abre un segmento nuevo vacío.
-4. `Tier 2`: para pintar el rol definitivo del frame, se toma la mayoría acumulada de cada segmento activo y se vuelve a ejecutar Húngaro contra los slots esperados del equipo.
+4. `Tier 2`: para pintar el rol definitivo del frame, se toma la mayoría acumulada de cada segmento activo y se vuelve a ejecutar Húngaro contra los slots esperados del equipo. La resolución final se reaplica por segmento real `(track_id, segment_id)` para que varios jugadores del mismo equipo no se pisen aunque compartan el mismo contador local de segmento.
 
 ## `pipeline/lineup_spec.py`
 

@@ -171,6 +171,7 @@ class PathCRFDrawer:
         role: str,
         active_src: bool,
         active_dst: bool,
+        label_override: str | None = None,
     ) -> None:
         if role == "home":
             fill_color = self.home_color
@@ -207,7 +208,8 @@ class PathCRFDrawer:
         if active_dst:
             cv2.circle(frame, center, radius + 9 if active_src else radius + 5, self.active_dst_color, 2)
 
-        label = self._player_label(node_id)
+        base_label = self._player_label(node_id)
+        label = label_override if label_override else base_label
         cv2.putText(
             frame,
             label,
@@ -289,6 +291,70 @@ class PathCRFDrawer:
             if isinstance(frames, list):
                 normalized[class_name] = frames
         return normalized
+
+    @staticmethod
+    def _segment_role_label(payload: Mapping[str, Any]) -> str | None:
+        role = (
+            payload.get("display_role_slot")
+            or payload.get("expected_role_slot")
+            or payload.get("segment_majority_expected_role_slot")
+            or payload.get("segment_majority_role")
+            or payload.get("predicted_role")
+            or payload.get("predicted_role_frame")
+        )
+        if not role:
+            return None
+        token = str(role).strip().upper().replace("-", "_").replace(" ", "_")
+        token = "_".join(part for part in token.split("_") if part)
+        if token in {"MC_IZQ", "MC_DCHO", "DC_IZQ", "DC_DCHO"}:
+            return token
+        return str(role)
+
+    def _build_node_label_overrides(
+        self,
+        tracks_payload: dict[str, list[dict[str, Any]]],
+        raw_to_slot: dict[str, str],
+    ) -> dict[str, str]:
+        overrides: dict[str, str] = {}
+        for class_name in ("player", "goalkeeper", "referee"):
+            frames = tracks_payload.get(class_name, [])
+            if not frames:
+                continue
+            pool: dict[str, list[tuple[str, str | None]]] = {}
+            for frame_map in frames:
+                if not isinstance(frame_map, Mapping):
+                    continue
+                for raw_id, payload in frame_map.items():
+                    if not isinstance(payload, Mapping):
+                        continue
+                    slot = raw_to_slot.get(str(raw_id))
+                    if not slot:
+                        continue
+                    player_name = str(payload.get("player_name") or "").strip()
+                    role = self._segment_role_label(payload)
+                    if not player_name and not role:
+                        continue
+                    pool.setdefault(slot, []).append((player_name, role))
+                if len(pool) >= 22:
+                    break
+            for slot, entries in pool.items():
+                name_counts: dict[str, int] = {}
+                role_counts: dict[str, int] = {}
+                for name, role in entries:
+                    if name:
+                        name_counts[name] = name_counts.get(name, 0) + 1
+                    if role:
+                        role_counts[role] = role_counts.get(role, 0) + 1
+                best_name = max(name_counts, key=name_counts.get) if name_counts else ""
+                best_role = max(role_counts, key=role_counts.get) if role_counts else ""
+                base = self._player_label(slot)
+                parts = [base]
+                if best_name:
+                    parts.append(best_name)
+                if best_role:
+                    parts.append(best_role)
+                overrides[slot] = " ".join(parts)
+        return overrides
 
     def _resolve_slot_lookup(self, conversion_summary: Mapping[str, Any] | None) -> tuple[dict[str, str], dict[str, str]]:
         if not isinstance(conversion_summary, Mapping):
@@ -375,7 +441,9 @@ class PathCRFDrawer:
         raw_to_slot: Mapping[str, str],
         edge_src: str | None,
         edge_dst: str | None,
+        node_label_overrides: dict[str, str] | None = None,
     ) -> None:
+        overrides = node_label_overrides or {}
         ordered_classes = ("player", "goalkeeper", "referee", "ball")
         for class_name in ordered_classes:
             for raw_id, payload in frame_tracks.get(class_name, {}).items():
@@ -386,7 +454,11 @@ class PathCRFDrawer:
                 if class_name == "ball":
                     label = "BALL"
                 elif slot_name is not None:
-                    label = self._player_label(slot_name)
+                    label = overrides.get(slot_name)
+                    if not label:
+                        base_label = self._player_label(slot_name)
+                        role = self._segment_role_label(payload)
+                        label = f"{base_label} {role}" if role else base_label
                 else:
                     label = f"{class_name[:1].upper()}{raw_id}"
                 self._draw_bbox_annotation(
@@ -445,12 +517,14 @@ class PathCRFDrawer:
         edge_row: pd.Series | None,
         event_row: pd.Series | None,
         frame_size: tuple[int, int],
+        node_label_overrides: dict[str, str] | None = None,
     ) -> np.ndarray:
         return self._draw_frame(
             tracking_row=tracking_row,
             edge_row=edge_row,
             event_row=event_row,
             frame_size=frame_size,
+            node_label_overrides=node_label_overrides,
         )
 
     def _blend_inset(
@@ -521,6 +595,7 @@ class PathCRFDrawer:
         edge_row: pd.Series | None,
         event_row: pd.Series | None,
         frame_size: tuple[int, int],
+        node_label_overrides: dict[str, str] | None = None,
     ) -> np.ndarray:
         frame_w, frame_h = frame_size
         canvas = np.zeros((frame_h, frame_w, 3), dtype=np.uint8)
@@ -553,23 +628,25 @@ class PathCRFDrawer:
 
         self._draw_active_edge(canvas, edge_row, node_positions)
 
+        overrides = node_label_overrides or {}
+
         for node_id in [f"home_{idx}" for idx in range(1, 12)]:
             center = node_positions.get(node_id)
             if center is None:
                 continue
-            self._draw_node(canvas, center, node_id, "home", node_id == edge_src, node_id == edge_dst)
+            self._draw_node(canvas, center, node_id, "home", node_id == edge_src, node_id == edge_dst, label_override=overrides.get(node_id))
 
         for node_id in [f"away_{idx}" for idx in range(1, 12)]:
             center = node_positions.get(node_id)
             if center is None:
                 continue
-            self._draw_node(canvas, center, node_id, "away", node_id == edge_src, node_id == edge_dst)
+            self._draw_node(canvas, center, node_id, "away", node_id == edge_src, node_id == edge_dst, label_override=overrides.get(node_id))
 
         for node_id in [f"referee_{idx}" for idx in range(1, 4)]:
             center = node_positions.get(node_id)
             if center is None:
                 continue
-            self._draw_node(canvas, center, node_id, "referee", False, False)
+            self._draw_node(canvas, center, node_id, "referee", False, False, label_override=overrides.get(node_id))
 
         for node_id in OUTSIDE_NODE_POINTS:
             center = node_positions[node_id]
@@ -612,6 +689,8 @@ class PathCRFDrawer:
                 with tracks_path.open("r", encoding="utf-8") as f:
                     tracks_payload = self._normalize_tracks_payload(json.load(f))
         raw_to_slot, slot_to_raw = self._resolve_slot_lookup(conversion_summary)
+
+        node_label_overrides = self._build_node_label_overrides(tracks_payload, raw_to_slot)
 
         video_cap = None
         effective_frame_size = frame_size
@@ -657,7 +736,10 @@ class PathCRFDrawer:
                     edge_src = edge_row.get("edge_src") if edge_row is not None else None
                     edge_dst = edge_row.get("edge_dst") if edge_row is not None else None
                     frame_tracks = self._frame_tracks_payload(tracks_payload, int(frame_id))
-                    self._draw_tracks_on_video(frame, frame_tracks, raw_to_slot, edge_src, edge_dst)
+                    self._draw_tracks_on_video(
+                        frame, frame_tracks, raw_to_slot, edge_src, edge_dst,
+                        node_label_overrides=node_label_overrides,
+                    )
                     self._draw_video_active_edge(frame, frame_tracks, slot_to_raw, edge_src, edge_dst)
                     inset_w = max(280, int(frame.shape[1] * 0.28))
                     inset_h = max(180, int(frame.shape[0] * 0.28))
@@ -666,6 +748,7 @@ class PathCRFDrawer:
                         edge_row=edge_row,
                         event_row=event_row,
                         frame_size=(inset_w, inset_h),
+                        node_label_overrides=node_label_overrides,
                     )
                     self._blend_inset(frame, inset_frame, opacity=0.8, margin_px=18)
                     self._draw_overlay(frame, tracking_row, edge_src, edge_dst, event_row)
@@ -675,6 +758,7 @@ class PathCRFDrawer:
                         edge_row=edge_row,
                         event_row=event_row,
                         frame_size=effective_frame_size,
+                        node_label_overrides=node_label_overrides,
                     )
                 writer.write(frame)
                 if show_window:

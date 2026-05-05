@@ -46,7 +46,7 @@ class RealtimeCheckpoint:
 
 
 _SELF_EDGE_EVENT = "control"
-_PASS_EVENT = "pase"
+_PASS_EVENT = "kick"
 _OUT_EVENT = "out"
 _UNKNOWN_EVENT = "unknown"
 

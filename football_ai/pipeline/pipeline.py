@@ -108,6 +108,36 @@ def _rgb_to_lab_opencv(rgb_color):
     return lab_pixel.astype(np.float32)
 
 
+def _reencode_to_h264(video_path, logger):
+    try:
+        import subprocess
+        from imageio_ffmpeg import get_ffmpeg_exe
+        ffmpeg_exe = str(get_ffmpeg_exe())
+    except ImportError:
+        return
+    video_path = Path(video_path)
+    if not video_path.exists():
+        return
+    temp_out = video_path.with_suffix(".tmp.mp4")
+    try:
+        subprocess.run(
+            [
+                ffmpeg_exe, "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(video_path),
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                "-profile:v", "main", "-level:v", "4.1",
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+                "-movflags", "+faststart",
+                str(temp_out),
+            ],
+            check=True,
+        )
+        temp_out.replace(video_path)
+        logger.info(f"Re-encoded to H.264 for browser: {video_path}")
+    except Exception:
+        pass  # Original file remains
+
+
 def _parse_team_color_overrides(raw_text):
     text = str(raw_text or "").strip()
     if not text:
@@ -655,6 +685,7 @@ def run_tracking_pipeline(args):
                 print_equipos=bool(getattr(args, "print_equipos", True)),
             )
             logger.info(f"Video with tracks saved to: {output}")
+            _reencode_to_h264(output, logger)
         else:
             logger.info("Skipping annotated video rendering for this execution.")
 
@@ -675,6 +706,11 @@ def run_tracking_pipeline(args):
                 rolling_fields["rolling_checkpoints"] = str(rolling_artifacts.get("checkpoints", ""))
             except Exception:
                 logger.exception("No se pudieron guardar los artefactos del rolling actions.")
+
+        # Save tracks JSON before PathCRF rendering so the drawer can load it
+        save_result(tracks, output_path_named, logger)
+        if output_path_legacy != output_path_named:
+            save_result(tracks, output_path_legacy, logger)
 
         # Render dedicado PathCRF (single panel) con edges emitidos y eventos postprocesados
         try:
@@ -735,6 +771,7 @@ def run_tracking_pipeline(args):
                     show=False,
                 )
                 logger.info(f"PathCRF dedicated video saved to: {pathcrf_video_output}")
+                _reencode_to_h264(pathcrf_video_output, logger)
         except Exception:
             logger.exception("No se pudo generar el video dedicado de PathCRF.")
 
@@ -784,10 +821,6 @@ def run_tracking_pipeline(args):
             except Exception:
                 logger.exception("No se pudo ensamblar el video con comentarios.")
 
-        # Save tracks JSON
-        save_result(tracks, output_path_named, logger)
-        if output_path_legacy != output_path_named:
-            save_result(tracks, output_path_legacy, logger)
         if position_phase is not None and position_phase.enabled:
             role_frame_df, role_player_df, role_greedy_df = (
                 position_phase.build_role_export_dataframes(tracks)

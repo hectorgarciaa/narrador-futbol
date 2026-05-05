@@ -74,13 +74,39 @@
           <div class="status-head">
             <div>
               <p class="eyebrow">Resultado</p>
-              <h2>Vídeo final</h2>
+              <h2>Vídeo de tracking</h2>
             </div>
           </div>
-          <p id="result-video-empty" class="run-summary">
-            El vídeo final aparecerá aquí cuando termine la ejecución y la interfaz tenga el MP4 listo.
+          <p class="run-summary result-video-placeholder" data-video="tracking">
+            El vídeo de tracking aparecerá aquí cuando termine la ejecución.
           </p>
-          <video id="result-video" class="result-video" controls preload="metadata"></video>
+          <video class="result-video" data-video="tracking" controls preload="metadata"></video>
+        </article>
+
+        <article class="status-card result-card">
+          <div class="status-head">
+            <div>
+              <p class="eyebrow">Resultado</p>
+              <h2>Vídeo PathCRF</h2>
+            </div>
+          </div>
+          <p class="run-summary result-video-placeholder" data-video="pathcrf">
+            El vídeo PathCRF con slots y mapa 2D aparecerá aquí cuando esté listo.
+          </p>
+          <video class="result-video" data-video="pathcrf" controls preload="metadata"></video>
+        </article>
+
+        <article class="status-card result-card">
+          <div class="status-head">
+            <div>
+              <p class="eyebrow">Resultado</p>
+              <h2>Vídeo con comentarios</h2>
+            </div>
+          </div>
+          <p class="run-summary result-video-placeholder" data-video="commentary">
+            El vídeo con audio de comentarios aparecerá aquí cuando esté listo.
+          </p>
+          <video class="result-video" data-video="commentary" controls preload="metadata"></video>
         </article>
       </section>
     </main>

@@ -385,7 +385,7 @@ class RollingActionsPhase(Phase):
                 lf = _coerce_int(row.get("frame_id"))
                 if lf is None:
                     continue
-                global_frame = int(lf)
+                global_frame = int(lf) + int(self._last_snapshot_start or 0)
                 es = str(row.get("edge_src")) if row.get("edge_src") is not None and not pd.isna(row.get("edge_src")) else None
                 ed = str(row.get("edge_dst")) if row.get("edge_dst") is not None and not pd.isna(row.get("edge_dst")) else None
                 cs, cd = _slot_to_canonical(es), _slot_to_canonical(ed)

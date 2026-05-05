@@ -296,6 +296,13 @@ class OnlineSpecialSeedRoleAssigner:
         row_ind, col_ind = solve_assignment(cost_matrix, _scipy_linear_sum_assignment)
         return [{"state": segment_states[row_idx], "slot": normalize_slot_token(expected_slots[col_idx]), "cost": float(cost_matrix[row_idx, col_idx])} for row_idx, col_idx in zip(row_ind.tolist(), col_ind.tolist())]
 
+    @staticmethod
+    def _segment_assignment_key(state):
+        return (
+            int(state.get("track_id", -1)),
+            int(state.get("segment_id", -1)),
+        )
+
     def _resolve_lineup_assignment(self, team_id, state):
         if self.lineup_matcher is None:
             return None, None
@@ -334,6 +341,47 @@ class OnlineSpecialSeedRoleAssigner:
             track_data["player_name"] = str(player_name)
             state["lineup_slot"] = str(resolved_slot)
             state["player_name"] = str(player_name)
+
+    def _apply_active_segment_assignments(self, active_segments_by_team, frame_id):
+        for team_id, state_pairs in active_segments_by_team.items():
+            expected_slots = self.segment_expected_slots_by_team.get(
+                str(team_id),
+                self.expected_roles_by_team.get(str(team_id), []),
+            )
+            assignments = self._assign_segments_for_team(
+                str(team_id),
+                [state for state, _ in state_pairs],
+                expected_slots,
+            )
+            assigned_by_key = {
+                self._segment_assignment_key(item["state"]): item
+                for item in assignments
+            }
+            for state, track_data in state_pairs:
+                assigned = assigned_by_key.get(self._segment_assignment_key(state))
+                final_slot = (
+                    assigned["slot"]
+                    if assigned is not None
+                    else state.get("majority_expected_role_slot") or state.get("majority_role")
+                )
+                assignment_cost = float(assigned["cost"]) if assigned is not None else math.nan
+                self._apply_segment_assignment_to_track(track_data, state, final_slot, frame_id, assignment_cost)
+                self.stats["segment_level_assignments"] += 1
+                self.segment_assignment_rows.append(
+                    {
+                        "frame_id": int(frame_id),
+                        "team_id": str(team_id),
+                        "player_id": int(state["track_id"]),
+                        "identity_segment_id": int(state["segment_id"]),
+                        "display_role_slot": str(final_slot),
+                        "segment_majority_role": state.get("majority_role"),
+                        "segment_majority_expected_role_slot": state.get("majority_expected_role_slot"),
+                        "assignment_cost": assignment_cost,
+                        "observations": int(state.get("observations", 0)),
+                        "player_name": state.get("player_name"),
+                        "lineup_slot": state.get("lineup_slot"),
+                    }
+                )
 
     def _assign_special_seed_frame_teams(self, tracks_frame, visible_player_df):
         defender_candidates = []
@@ -487,31 +535,7 @@ class OnlineSpecialSeedRoleAssigner:
                 }
             )
 
-        for team_id, state_pairs in active_segments_by_team.items():
-            expected_slots = self.segment_expected_slots_by_team.get(str(team_id), self.expected_roles_by_team.get(str(team_id), []))
-            assignments = self._assign_segments_for_team(str(team_id), [state for state, _ in state_pairs], expected_slots)
-            assigned_by_segment = {int(item["state"]["segment_id"]): item for item in assignments}
-            for state, track_data in state_pairs:
-                assigned = assigned_by_segment.get(int(state.get("segment_id", -1)))
-                final_slot = assigned["slot"] if assigned is not None else state.get("majority_expected_role_slot") or state.get("majority_role")
-                assignment_cost = float(assigned["cost"]) if assigned is not None else math.nan
-                self._apply_segment_assignment_to_track(track_data, state, final_slot, frame_id, assignment_cost)
-                self.stats["segment_level_assignments"] += 1
-                self.segment_assignment_rows.append(
-                    {
-                        "frame_id": int(frame_id),
-                        "team_id": str(team_id),
-                        "player_id": int(state["track_id"]),
-                        "identity_segment_id": int(state["segment_id"]),
-                        "display_role_slot": str(final_slot),
-                        "segment_majority_role": state.get("majority_role"),
-                        "segment_majority_expected_role_slot": state.get("majority_expected_role_slot"),
-                        "assignment_cost": assignment_cost,
-                        "observations": int(state.get("observations", 0)),
-                        "player_name": state.get("player_name"),
-                        "lineup_slot": state.get("lineup_slot"),
-                    }
-                )
+        self._apply_active_segment_assignments(active_segments_by_team, frame_id)
 
         self._annotate_special_goalkeepers(tracks_frame, frame_id)
         self.prev_positions.update(frame_positions)

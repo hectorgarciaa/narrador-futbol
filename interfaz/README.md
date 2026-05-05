@@ -38,7 +38,7 @@ python interfaz/app.py --commentary-backend llama_cpp --commentary-port 8788
 python interfaz/app.py --commentary-backend ollama --commentary-model gemma4:e2b
 ```
 
-Después abre `http://127.0.0.1:8767`.
+Después abre la URL que imprime la consola al arrancar. Por defecto será `http://127.0.0.1:8767`, pero si ese puerto ya está ocupado la interfaz probará el siguiente puerto libre y mostrará el definitivo.
 
 Nota:
 
