@@ -1,6 +1,8 @@
 import json
+import os
 import re
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -234,6 +236,42 @@ def _build_rolling_output_dir(config, video_path) -> Path:
     return (config.project_root / "output" / "actions" / "rolling_online" / stem).resolve()
 
 
+def _slugify_path_token(value, *, fallback="run") -> str:
+    token = _normalize_token(value)
+    token = re.sub(r"[^a-z0-9-]+", "-", token).strip("-")
+    return token or fallback
+
+
+def _build_commentary_run_token(args, video_source, video_path) -> str:
+    app_run_id = str(os.environ.get("NARRADOR_APP_RUN_ID") or "").strip()
+    if app_run_id:
+        return _slugify_path_token(app_run_id)
+
+    label = str(
+        getattr(args, "experiment_label", None)
+        or video_source
+        or Path(video_path).stem
+    ).strip()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"{timestamp}_{_slugify_path_token(label)}_{os.getpid()}"
+
+
+def _resolve_commentary_output_dir(args, config, video_path, video_source) -> Path:
+    app_run_dir = str(os.environ.get("NARRADOR_APP_RUN_DIR") or "").strip()
+    if app_run_dir:
+        return (Path(app_run_dir).expanduser().resolve() / "commentaries").resolve()
+
+    output_root_arg = getattr(args, "output_root", None)
+    run_token = _build_commentary_run_token(args, video_source, video_path)
+    if output_root_arg:
+        output_root = Path(output_root_arg).expanduser()
+        if not output_root.is_absolute():
+            output_root = (config.project_root / output_root).resolve()
+        return (output_root / "commentary" / run_token).resolve()
+
+    return (_build_rolling_output_dir(config, video_path) / "runs" / run_token / "commentary").resolve()
+
+
 def resolve_lineup_spec(args, config):
     lineup_spec = getattr(args, "lineup_spec", None)
     lineup_spec_source = "cli"
@@ -422,10 +460,10 @@ def run_tracking_pipeline(args):
         actions_conf = dict(tracker_conf.get("actions") or {})
         actions_mode = str(actions_conf.get("mode", "legacy")).strip().lower()
         logger.info("Actions mode: %s", actions_mode)
+        rolling_output_dir = _build_rolling_output_dir(config, video_path)
         if bool(actions_conf.get("enabled", True)):
             if actions_mode != "rolling":
                 raise ValueError(f"Actions mode '{actions_mode}' no soportado. Solo se admite 'rolling'.")
-            rolling_output_dir = _build_rolling_output_dir(config, video_path)
             actions_phase = RollingActionsPhase(
                 RollingActionsConfig(
                     enabled=True,
@@ -475,7 +513,17 @@ def run_tracking_pipeline(args):
                 if not commentary_conf.get("llm_base_url"):
                     commentary_conf["llm_base_url"] = llama_base_url
 
-            commentary_output_dir = str(rolling_output_dir / "commentary")
+            commentary_output_dir = _resolve_commentary_output_dir(
+                args,
+                config,
+                video_path,
+                video_source,
+            )
+            commentary_manifest_filename = (
+                "events_manifest.jsonl"
+                if str(os.environ.get("NARRADOR_APP_RUN_DIR") or "").strip()
+                else "commentary_manifest.jsonl"
+            )
             commentary_phase = CommentaryPhase(CommentaryPhaseConfig(
                 enabled=True,
                 generate_text=bool(commentary_conf.get("generate_text", True)),
@@ -505,12 +553,14 @@ def run_tracking_pipeline(args):
                 elevenlabs_optimize_streaming_latency=commentary_conf.get("elevenlabs_optimize_streaming_latency"),
                 fps=float(actions_conf.get("fps", 25.0)),
                 output_dir=str(commentary_output_dir),
+                manifest_filename=commentary_manifest_filename,
                 max_workers=max(1, int(commentary_conf.get("max_workers", 2))),
                 drop_policy=str(commentary_conf.get("drop_policy", "latest")),
                 max_queue_size=max(1, int(commentary_conf.get("max_queue_size", 8))),
                 skip_event_types=list(commentary_conf.get("skip_event_types", ["out", "unknown"])),
                 deduplicate_consecutive=bool(commentary_conf.get("deduplicate_consecutive", True)),
             ))
+            logger.info("Commentary output directory: %s", commentary_output_dir)
             logger.info("Commentary phase enabled (mode: %s, audio: %s, tts: %s)",
                         "online", commentary_phase.config.generate_audio, commentary_phase.config.tts_backend)
         else:
@@ -817,16 +867,24 @@ def run_tracking_pipeline(args):
                 logger.exception("No se pudo generar el summary de commentary.")
             try:
                 commentary_artifacts = commentary_phase.build_result(
-                    rolling_output_dir / "commentary"
+                    commentary_phase._output_dir or (rolling_output_dir / "commentary")
                 )
                 logger.info("Commentary artifacts: %s", commentary_artifacts)
             except Exception:
                 logger.exception("No se pudieron guardar los artefactos de commentary.")
             try:
-                manifest_path = rolling_output_dir / "commentary" / "commentary_manifest.jsonl"
+                manifest_path = None
+                if isinstance(commentary_artifacts, dict):
+                    raw_manifest_path = commentary_artifacts.get("commentary_manifest_jsonl")
+                    if raw_manifest_path:
+                        manifest_path = Path(raw_manifest_path).expanduser().resolve()
+                if manifest_path is None:
+                    manifest_path = (commentary_phase._output_dir or (rolling_output_dir / "commentary")) / (
+                        commentary_phase.config.manifest_filename or "commentary_manifest.jsonl"
+                    )
                 if manifest_path.exists() and manifest_path.stat().st_size > 0:
                     from football_ai.commentaries.deferred_media import assemble_deferred_commentary_video
-                    commentary_audio_path = rolling_output_dir / "commentary" / "commentary_track.wav"
+                    commentary_audio_path = manifest_path.parent / "commentary_track.wav"
                     commentary_video_out = Path(output).with_name(f"{Path(output).stem}_commentary.mp4")
                     assembly = assemble_deferred_commentary_video(
                         str(manifest_path),

@@ -13,6 +13,16 @@ Tomar un evento estructurado en JSON y convertirlo en un comentario corto de nar
 - **TTS alternativo (demo)**: ElevenLabs `eleven_multilingual_v2` via API.
 - **TTS experimental**: Qwen3-TTS (VoiceDesign + Base), aislado en `experimental/qwen_voice.py`.
 
+## Persistencia por run
+
+Durante la ejecución, la fase de comentarios mantiene en memoria la cola, el caché de identidades y los eventos completados, pero los artefactos finales se persisten por run:
+
+- manifiesto JSONL con los eventos aceptados;
+- WAV individuales generados por TTS;
+- `commentary_events.json` y, cuando aplica, `commentary_track.wav`.
+
+En la interfaz esos archivos viven en `output/interfaz/runs/<run_id>/commentaries/`. En `scripts/track.py` sin interfaz se guardan en un subdirectorio único de la ejecución dentro de `output/actions/rolling_online/<video>/runs/<run_token>/commentary/` o dentro de `--output-root/commentary/<run_token>/` si se usa `--output-root`.
+
 ## Campos minimos del evento
 
 ```json

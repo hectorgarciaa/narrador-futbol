@@ -60,6 +60,8 @@ Cada ejecución crea:
 - `output/interfaz/runs/<run_id>/commentaries/audio/000_intro.wav`
 - `output/interfaz/runs/<run_id>/commentaries/commentary_track.wav` cuando el vídeo termina y se ensambla la pista diferida
 
+Cuando el tracking se lanza desde la interfaz, la fase `CommentaryPhase` del subprocess escribe directamente en ese mismo `output/interfaz/runs/<run_id>/commentaries/`. Ya no reutiliza `output/actions/rolling_online/<video>/commentary/`, así que el manifiesto y los WAV del run quedan aislados y el MP4 final no arrastra audios de partidos anteriores.
+
 El `<run_id>` incluye fecha/hora local, equipos, vídeo y un sufijo corto para que se pueda reconocer la salida al mirar la carpeta. Ejemplo: `20260413-153012_madrid-vs-barcelona_video-prueba-ajustado_a1b2`.
 
 El propio `track.py` copia además el spec dentro del directorio de artefactos del vídeo para dejar trazabilidad completa.

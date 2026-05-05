@@ -310,50 +310,28 @@ class PathCRFDrawer:
             return token
         return str(role)
 
-    def _build_node_label_overrides(
+    def _frame_node_label_overrides(
         self,
-        tracks_payload: dict[str, list[dict[str, Any]]],
-        raw_to_slot: dict[str, str],
+        frame_tracks: Mapping[str, dict[str, Mapping[str, Any]]],
+        raw_to_slot: Mapping[str, str],
     ) -> dict[str, str]:
         overrides: dict[str, str] = {}
         for class_name in ("player", "goalkeeper", "referee"):
-            frames = tracks_payload.get(class_name, [])
-            if not frames:
-                continue
-            pool: dict[str, list[tuple[str, str | None]]] = {}
-            for frame_map in frames:
-                if not isinstance(frame_map, Mapping):
+            for raw_id, payload in frame_tracks.get(class_name, {}).items():
+                if not isinstance(payload, Mapping):
                     continue
-                for raw_id, payload in frame_map.items():
-                    if not isinstance(payload, Mapping):
-                        continue
-                    slot = raw_to_slot.get(str(raw_id))
-                    if not slot:
-                        continue
-                    player_name = str(payload.get("player_name") or "").strip()
-                    role = self._segment_role_label(payload)
-                    if not player_name and not role:
-                        continue
-                    pool.setdefault(slot, []).append((player_name, role))
-                if len(pool) >= 22:
-                    break
-            for slot, entries in pool.items():
-                name_counts: dict[str, int] = {}
-                role_counts: dict[str, int] = {}
-                for name, role in entries:
-                    if name:
-                        name_counts[name] = name_counts.get(name, 0) + 1
-                    if role:
-                        role_counts[role] = role_counts.get(role, 0) + 1
-                best_name = max(name_counts, key=name_counts.get) if name_counts else ""
-                best_role = max(role_counts, key=role_counts.get) if role_counts else ""
-                base = self._player_label(slot)
+                slot = raw_to_slot.get(str(raw_id))
+                if not slot:
+                    continue
+                base = self._player_label(str(slot))
+                player_name = str(payload.get("player_name") or "").strip()
+                role = self._segment_role_label(payload)
                 parts = [base]
-                if best_name:
-                    parts.append(best_name)
-                if best_role:
-                    parts.append(best_role)
-                overrides[slot] = " ".join(parts)
+                if player_name:
+                    parts.append(player_name)
+                if role:
+                    parts.append(role)
+                overrides[str(slot)] = " ".join(parts)
         return overrides
 
     def _resolve_slot_lookup(self, conversion_summary: Mapping[str, Any] | None) -> tuple[dict[str, str], dict[str, str]]:
@@ -690,8 +668,6 @@ class PathCRFDrawer:
                     tracks_payload = self._normalize_tracks_payload(json.load(f))
         raw_to_slot, slot_to_raw = self._resolve_slot_lookup(conversion_summary)
 
-        node_label_overrides = self._build_node_label_overrides(tracks_payload, raw_to_slot)
-
         video_cap = None
         effective_frame_size = frame_size
         use_video_background = False
@@ -730,12 +706,13 @@ class PathCRFDrawer:
                         break
                 else:
                     base_frame = None
+                frame_tracks = self._frame_tracks_payload(tracks_payload, int(frame_id))
+                node_label_overrides = self._frame_node_label_overrides(frame_tracks, raw_to_slot)
 
                 if use_video_background and base_frame is not None:
                     frame = base_frame.copy()
                     edge_src = edge_row.get("edge_src") if edge_row is not None else None
                     edge_dst = edge_row.get("edge_dst") if edge_row is not None else None
-                    frame_tracks = self._frame_tracks_payload(tracks_payload, int(frame_id))
                     self._draw_tracks_on_video(
                         frame, frame_tracks, raw_to_slot, edge_src, edge_dst,
                         node_label_overrides=node_label_overrides,

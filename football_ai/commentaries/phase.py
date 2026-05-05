@@ -58,6 +58,7 @@ class CommentaryPhaseConfig:
 
     fps: float = 25.0
     output_dir: str | None = None
+    manifest_filename: str = "commentary_manifest.jsonl"
 
     max_workers: int = 2
     drop_policy: str = "latest"
@@ -127,7 +128,8 @@ class CommentaryPhase(Phase):
                 else Path("output/commentary")
             )
             self._output_dir.mkdir(parents=True, exist_ok=True)
-            self._manifest_path = self._output_dir / "commentary_manifest.jsonl"
+            manifest_filename = str(self.config.manifest_filename or "commentary_manifest.jsonl").strip()
+            self._manifest_path = self._output_dir / manifest_filename
             if self.config.generate_audio or self.config.generate_text:
                 self._executor = ThreadPoolExecutor(max_workers=max(1, int(self.config.max_workers)))
 
