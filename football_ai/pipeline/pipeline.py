@@ -365,7 +365,6 @@ def run_tracking_pipeline(args):
         ball_conf = config.ball
 
         tracker_conf = config.tracking
-
         if lineup_spec is not None:
             lineup_colors = _build_team_colors_from_raw_mapping(lineup_team_colors_raw)
             team_detector_conf.setdefault("team_color_model_conf", {})
@@ -502,7 +501,7 @@ def run_tracking_pipeline(args):
             commentary_enabled
             or bool(getattr(args, "commentary", False))
         )
-        if getattr(args, "no_commentary", False):
+        if hasattr(args, "commentary") and getattr(args, "commentary", None) is False:
             commentary_enabled = False
         if commentary_enabled:
             from football_ai.commentaries.launcher import ensure_llama_server_running
@@ -899,9 +898,7 @@ def run_tracking_pipeline(args):
                 logger.exception("No se pudo ensamblar el video con comentarios.")
 
         if position_phase is not None and position_phase.enabled:
-            role_frame_df, role_player_df, role_greedy_df = (
-                position_phase.build_role_export_dataframes(tracks)
-            )
+            role_frame_df, role_player_df, role_greedy_df = position_phase.build_role_export_dataframes()
             save_dataframe_csv(role_frame_df, role_frame_csv_path, logger, "Frame role predictions CSV")
             copy_output_artifact(role_frame_csv_path, role_frame_csv_path_legacy, logger, "Frame role predictions CSV")
             save_dataframe_csv(role_player_df, role_player_csv_path, logger, "Player role summary CSV")

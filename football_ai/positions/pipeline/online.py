@@ -64,13 +64,6 @@ class OnlineSpecialSeedRoleAssigner:
         self.segment_switch_distance_m = float(tracking_cfg.get("role_segment_switch_distance_m", tracking_cfg.get("role_swap_position_jump_m", 14.0)))
         self.segment_min_observations = max(2, int(tracking_cfg.get("role_segment_min_observations", tracking_cfg.get("role_swap_min_recent_samples", 6))))
         self.recent_window = max(3, int(tracking_cfg.get("role_segment_recent_window", 10)))
-        self.recent_position_window = max(3, int(tracking_cfg.get("role_recent_position_window", self.recent_window)))
-        self.recent_role_window = max(3, int(tracking_cfg.get("role_recent_role_window", self.recent_window)))
-        self.swap_min_recent_samples = max(2, int(tracking_cfg.get("role_swap_min_recent_samples", 8)))
-        self.swap_position_jump_m = float(tracking_cfg.get("role_swap_position_jump_m", self.segment_switch_distance_m))
-        self.swap_position_jump_relinked_m = float(tracking_cfg.get("role_swap_position_jump_relinked_m", self.swap_position_jump_m))
-        self.swap_role_change_min_ratio = float(tracking_cfg.get("role_swap_role_change_min_ratio", 0.60))
-        self.swap_role_change_min_confidence = float(tracking_cfg.get("role_swap_role_change_min_confidence", 0.35))
         self._reset_runtime_state()
         self.role_session = None
         if not self.enabled:
@@ -146,16 +139,14 @@ class OnlineSpecialSeedRoleAssigner:
             "frame_vote_counts": Counter(),
             "frame_vote_confidence_sums": {},
             "model_role_counts": Counter(),
-            "recent_positions_m": deque(maxlen=self.recent_position_window),
-            "recent_votes": deque(maxlen=self.recent_role_window),
+            "recent_positions_m": deque(maxlen=self.recent_window),
+            "recent_votes": deque(maxlen=self.recent_window),
             "sum_x_norm": 0.0,
             "sum_y_norm": 0.0,
             "display_role_slot": None,
             "expected_role_slot": None,
             "lineup_slot": None,
             "player_name": None,
-            "anchor_lineup_slot": None,
-            "anchor_player_name": None,
             "majority_role": None,
             "majority_expected_role_slot": None,
             "recent_majority_role": None,
@@ -180,8 +171,8 @@ class OnlineSpecialSeedRoleAssigner:
             "frame_vote_counts": Counter(state.get("frame_vote_counts", Counter())),
             "frame_vote_confidence_sums": dict(state.get("frame_vote_confidence_sums", {})),
             "model_role_counts": Counter(state.get("model_role_counts", Counter())),
-            "recent_positions_m": deque(state.get("recent_positions_m", ()), maxlen=self.recent_position_window),
-            "recent_votes": deque(state.get("recent_votes", ()), maxlen=self.recent_role_window),
+            "recent_positions_m": deque(state.get("recent_positions_m", ()), maxlen=self.recent_window),
+            "recent_votes": deque(state.get("recent_votes", ()), maxlen=self.recent_window),
         }
 
     def _start_new_segment(self, track_id, frame_id, team_id=None, reason=None, position_jump_m=None):
@@ -217,12 +208,7 @@ class OnlineSpecialSeedRoleAssigner:
         y_anchor = float(np.median([float(point[1]) for point in recent_positions]))
         return float(math.dist((x_anchor, y_anchor), current_position_m))
 
-    def _resolve_lineup_identity_for_slot(self, team_id, slot_name):
-        if self.lineup_matcher is None or not slot_name:
-            return None, None
-        return self.lineup_matcher.resolve_player_name(team_id, slot_name, slot_name, slot_name)
-
-    def _should_rotate_segment(self, state, frame_slot, frame_confidence, current_position_m, track_data):
+    def _should_rotate_segment(self, state, frame_slot, current_position_m, track_data):
         assignment_mode = str(track_data.get("canonical_assignment_mode") or "").strip()
         if bool(track_data.get("canonical_relinked")) or assignment_mode in {"forced_absorption", "canonical_relinked_to_new_raw_tracker", "raw_tracker_reassigned_to_other_canonical"}:
             return True, "canonical_relinked", self._recent_position_jump_m(state, current_position_m)
@@ -235,30 +221,6 @@ class OnlineSpecialSeedRoleAssigner:
         if previous_position_m is not None and math.dist(previous_position_m, current_position_m) >= float(self.segment_switch_distance_m):
             if normalize_slot_token(majority_slot) != normalize_slot_token(frame_slot):
                 return True, "position_jump_plus_role_change", float(math.dist(previous_position_m, current_position_m))
-        recent_slot, recent_count, recent_ratio = self._recent_majority(state.get("recent_votes"), extra_vote=frame_slot)
-        state["recent_majority_role"] = recent_slot
-        if recent_slot is None or recent_count < int(self.swap_min_recent_samples):
-            return False, None, None
-        if normalize_slot_token(majority_slot) == normalize_slot_token(recent_slot):
-            return False, None, None
-        if recent_ratio < float(self.swap_role_change_min_ratio) or float(frame_confidence) < float(self.swap_role_change_min_confidence):
-            return False, None, None
-        current_lineup_slot = normalize_slot_token(
-            state.get("anchor_lineup_slot")
-            or state.get("lineup_slot")
-            or state.get("display_role_slot")
-            or majority_slot
-        )
-        current_player_name = str(state.get("anchor_player_name") or state.get("player_name") or "").strip()
-        recent_lineup_slot, recent_player_name = self._resolve_lineup_identity_for_slot(state.get("team_id"), recent_slot)
-        player_changed = bool(recent_player_name and current_player_name and str(recent_player_name).strip() != current_player_name)
-        slot_changed = bool(recent_lineup_slot and current_lineup_slot and normalize_slot_token(recent_lineup_slot) != current_lineup_slot)
-        recent_position_jump_m = self._recent_position_jump_m(state, current_position_m)
-        if player_changed or slot_changed:
-            return True, "sustained_lineup_identity_shift", recent_position_jump_m
-        jump_threshold = float(self.swap_position_jump_relinked_m) if assignment_mode in {"forced_absorption", "canonical_relinked_to_new_raw_tracker", "raw_tracker_reassigned_to_other_canonical"} else float(self.swap_position_jump_m)
-        if recent_position_jump_m is not None and recent_position_jump_m >= jump_threshold:
-            return True, "recent_role_shift_plus_position_jump", recent_position_jump_m
         return False, None, None
 
     def _build_observations_df(self, tracks_frame, frame_id):
@@ -320,7 +282,7 @@ class OnlineSpecialSeedRoleAssigner:
     def _update_segment(self, track_id, frame_id, team_id, frame_slot, frame_confidence, row, track_data):
         current_position_m = safe_field_position_m(track_data)
         state = self._ensure_active_segment(track_id, frame_id, team_id=team_id)
-        rotate, reason, position_jump_m = self._should_rotate_segment(state, frame_slot, frame_confidence, current_position_m, track_data)
+        rotate, reason, position_jump_m = self._should_rotate_segment(state, frame_slot, current_position_m, track_data)
         if rotate:
             state = self._start_new_segment(track_id, frame_id, team_id=team_id, reason=reason, position_jump_m=position_jump_m)
         slot_key = normalize_slot_token(frame_slot)
@@ -422,10 +384,6 @@ class OnlineSpecialSeedRoleAssigner:
             track_data["player_name"] = str(player_name)
             state["lineup_slot"] = str(resolved_slot)
             state["player_name"] = str(player_name)
-            if not state.get("anchor_lineup_slot"):
-                state["anchor_lineup_slot"] = str(resolved_slot)
-            if not state.get("anchor_player_name"):
-                state["anchor_player_name"] = str(player_name)
 
     def _apply_active_segment_assignments(self, active_segments_by_team, frame_id):
         for team_id, state_pairs in active_segments_by_team.items():
@@ -569,13 +527,13 @@ class OnlineSpecialSeedRoleAssigner:
             self._annotate_special_goalkeepers(tracks_frame, frame_id)
             return {"frame_predictions": 0, "player_predictions": 0, "roles_applied": False}
         role_result = self.role_session.predict_frame(observations_df, expected_roles_by_team=self.expected_roles_by_team, include_all_targets=True)
-        frame_predictions_df = role_result.get("frame_predictions_df", pd.DataFrame()).copy()
-        player_predictions_df = role_result.get("player_predictions_df", pd.DataFrame()).copy()
+        frame_predictions_df = role_result.get("frame_predictions_df", pd.DataFrame())
+        player_predictions_df = role_result.get("player_predictions_df", pd.DataFrame())
         if frame_predictions_df.empty or player_predictions_df.empty:
             self._annotate_special_goalkeepers(tracks_frame, frame_id)
             return {"frame_predictions": 0, "player_predictions": 0, "roles_applied": False}
 
-        visible_player_df = player_predictions_df.copy()
+        visible_player_df = player_predictions_df
         self._assign_special_seed_frame_teams(tracks_frame, visible_player_df)
         self._annotate_special_goalkeepers(tracks_frame, frame_id)
         active_segments_by_team = {}
@@ -635,7 +593,7 @@ class OnlineSpecialSeedRoleAssigner:
             self.stats["frames_with_role_predictions"] += 1
         return {"frame_predictions": frame_predictions, "player_predictions": player_predictions, "roles_applied": bool(roles_applied)}
 
-    def build_role_export_dataframes(self, tracks):
+    def build_role_export_dataframes(self):
         frame_df = pd.DataFrame(self.raw_frame_prediction_rows)
         if not frame_df.empty:
             frame_df = frame_df.sort_values(["frame_id", "team_id", "player_id"]).reset_index(drop=True)
