@@ -43,7 +43,7 @@ tracker = Tracker(
 ```
 
 Si no pasas `field_tracking_conf`, el tracker puede funcionar solo con `bbox` en imagen. En `scripts/track.py`, por defecto se lee esta configuración desde `config.yaml` y se activa la proyección 2D del campo.
-`PnLCalib` no se guarda dentro de este repositorio como código versionado: el propio tracker lo clona en `models/reference_points/pnlcalib_repo/` y descarga sus pesos en la primera ejecución. Por tanto, otra persona que ya tenga este repo solo necesita `git pull`; no tiene que clonar `PnLCalib` manualmente.
+`PnLCalib` no se guarda dentro de este repositorio como código versionado: el propio tracker lo clona en `external/pnlcalib/` y descarga sus pesos en `models/pnlcalib/` durante la primera ejecución. Por tanto, otra persona que ya tenga este repo solo necesita `git pull`; no tiene que clonar `PnLCalib` manualmente.
 
 ### Pipeline interno de `get_tracks(video, show_kmeans, frame_hook=None, collect_visual_debug=False, profile_phases=False)`
 

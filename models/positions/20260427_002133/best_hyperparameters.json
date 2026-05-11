@@ -1,8 +1,8 @@
 {
   "run_dir": "models/positions/20260427_002133",
   "checkpoint_path": "models/positions/20260427_002133/best_model.pt",
-  "source_run_dir": "/home/cmantill/narrador-futbol/experiments/positions/grid_search_outputs/20260427_002133/runs/run_049_refine_run342_second_val_h256_objh256_te128_fu256_obj1_ff2_blocks5_drop0p27_ls0p05_lr0p0002_wd0p0015",
-  "source_checkpoint_path": "/home/cmantill/narrador-futbol/experiments/positions/grid_search_outputs/20260427_002133/runs/run_049_refine_run342_second_val_h256_objh256_te128_fu256_obj1_ff2_blocks5_drop0p27_ls0p05_lr0p0002_wd0p0015/best_model.pt",
+  "source_run_dir": "experiments/positions/grid_search_outputs/20260427_002133/runs/run_049_refine_run342_second_val_h256_objh256_te128_fu256_obj1_ff2_blocks5_drop0p27_ls0p05_lr0p0002_wd0p0015",
+  "source_checkpoint_path": "experiments/positions/grid_search_outputs/20260427_002133/runs/run_049_refine_run342_second_val_h256_objh256_te128_fu256_obj1_ff2_blocks5_drop0p27_ls0p05_lr0p0002_wd0p0015/best_model.pt",
   "teammate_embed_dim": 128,
   "objective_hidden_dim": 256,
   "set_hidden_dim": 256,

@@ -20,6 +20,7 @@ from football_ai.positions import (
     copy_output_artifact,
     load_lineup_spec,
     save_dataframe_csv,
+    validate_lineup_payload,
 )
 from football_ai.tracking import Tracker
 from football_ai.visualization import Drawer
@@ -283,7 +284,11 @@ def resolve_lineup_spec(args, config):
     lineup_team_colors_raw = {}
 
     if lineup_spec:
-        lineup_spec = load_lineup_spec(lineup_spec, project_root=config.project_root)
+        if isinstance(lineup_spec, dict):
+            lineup_spec = validate_lineup_payload(lineup_spec)
+            lineup_spec["spec_path"] = "config.yaml::tracking.lineup_spec"
+        else:
+            lineup_spec = load_lineup_spec(lineup_spec, project_root=config.project_root)
         lineup_matcher = LineupSlotMatcher(lineup_spec)
         lineup_expected_roles_by_team = build_expected_roles_by_team(lineup_spec)
         lineup_team_colors_raw = build_team_colors_by_team(lineup_spec)
@@ -486,12 +491,12 @@ def run_tracking_pipeline(args):
                     async_enabled=bool(actions_conf.get("async_enabled", True)),
                     max_workers=max(1, int(actions_conf.get("max_workers", 1))),
                     drop_policy=str(actions_conf.get("drop_policy", "latest")).strip().lower(),
-                snapshot_window_frames=(
-                    int(actions_conf["snapshot_window_frames"])
-                    if actions_conf.get("snapshot_window_frames") is not None
-                    else None
-                ),
-            )
+                    snapshot_window_frames=(
+                        int(actions_conf["snapshot_window_frames"])
+                        if actions_conf.get("snapshot_window_frames") is not None
+                        else None
+                    ),
+                )
             )
 
         commentary_phase = None

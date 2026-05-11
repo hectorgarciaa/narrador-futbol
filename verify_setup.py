@@ -99,9 +99,10 @@ def check_football_ai_imports() -> bool:
     """Check football_ai package imports."""
     imports = [
         'football_ai.core.config',
-        'football_ai.detection.detector',
+        'football_ai.pipeline.pipeline',
         'football_ai.tracking.tracker',
-        'football_ai.identification.team_detector',
+        'football_ai.tracking.phases.detection.detector',
+        'football_ai.tracking.phases.identification.team_detector',
         'football_ai.visualization.drawer',
         'football_ai.evaluation.evaluator',
     ]
@@ -142,7 +143,7 @@ def check_config_files() -> bool:
     project_root = Path(__file__).parent
     files_to_check = {
         'config.yaml': project_root / 'config.yaml',
-        '.env': project_root / '.env',
+        '.env.example': project_root / '.env.example',
         'requirements.txt': project_root / 'requirements.txt',
         'pyproject.toml': project_root / 'pyproject.toml',
     }
@@ -154,16 +155,22 @@ def check_config_files() -> bool:
         else:
             print_error(f"{name} — NO ENCONTRADO")
             all_ok = False
+
+    env_path = project_root / '.env'
+    if env_path.exists():
+        print_success(".env")
+    else:
+        print_warning(".env no existe todavía — opcional salvo para descargas de Roboflow o credenciales locales")
     
     return all_ok
 
 def check_env_vars() -> bool:
-    """Check .env file has required variables."""
+    """Check optional .env variables if the file exists."""
     dotenv_file = Path(__file__).parent / '.env'
     
     if not dotenv_file.exists():
-        print_error(".env no existe")
-        return False
+        print_warning(".env no existe — se puede arrancar sin él si no vas a descargar datasets ni usar credenciales locales")
+        return True
     
     required_keys = [
         'ROBOFLOW_API_KEY',
@@ -181,27 +188,97 @@ def check_env_vars() -> bool:
             if value and value[0] != 'your_api_key_here':
                 print_success(f"{key}: configurado")
             else:
-                print_warning(f"{key}: aún es placeholder (edita .env)")
-                all_ok = False
+                print_warning(f"{key}: placeholder (solo hace falta si vas a descargar datasets)")
         else:
-            print_error(f"{key}: no encontrado en .env")
-            all_ok = False
+            print_warning(f"{key}: no encontrado en .env (solo hace falta para descargar datasets)")
     
     return all_ok
 
 def check_model_paths() -> bool:
-    """Check if at least config references valid model paths."""
+    """Check config loads and required runtime assets exist."""
     try:
         from football_ai.core.config import get_config
+        from football_ai.positions import validate_lineup_payload
         config = get_config()
-        
-        # Just check that config loads, actual model files are large and can be downloaded
+
         print_success("config.yaml carga correctamente")
-        
-        print_info("Modelos (verifica): yolo/v11/, yolo/v8/, finetuning/, finetuning-balon/")
-        print_info("Usa scripts/data/download_models.py para descargar modelos")
-        
-        return True
+        all_ok = True
+
+        model_path = config.get_path('paths', 'models', 'modelo_base')
+        if model_path.exists():
+            print_success(f"Modelo default de tracking: {model_path}")
+        else:
+            print_error(
+                f"Falta el modelo default de tracking: {model_path}. "
+                "Versiona ese artefacto en git o cambia paths.models.modelo_base a una ruta válida."
+            )
+            all_ok = False
+
+        lineup_spec = config.get('tracking', 'lineup_spec', default=None)
+        if isinstance(lineup_spec, dict):
+            validate_lineup_payload(lineup_spec)
+            print_success("tracking.lineup_spec embebido en config.yaml y válido")
+        elif lineup_spec:
+            lineup_path = (config.project_root / str(lineup_spec)).resolve()
+            if lineup_path.exists():
+                print_success(f"tracking.lineup_spec: {lineup_path}")
+            else:
+                print_error(f"Falta tracking.lineup_spec: {lineup_path}")
+                all_ok = False
+        else:
+            print_error("tracking.lineup_spec no está definido")
+            all_ok = False
+
+        actions_conf = dict(config.get('tracking', 'actions', default={}) or {})
+        if actions_conf.get('enabled', False):
+            actions_repo = actions_conf.get('repo_path')
+            actions_repo_path = (config.project_root / str(actions_repo)).resolve()
+            trial = int(actions_conf.get('trial', 120))
+            model_file = str(actions_conf.get('model_file', 'state_dict_best_acc.pt'))
+            save_path = actions_repo_path / "saved" / f"{trial:03d}"
+            candidate_paths = [
+                save_path / "model" / model_file,
+                save_path / model_file,
+            ]
+            checkpoint_path = next((path for path in candidate_paths if path.exists()), candidate_paths[0])
+            if not actions_repo_path.exists():
+                print_error(
+                    f"Falta external/pathcrf: {actions_repo_path}. "
+                    "Clónalo en esa ruta o cambia tracking.actions.repo_path."
+                )
+                all_ok = False
+            elif not save_path.exists():
+                print_error(
+                    f"Falta el trial de PathCRF: {save_path}. "
+                    "Comprueba tracking.actions.trial o copia ese trial dentro del repo externo."
+                )
+                all_ok = False
+            elif not checkpoint_path.exists():
+                print_error(
+                    f"Falta checkpoint de PathCRF: {checkpoint_path}. "
+                    "Comprueba el trial/model_file configurados o copia el checkpoint esperado."
+                )
+                all_ok = False
+            else:
+                print_success(f"PathCRF disponible: {checkpoint_path}")
+
+        commentary_conf = dict(config.get('tracking', 'commentary', default={}) or {})
+        if commentary_conf.get('enabled', False):
+            llm_base_url = commentary_conf.get('llm_base_url')
+            if llm_base_url:
+                print_success(f"Comentario online configurado con llm_base_url={llm_base_url}")
+            else:
+                llama_cfg_path = (config.project_root / 'external' / 'llama.cpp' / 'config.yaml').resolve()
+                if llama_cfg_path.exists():
+                    print_success(f"Config local de llama.cpp disponible: {llama_cfg_path}")
+                else:
+                    print_error(
+                        "Falta external/llama.cpp/config.yaml y tracking.commentary.llm_base_url está vacío. "
+                        "Crea ese config local o define tracking.commentary.llm_base_url antes de arrancar comentarios."
+                    )
+                    all_ok = False
+
+        return all_ok
     except Exception as e:
         print_error(f"Error al cargar config: {str(e)[:60]}")
         return False
@@ -271,9 +348,9 @@ def main():
     if all(results.values()):
         print_success("Todos los chequeos pasaron. ¡Listo para correr!")
         print_info("Próximos pasos:")
-        print_info("1. Edita .env con tu API key de Roboflow")
-        print_info("2. Descarga modelos: python scripts/data/download_models.py")
-        print_info("3. Descarga datasets: python scripts/data/download_datasets.py")
+        print_info("1. Versiona o copia models/finetuning/yolov11m/weights/best.pt si quieres el runtime por defecto")
+        print_info("2. Clona external/pathcrf con el trial y el checkpoint usados por config.yaml")
+        print_info("3. Configura external/llama.cpp/config.yaml o tracking.commentary.llm_base_url")
         print_info("4. Ejecuta: python scripts/track.py")
         return 0
     else:

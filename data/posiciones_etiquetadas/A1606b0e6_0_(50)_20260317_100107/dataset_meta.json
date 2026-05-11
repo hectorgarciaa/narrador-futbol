@@ -1,9 +1,9 @@
 {
   "created_at": "2026-03-17T10:01:08.685549",
   "match_id": "A1606b0e6_0_(50)",
-  "video_path": "/Users/carloscole/narrador-futbol/data/partidosPosiciones/A1606b0e6_0 (50).mp4",
-  "tracks_path": "/Users/carloscole/narrador-futbol/output/tracks_json/tracker/A1606b0e6_0_50_tracks.json",
-  "labels_json_path": "/Users/carloscole/narrador-futbol/data/posiciones_etiquetadas/labels/A1606b0e6_0_(50)_labels_every_6s.json",
+  "video_path": "data/partidosPosiciones/A1606b0e6_0 (50).mp4",
+  "tracks_path": "output/tracks_json/tracker/A1606b0e6_0_50_tracks.json",
+  "labels_json_path": "data/posiciones_etiquetadas/labels/A1606b0e6_0_(50)_labels_every_6s.json",
   "label_every_seconds": 6.0,
   "label_start_seconds": 0.56,
   "label_window_frames": 20,

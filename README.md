@@ -66,8 +66,7 @@ narrador-futbol/
 │
 ├── football_ai/            # Paquete principal (toda la lógica de negocio)
 │   ├── core/               # Configuración, logging, serialización
-│   ├── actions/            # Utilidades históricas/offline de PathCRF
-│   ├── actions_incremental/ # Flujo activo de acciones online con estado por slot + runtime PathCRF
+│   ├── actions/            # Adaptador + inferencia PathCRF offline y rolling live
 │   ├── detection/          # Wrapper YOLO + cabeza DetectR8 para balón
 │   ├── positions/          # Lógica de roles posicionales y estabilización online
 │   ├── bytetrack/         # Fase ByteTrack desacoplada (packet IDENTIFICATION -> BYTETRACK)
@@ -94,7 +93,7 @@ narrador-futbol/
 │   ├── partidoPrueba/      # Vídeos de partido para tracking/detección
 │   └── partidosPosiciones/ # Clips para construir dataset de roles posicionales
 │
-├── models/                 # Pesos de modelos (no versionados, ver models/README.md)
+├── models/                 # Pesos y checkpoints del proyecto (ver models/README.md)
 │   ├── yolo/               # Modelos base YOLOv8 y YOLOv11
 │   ├── finetuning/         # Modelo fine-tuned de jugadores
 │   └── finetuning-balon/   # Modelo fine-tuned de balón
@@ -244,11 +243,13 @@ pip install -e .
 
 ### Paso 5: Configurar variables de entorno
 ```bash
-# Copia .env.example a .env
+# Copia .env.example a .env solo si necesitas credenciales o overrides locales
 cp .env.example .env
 
-# Edita .env con tu API key de Roboflow
-# ROBOFLOW_API_KEY=<tu_clave_aqui>
+# Variables opcionales:
+# ROBOFLOW_API_KEY=<tu_clave_aqui>          # solo para descargar datasets
+# ELEVENLABS_API_KEY=<tu_clave_aqui>        # solo para ElevenLabs
+# LLAMA_CPP_BASE_URL=http://127.0.0.1:8001 # si reutilizas un llama.cpp ya levantado
 ```
 
 ### Paso 6: Verificar la instalación
@@ -259,14 +260,89 @@ python verify_setup.py
 # Debería mostrar 8/9 o 9/9 chequeos pasados (el .env needs API key es warning, no error)
 ```
 
-### Paso 7: Descargar modelos y datos (opcional pero recomendado)
+### Paso 7: Descargar modelos y datos
+
+El runtime por defecto no usa el YOLO base descargable. Usa el fine-tuned:
+
+```text
+models/finetuning/yolov11m/weights/best.pt
+```
+
+Ese archivo pesa ~39 MB y se puede versionar en GitHub sin Git LFS. El `.gitignore` ya permite trackear precisamente ese checkpoint si queréis dejarlo como artefacto oficial de la rama.
+
+Opciones válidas:
+- preferida para una rama reproducible: versionar `models/finetuning/yolov11m/weights/best.pt`
+- alternativa: copiar ese checkpoint manualmente en esa ruta tras clonar
+- fallback explícito: cambiar `paths.models.modelo_base` a otro peso válido
+
+Los modelos base descargables siguen siendo útiles para pruebas, entrenamiento o para ese fallback, pero no son el detector por defecto del tracking actual.
+
 ```bash
-# Descargar modelos YOLO base desde Ultralytics
+# Descargar modelos YOLO base de referencia
 python scripts/data/download_models.py
 
-# Descargar dataset de detección desde Roboflow (requiere ROBOFLOW_API_KEY válida)
+# Descargar dataset de detección desde Roboflow (opcional; requiere ROBOFLOW_API_KEY válida)
 python scripts/data/download_datasets.py
 ```
+
+Nota:
+- `download_models.py` no deja listo por sí solo el runtime por defecto.
+- Si no vais a versionar `models/finetuning/yolov11m/weights/best.pt`, hay que copiarlo manualmente o sobrescribir `paths.models.modelo_base`.
+
+### Paso 7.1: Assets de runtime
+
+#### PathCRF (`external/pathcrf`)
+
+Con la configuración actual es obligatorio, porque `tracking.actions.enabled: true` y el pipeline espera ese checkout para la detección de acciones.
+
+No basta con copiar solo el checkpoint a `models/`: el runtime actual importa módulos del repo externo (`models.utils`, `inference`, `datatools.postprocess`), lee `saved/<trial>/args.json` y carga el checkpoint dentro de ese trial. Por eso, hoy es mejor mantener `PathCRF` como repo externo clonado en `external/pathcrf`.
+
+```bash
+git clone <ruta-o-fork-de-pathcrf> external/pathcrf
+```
+
+La ruta configurada por defecto espera el trial en:
+
+```text
+external/pathcrf/saved/120/model/state_dict_best_acc.pt
+```
+
+#### `llama.cpp` local (`external/llama.cpp/config.yaml`)
+
+Con la configuración actual es obligatorio salvo que sobrescribas `tracking.commentary.llm_base_url` o arranques la interfaz con otro backend explícito.
+
+```bash
+mkdir -p external/llama.cpp
+cat > external/llama.cpp/config.yaml <<'YAML'
+server:
+  executable: /ruta/a/llama-server
+  host: 127.0.0.1
+  port: 8081
+model:
+  path: /ruta/al/modelo.gguf
+YAML
+```
+
+Después ajusta:
+- `server.executable` a tu binario `llama-server`
+- `model.path` al GGUF real que quieras servir
+
+Si prefieres no usar `external/llama.cpp`, puedes:
+- usar `--commentary-backend ollama`, o
+- exportar `LLAMA_CPP_BASE_URL=http://host:puerto`
+
+#### Assets demasiado pesados para GitHub normal
+
+Estos assets no conviene meterlos en git normal porque superan claramente los `100 MB` por archivo o dependen de repos externos:
+
+- `models/pnlcalib/SV_kp` y `models/pnlcalib/SV_lines`
+- `models/gguf/**/*.gguf`
+- `external/pathcrf` completo
+
+Estado actual recomendado:
+- `PnLCalib`: el runtime clona `external/pnlcalib` y descarga automáticamente `SV_kp` y `SV_lines` en `models/pnlcalib/`
+- `PathCRF`: mantenerlo como repo externo en `external/pathcrf`, porque el runtime necesita código + `args.json` + checkpoint, no solo pesos
+- `GGUF`: descargarlo/manualmente o gestionarlo fuera del repo principal
 
 ### Paso 8: Descargar dataset sintético SoccerSynth (SpiideoSynLoc)
 Para obtener un modelo YOLO más robusto, se recomienda pre-entrenarlo con el dataset sintético SoccerSynth. Su descarga es manual:
@@ -316,7 +392,7 @@ Ahora el proyecto incluye una interfaz web ligera en `interfaz/` para:
 - elegir modo de comentarios `live` o `deferred` (por defecto `live`)
 - lanzar `scripts/track.py` automáticamente con un `lineup_spec.json`
 - arrancar automáticamente el servidor local de comentarios y precalentar un `intro` al abrir la interfaz
-- intentar lanzar automáticamente el backend LLM configurado; por defecto usa `llama.cpp` leyendo `llama.cpp/config.yaml`
+- intentar lanzar automáticamente el backend LLM configurado; por defecto usa `llama.cpp` leyendo `external/llama.cpp/config.yaml`
 - dejar la interfaz disponible enseguida y mover el warmup de Gemma/XTTS a segundo plano
 - bloquear el resto del formulario hasta que los dos nombres de equipo estén completos
 - no rehacer las tarjetas mientras estás escribiendo el segundo equipo, para que el foco no se pierda a mitad de edición
@@ -336,10 +412,10 @@ http://127.0.0.1:8767
 
 La interfaz guarda un spec por ejecución en `output/interfaz/runs/<run_id>/lineup_spec.json` y llama a `scripts/track.py --lineup-spec ...`. El `<run_id>` ya no es un hash opaco: incluye fecha/hora local, equipos, vídeo y un sufijo corto, por ejemplo `20260413-153012_madrid-vs-barcelona_video-prueba-ajustado_a1b2`.
 También deja el manifiesto de comentarios en `output/interfaz/runs/<run_id>/commentaries/events_manifest.jsonl`; en `live` intenta reproducir el `intro` precalentado nada más guardar y, cuando el tracking termina, ensambla una pista diferida desde ese manifiesto para incrustarla en el MP4 final. Además, cuando la ejecución nace desde la interfaz, el subprocess de tracking activa un bridge incremental `tracking -> PathCRF -> servidor de comentarios` solo para ese run, de modo que los scripts sueltos del repo siguen sin ejecutar PathCRF ni comentar jugadas automáticamente.
-Ese bridge descarta reenvíos casi idénticos de PathCRF, guarda comentarios de texto aunque el audio esté ocupado y solo pide un nuevo WAV si la acción cae fuera de la ventana temporal ocupada por la generación + duración del audio anterior. Los eventos que ocurren mientras suena otro audio no quedan en cola sonora: permanecen en el manifiesto como texto. El flujo activo de acciones usa `football_ai/actions_incremental`: mantiene estado causal por slot (`n-1` congelados, actualización solo del frame `n`) y ejecuta PathCRF online sin reconstruir ventanas completas. Las acciones se etiquetan además con zona de campo (`iniciacion`, `creacion`, `finalizacion`) según el tercio del largo y la dirección de ataque del equipo; las acciones en finalización y los tiros tienen prioridad alta, y algunas acciones en iniciación pueden disparar un comentario de contexto generado por el LLM con datos tácticos de la alineación y clasificación simulada. Si ese comentario contextual está sonando y aparece un tiro o gol, el nuevo audio se marca como interrupción y la interfaz corta el comentario anterior. La pista diferida tampoco desplaza WAV antiguos hacia delante; omite los audios que se solaparían y, si un tiro/gol pisa un contexto interruptible, conserva la acción peligrosa y descarta ese contexto de la pista sonora. El servidor de comentarios sigue omitiendo duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo). El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC` y se limita a `1080p`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores mostraban en negro los exports demasiado grandes.
+Ese bridge descarta reenvíos casi idénticos de PathCRF, guarda comentarios de texto aunque el audio esté ocupado y solo pide un nuevo WAV si la acción cae fuera de la ventana temporal ocupada por la generación + duración del audio anterior. Los eventos que ocurren mientras suena otro audio no quedan en cola sonora: permanecen en el manifiesto como texto. El flujo activo de acciones usa `football_ai/actions/rolling.py`: mantiene una ventana bounded, lanza checkpoints asíncronos y consolida eventos con `postprocess_emit_block`. Las acciones se etiquetan además con zona de campo (`iniciacion`, `creacion`, `finalizacion`) según el tercio del largo y la dirección de ataque del equipo; las acciones en finalización y los tiros tienen prioridad alta, y algunas acciones en iniciación pueden disparar un comentario de contexto generado por el LLM con datos tácticos de la alineación y clasificación simulada. Si ese comentario contextual está sonando y aparece un tiro o gol, el nuevo audio se marca como interrupción y la interfaz corta el comentario anterior. La pista diferida tampoco desplaza WAV antiguos hacia delante; omite los audios que se solaparían y, si un tiro/gol pisa un contexto interruptible, conserva la acción peligrosa y descarta ese contexto de la pista sonora. El servidor de comentarios sigue omitiendo duplicados consecutivos del mismo evento semántico básico (`action` + `player_name` + equipo). El MP4 final que sirve la interfaz se reexporta además como `H.264/AAC` y se limita a `1080p`, porque el tracking base seguía escribiendo `mp4v` y algunos navegadores mostraban en negro los exports demasiado grandes.
 La interfaz intenta usar dos comentaristas cuando existen referencias de Qwen VoiceDesign cacheadas: mantiene XTTS como backend estable y elige entre la voz masculina y la femenina con aleatoriedad controlada, sin permitir mas de tres comentarios seguidos de la misma voz.
-Si `--commentary-backend auto` no se toca, la interfaz intenta usar `llama.cpp` cuando existe `llama.cpp/config.yaml`; si no, cae a `ollama`. Si `--commentary-base-url` apunta a una URL local, la interfaz intenta arrancar ese backend localmente; si apuntas a un backend remoto, ese autoarranque no se intenta.
-El fichero `llama.cpp/config.yaml` fija el binario `llama-server`, el alias expuesto por la API y el GGUF que se cargará al abrir la interfaz.
+Si `--commentary-backend auto` no se toca, la interfaz intenta usar `llama.cpp` cuando existe `external/llama.cpp/config.yaml`; si no, cae a `ollama`. Si `--commentary-base-url` apunta a una URL local, la interfaz intenta arrancar ese backend localmente; si apuntas a un backend remoto, ese autoarranque no se intenta.
+El fichero `external/llama.cpp/config.yaml` fija el binario `llama-server`, el alias expuesto por la API y el GGUF que se cargará al abrir la interfaz.
 Ese precalentado ya no bloquea el arranque visible de la UI: la interfaz HTTP sube primero y el warmup de Gemma/XTTS sigue en segundo plano.
 
 Cuando el tracker estabiliza los slots:
@@ -597,7 +673,7 @@ Para `player/goalkeeper` con homografía disponible, la reasignación canónica 
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
 En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida. También puedes activar `visualization.four_panel_enabled=true` para generar una salida 2x2 de depuración (tracking compacto, mapa de campo, YOLO descartadas y continuidad), incluyendo el indicador de posesión en los paneles.
-Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `models/reference_points/pnlcalib_repo/` y descarga sus pesos automáticamente. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
+Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `external/pnlcalib/` y descarga sus pesos automáticamente en `models/pnlcalib/`. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
 
 ### Detección básica
 ```bash
@@ -660,8 +736,8 @@ jupyter lab experiments/reference_points/pnlcalib_reference_points.ipynb
 ```
 
 Ese notebook:
-- clona `PnLCalib` bajo `models/reference_points/pnlcalib_repo/` si no existe;
-- descarga los pesos `SV_kp` y `SV_lines` desde GitHub Releases;
+- clona `PnLCalib` bajo `external/pnlcalib/` si no existe;
+- descarga los pesos `SV_kp` y `SV_lines` en `models/pnlcalib/`;
 - detecta keypoints y líneas del campo con los modelos originales del repositorio;
 - estima homografía `imagen -> campo`, hace warp a bird-eye y proyecta tracks al campo 2D reescalando sus coordenadas a la resolución real del frame usado por la homografía.
 
@@ -852,7 +928,7 @@ Este modo ejecuta `ActionsRuntime` causal:
 python scripts/actions/compare_pathcrf_modes.py output/tracks_json/tracker/partido_corto_tracks.json
 ```
 
-Este script está pensado para depurar divergencias entre el adaptador offline histórico (`football_ai.actions`) y el flujo online actual (`football_ai.actions_incremental`).
+Este script está pensado para depurar divergencias entre el adaptador offline histórico (`football_ai.actions`) y el flujo rolling actual (`football_ai.actions.rolling`).
 En la rama incremental actual, el warmup intenta parecerse más al legacy en dos puntos que sesgaban mucho la comparación: la primera observación real de cada slot se ancla sin arrastrarla con la seed/template y `ball_x/ball_y` vuelve a exportarse vacío para no meter un balón sintético fijo en el centro.
 
 Genera en `output/actions/pathcrf_compare/<video>/`:

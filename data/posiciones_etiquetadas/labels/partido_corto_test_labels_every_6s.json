@@ -2,7 +2,7 @@
   "schema_version": 2,
   "created_at": "2026-03-12T13:06:24.555396",
   "match_id": "partido_corto",
-  "video_path": "/Users/carloscole/narrador-futbol/data/partidoPrueba/partido_corto.mp4",
+  "video_path": "data/partidoPrueba/partido_corto.mp4",
   "fps": 25.0,
   "label_every_seconds": 6.0,
   "label_start_seconds": 0.0,

@@ -14,12 +14,7 @@ paths:
     yolo_v11_l: "models/yolo/v11/yolo11l.pt"
     yolo_v11_x: "models/yolo/v11/yolo11x.pt"
 
-
-    # El tracking principal consume `modelo_base`.
-    # Por defecto usamos el detector fine-tuned de jugadores.
-    # modelo_base: "models/yolo/v11/yolo11m.pt"
     modelo_base: "models/finetuning/yolov11m/weights/best.pt"
-    # modelo_base: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_ball: "models/finetuning-balon/v11/yolo11m/weights/best.pt"
   
@@ -108,7 +103,67 @@ team_detector:
 
 # Configuración de tracking (ByteTrack)
 tracking:
-  lineup_spec: "output/interfaz/runs/10246f76b26d/lineup_spec.json"  # Fallback de --lineup-spec (ruta relativa a la raiz del proyecto)
+  lineup_spec:
+    teams:
+      - formation: "4-3-3"
+        pitch_layout:
+          DC: {x: 50, y: 14}
+          DFC_DER: {x: 62, y: 72}
+          DFC_IZQ: {x: 38, y: 72}
+          ED: {x: 80, y: 20}
+          EI: {x: 20, y: 20}
+          LD: {x: 82, y: 72}
+          LI: {x: 18, y: 72}
+          MC: {x: 50, y: 44}
+          MD: {x: 72, y: 48}
+          MI: {x: 28, y: 48}
+          POR: {x: 50, y: 90}
+        players_by_slot:
+          DC: "Benzema"
+          DFC_DER: "Alaba"
+          DFC_IZQ: "Militao"
+          ED: "Valverde"
+          EI: "Vini"
+          LD: "Carvajal"
+          LI: "Mendy"
+          MC: "Casemiro"
+          MD: "Modric"
+          MI: "Kross"
+          POR: "Courtois"
+        team_color: "#ffffff"
+        team_name: "Real Madrid"
+        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
+        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
+      - formation: "4-3-3"
+        pitch_layout:
+          DC: {x: 50, y: 14}
+          DFC_DER: {x: 62, y: 72}
+          DFC_IZQ: {x: 38, y: 72}
+          ED: {x: 80, y: 20}
+          EI: {x: 20, y: 20}
+          LD: {x: 82, y: 72}
+          LI: {x: 18, y: 72}
+          MC: {x: 50, y: 44}
+          MD: {x: 72, y: 48}
+          MI: {x: 28, y: 48}
+          POR: {x: 50, y: 90}
+        players_by_slot:
+          DC: "Mane"
+          DFC_DER: "Konate"
+          DFC_IZQ: "Virgil"
+          ED: "Salah"
+          EI: "Luis Diaz"
+          LD: "Arnold"
+          LI: "Robertson"
+          MC: "Fabinho"
+          MD: "Henderson"
+          MI: "Thiago"
+          POR: "Victor Valdes"
+        team_color: "#FF0000"
+        team_name: "Liverpool"
+        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
+        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
+    video_source: "video_prueba_medio"
   print_runtime_devices: true  # Si true, imprime el dispositivo efectivo real de PnLCalib y frame hook (cuda/cpu)
 
   projector:
@@ -172,7 +227,6 @@ tracking:
     field_position_classes: ["player", "goalkeeper"]
     
     field_distance_gate_m: 8.0
-    field_distance_weight: 0.5
     field_distance_weight: 0.25 # 0.5
     field_distance_gate_max_lost_frames: 10
     field_distance_gate_cap_m: 8.0

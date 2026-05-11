@@ -35,5 +35,5 @@
     "vx",
     "vy"
   ],
-  "sources_log_path": "/Users/carloscole/narrador-futbol/data/posiciones_etiquetadas/common/sources.jsonl"
+  "sources_log_path": "data/posiciones_etiquetadas/common/sources.jsonl"
 }

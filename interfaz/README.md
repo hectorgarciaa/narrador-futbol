@@ -11,7 +11,7 @@ Interfaz web ligera para preparar alineaciones y lanzar el tracking del partido.
 - guarda un `lineup_spec.json` por ejecución
 - lanza `scripts/track.py --lineup-spec ...`
 - arranca automáticamente el servidor de comentarios al abrir la interfaz
-- por defecto intenta usar `llama.cpp` leyendo `llama.cpp/config.yaml` y lanza `llama-server` automáticamente antes de precalentar el `intro`
+- por defecto intenta usar `llama.cpp` leyendo `external/llama.cpp/config.yaml` y lanza `llama-server` automáticamente antes de precalentar el `intro`
 - el precalentado del `intro` y del servidor de comentarios corre en segundo plano, así que la interfaz HTTP queda disponible sin esperar a XTTS ni al primer warmup de Gemma
 - permite elegir modo de comentarios `live` o `deferred` (por defecto `live`)
 - precalienta un comentario de `intro` al arrancar la interfaz para que ya esté listo al guardar la alineación
@@ -45,9 +45,9 @@ Nota:
 
 - la interfaz expone también respuestas `HEAD` para mejorar compatibilidad con navegadores como Safari;
 - si trabajas en una máquina remota, `127.0.0.1` debe estar reenviado a tu equipo local o abrirse con la IP/host remotos.
-- `--commentary-backend auto` intenta usar `llama.cpp` si existe `llama.cpp/config.yaml`; si no, cae a `ollama`.
+- `--commentary-backend auto` intenta usar `llama.cpp` si existe `external/llama.cpp/config.yaml`; si no, cae a `ollama`.
 - el autoarranque del backend LLM solo se intenta cuando `--commentary-base-url` apunta a una URL local; si apuntas a un backend remoto, la interfaz solo lo reutiliza.
-- la configuración de `llama.cpp` vive en `llama.cpp/config.yaml`; ahí se fija el binario `llama-server`, el alias, el puerto y el GGUF a cargar.
+- la configuración de `llama.cpp` vive en `external/llama.cpp/config.yaml`; ahí se fija el binario `llama-server`, el alias, el puerto y el GGUF a cargar.
 
 ## Qué genera
 

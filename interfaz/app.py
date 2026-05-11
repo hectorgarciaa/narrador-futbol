@@ -1337,7 +1337,7 @@ def parse_args():
         default="auto",
         help=(
             "Backend LLM para el servidor de comentarios. "
-            "`auto` usa `llama.cpp` si existe `llama.cpp/config.yaml`; "
+            "`auto` usa `llama.cpp` si existe `external/llama.cpp/config.yaml`; "
             "si no, cae a `ollama`."
         ),
     )

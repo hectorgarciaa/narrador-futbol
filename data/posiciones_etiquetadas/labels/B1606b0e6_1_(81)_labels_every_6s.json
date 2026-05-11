@@ -2,7 +2,7 @@
   "schema_version": 2,
   "created_at": "2026-03-17T11:39:38.600684",
   "match_id": "B1606b0e6_1_(81)",
-  "video_path": "/Users/carloscole/narrador-futbol/data/partidosPosiciones/B1606b0e6_1 (81).mp4",
+  "video_path": "data/partidosPosiciones/B1606b0e6_1 (81).mp4",
   "fps": 25.0,
   "label_every_seconds": 6.0,
   "label_start_seconds": 0.52,

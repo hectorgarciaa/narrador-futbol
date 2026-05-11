@@ -1,6 +1,6 @@
 # models
 
-Directorio de modelos de machine learning. En general, los archivos de pesos grandes (`.pt`) no se versionan en git por su tamaño. La excepción actual es el checkpoint del Set Transformer de roles, que sí se puede versionar porque su tamaño es reducido.
+Directorio de modelos de machine learning. Algunos checkpoints del runtime sí se pueden versionar en git porque están por debajo de `100 MB`; otros assets pesados se descargan o preparan fuera del repo principal.
 
 ## Estructura esperada
 
@@ -41,12 +41,16 @@ Referenciados en `config.yaml` como `paths.models.yolo_v8_m`, `yolo_v11_m`, etc.
 Modelo YOLO fine-tuned sobre el dataset de Roboflow para detectar las 4 clases específicas: `player`, `goalkeeper`, `referee`, `ball`. Usado por `Tracker` como detección principal.
 
 Referenciado en `config.yaml` como `paths.models.finetuned_player`.
+Actualmente `paths.models.modelo_base` apunta también a este peso fine-tuned, así que debe existir en el clon antes de arrancar el tracking.
+Ese checkpoint concreto (`models/finetuning/yolov11m/weights/best.pt`) pesa ~39 MB, así que puede versionarse directamente en GitHub; el `.gitignore` del repo ya lo deja pasar como excepción.
+También puede versionarse `models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt`, que tiene un tamaño parecido.
 
 ### Modelo fine-tuned de balón (`finetuning-balon/`)
 
 Modelo YOLO fine-tuned específicamente para detección de balón, entrenado con `DetectR8` (cabeza con `reg_max=8` en lugar de 16). Optimizado para detectar objetos pequeños con mayor precisión.
 
 Referenciado en `config.yaml` como `paths.models.finetuned_ball`.
+La ruta configurada actualmente no existe en este clon, así que este asset sigue siendo pendiente de poblar o documentar aparte.
 
 ### Modelo posicional Set Transformer (`positions/set_transformer/`)
 
@@ -71,6 +75,8 @@ python scripts/data/download_models.py
 ```
 
 Este script usa `YOLO(nombre)` de Ultralytics que descarga automáticamente desde los servidores de Ultralytics si el modelo no está en caché, y lo guarda en la ruta correcta.
+
+En la rama actual también puede versionarse directamente `models/yolo/v11/yolo11m.pt`, porque pesa ~40 MB.
 
 ### Modelos fine-tuned (generación manual)
 
@@ -99,4 +105,12 @@ En la configuración actual, el tracking principal lee `paths.models.modelo_base
 models/finetuning/yolov11m/weights/best.pt
 ```
 
-Los pesos base de `models/yolo/` se mantienen para descargas/referencias, pero no son el detector por defecto del pipeline de tracking.
+Si quieres usar otro peso, cambia explícitamente `paths.models.modelo_base` o pasa `--model-path` al script correspondiente.
+
+## Assets pesados fuera de git normal
+
+- `models/pnlcalib/SV_kp`
+- `models/pnlcalib/SV_lines`
+- `models/gguf/**/*.gguf`
+
+`PnLCalib` se resuelve en runtime: el código clona `external/pnlcalib` y descarga esos pesos en `models/pnlcalib/` cuando hacen falta.

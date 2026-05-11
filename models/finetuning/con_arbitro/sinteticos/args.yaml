@@ -1,6 +1,6 @@
 task: detect
 mode: train
-model: /home/hegarc04/narrador-futbol/models/yolo/v11/yolo11m.pt
+model: models/yolo/v11/yolo11m.pt
 data: data/detection/SoccerSynth_YOLO/data.yaml
 epochs: 20
 time: null
@@ -106,4 +106,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: /home/hegarc04/narrador-futbol/runs/detect/models/finetuning/sinteticos
+save_dir: runs/detect/models/finetuning/sinteticos
