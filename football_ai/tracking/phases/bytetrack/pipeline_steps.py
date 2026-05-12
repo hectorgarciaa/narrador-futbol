@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from supervision.tracker.byte_tracker import matching
+from scipy.optimize import linear_sum_assignment
 from supervision.tracker.byte_tracker.single_object_track import STrack, TrackState
 
 from .utils import joint_tracks, remove_duplicate_tracks, sub_tracks
@@ -18,77 +18,103 @@ class ByteTrackPipelineSteps:
                 tracked_tracks.append(track)
         return tracked_tracks, unconfirmed
 
-    def _associate_high_confidence(
+    def _solve_phase_matches(
         self,
-        strack_pool,
-        detections,
+        tracks: list[STrack],
+        detections: list[STrack],
         *,
-        activated_tracks,
-        refound_tracks,
-    ):
-        first_costs = self._build_association_costs(
-            strack_pool,
+        phase_name: str,
+        cost_mode: str,
+        threshold: float | None,
+    ) -> tuple[list[tuple[int, int]], list[int], list[int], dict[str, object]]:
+        match_data = self._build_phase_match_data(
+            tracks,
             detections,
-            include_team_penalty=True,
-            include_fuse_score=True,
-            use_field_positions=True,
+            phase_name=phase_name,
+            cost_mode=cost_mode,
         )
-        matches, u_track, u_detection = matching.linear_assignment(
-            first_costs["final_costs"],
-            thresh=self.minimum_matching_threshold,
-        )
-        for itracked, idet in matches:
-            track = strack_pool[itracked]
-            det = detections[idet]
-            self._set_detection_debug_reason(
-                getattr(det, "raw_det_idx", None),
-                "matched_existing_track_high",
-                class_name=getattr(det, "class_name", None),
-                confidence=getattr(det, "score", None),
-                stage="first_association",
-                tracker_id=getattr(track, "external_track_id", None),
-            )
-            self._apply_match(
-                track,
-                det,
-                activated_tracks=activated_tracks,
-                refound_tracks=refound_tracks,
-            )
-        return u_track, u_detection
+        feasible_mask = match_data["feasible_mask"]
+        base_cost = match_data["base_cost"]
+        matches: list[tuple[int, int]] = []
 
-    def _associate_low_confidence(
-        self,
-        strack_pool,
-        u_track,
-        detections_second,
-        *,
-        activated_tracks,
-        refound_tracks,
-        lost_tracks,
-    ):
-        remaining_tracked_tracks = [
-            strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked
+        row_indices = [i for i in range(len(tracks)) if bool(feasible_mask[i].any())]
+        col_indices = [j for j in range(len(detections)) if bool(feasible_mask[:, j].any())]
+
+        if row_indices and col_indices:
+            row_lookup = {track_idx: offset for offset, track_idx in enumerate(row_indices)}
+            col_lookup = {det_idx: offset for offset, det_idx in enumerate(col_indices)}
+            sub_cost = np.full(
+                (len(row_indices), len(col_indices)),
+                self.large_match_cost,
+                dtype=np.float32,
+            )
+            for track_idx in row_indices:
+                feasible_det_indices = np.where(feasible_mask[track_idx])[0].tolist()
+                for det_idx in feasible_det_indices:
+                    sub_cost[row_lookup[track_idx], col_lookup[det_idx]] = base_cost[
+                        track_idx, det_idx
+                    ]
+
+            row_ind, col_ind = linear_sum_assignment(sub_cost)
+            for row_offset, col_offset in zip(row_ind.tolist(), col_ind.tolist()):
+                track_idx = row_indices[row_offset]
+                det_idx = col_indices[col_offset]
+                if not bool(feasible_mask[track_idx, det_idx]):
+                    continue
+                cost = float(base_cost[track_idx, det_idx])
+                if cost >= self.large_match_cost:
+                    continue
+                if threshold is not None and cost > float(threshold):
+                    continue
+                matches.append((track_idx, det_idx))
+
+        matched_track_indices = {track_idx for track_idx, _ in matches}
+        matched_det_indices = {det_idx for _, det_idx in matches}
+        unmatched_track_indices = [
+            index for index in range(len(tracks)) if index not in matched_track_indices
         ]
-        second_costs = self._build_association_costs(
-            remaining_tracked_tracks,
-            detections_second,
-            include_team_penalty=False,
-            include_fuse_score=False,
-            use_field_positions=True,
+        unmatched_det_indices = [
+            index for index in range(len(detections)) if index not in matched_det_indices
+        ]
+
+        self._collect_phase_matching_debug(
+            phase_name=phase_name,
+            tracks=tracks,
+            detections=detections,
+            match_data=match_data,
+            matches=matches,
+            threshold=threshold,
         )
-        matches, remaining_u_track, u_detection_second = matching.linear_assignment(
-            second_costs["final_costs"],
-            thresh=self.second_match_threshold,
+        return matches, unmatched_track_indices, unmatched_det_indices, match_data
+
+    def _associate_confirmed_phase(
+        self,
+        tracks: list[STrack],
+        detections: list[STrack],
+        *,
+        phase_name: str,
+        cost_mode: str,
+        threshold: float | None,
+        activated_tracks,
+        refound_tracks,
+        reason: str,
+    ) -> tuple[list[STrack], list[STrack]]:
+        matches, unmatched_track_indices, unmatched_det_indices, _ = self._solve_phase_matches(
+            tracks,
+            detections,
+            phase_name=phase_name,
+            cost_mode=cost_mode,
+            threshold=threshold,
         )
-        for itracked, idet in matches:
-            track = remaining_tracked_tracks[itracked]
-            det = detections_second[idet]
+        for track_idx, det_idx in matches:
+            track = tracks[track_idx]
+            det = detections[det_idx]
             self._set_detection_debug_reason(
                 getattr(det, "raw_det_idx", None),
-                "matched_existing_track_low",
+                reason,
                 class_name=getattr(det, "class_name", None),
                 confidence=getattr(det, "score", None),
-                stage="second_association",
+                stage=phase_name,
                 tracker_id=getattr(track, "external_track_id", None),
             )
             self._apply_match(
@@ -97,81 +123,55 @@ class ByteTrackPipelineSteps:
                 activated_tracks=activated_tracks,
                 refound_tracks=refound_tracks,
             )
-        for it in remaining_u_track:
-            track = remaining_tracked_tracks[it]
-            if track.state != TrackState.Lost:
-                track.state = TrackState.Lost
-                lost_tracks.append(track)
-        return u_detection_second
+        return (
+            [tracks[index] for index in unmatched_track_indices],
+            [detections[index] for index in unmatched_det_indices],
+        )
 
-    def _associate_unconfirmed(
+    def _associate_unconfirmed_phase(
         self,
-        unconfirmed,
-        detections,
+        tracks: list[STrack],
+        detections: list[STrack],
         *,
+        phase_name: str,
+        cost_mode: str,
+        threshold: float | None,
         activated_tracks,
-        removed_tracks,
-    ):
-        unconfirmed_costs = self._build_association_costs(
-            unconfirmed,
+        reason: str,
+    ) -> tuple[list[STrack], list[STrack], list[STrack]]:
+        matches, unmatched_track_indices, unmatched_det_indices, _ = self._solve_phase_matches(
+            tracks,
             detections,
-            include_team_penalty=False,
-            include_fuse_score=True,
-            use_field_positions=self.use_field_positions_for_unconfirmed,
+            phase_name=phase_name,
+            cost_mode=cost_mode,
+            threshold=threshold,
         )
-        matches, u_unconfirmed, u_detection = matching.linear_assignment(
-            unconfirmed_costs["final_costs"],
-            thresh=self.unconfirmed_match_threshold,
-        )
-        self._collect_unconfirmed_association_debug(
-            unconfirmed=unconfirmed,
-            detections=detections,
-            iou_costs=unconfirmed_costs["iou_costs"],
-            class_penalties=unconfirmed_costs["class_penalties"],
-            bbox_size_penalties=unconfirmed_costs["bbox_size_penalties"],
-            after_bbox_costs=unconfirmed_costs["after_bbox_costs"],
-            after_field_costs=unconfirmed_costs["after_field_costs"],
-            after_fuse_costs=unconfirmed_costs["after_fuse_costs"],
-            final_costs=unconfirmed_costs["final_costs"],
-            matches=matches,
-            threshold=self.unconfirmed_match_threshold,
-        )
-
-        accepted_unconfirmed_tracks = []
-        for itracked, idet in matches:
-            track = unconfirmed[itracked]
-            det = detections[idet]
+        accepted_tracks = []
+        for track_idx, det_idx in matches:
+            track = tracks[track_idx]
+            det = detections[det_idx]
             self._set_detection_debug_reason(
                 getattr(det, "raw_det_idx", None),
-                "matched_unconfirmed_track",
+                reason,
                 class_name=getattr(det, "class_name", None),
                 confidence=getattr(det, "score", None),
-                stage="unconfirmed_association",
+                stage=phase_name,
                 tracker_id=getattr(track, "external_track_id", None),
             )
             track.update(det, self.frame_id)
             self._apply_track_metadata(track, det)
             activated_tracks.append(track)
-            accepted_unconfirmed_tracks.append(track)
-
-        for it in u_unconfirmed:
-            track = unconfirmed[it]
-            track.state = TrackState.Removed
-            removed_tracks.append(track)
-
-        surviving_unconfirmed_tracks = [
-            track
-            for track in accepted_unconfirmed_tracks
-            if getattr(track, "state", None) == TrackState.Tracked
-            and not bool(getattr(track, "is_activated", False))
-        ]
-        return u_detection, surviving_unconfirmed_tracks
+            accepted_tracks.append(track)
+        return (
+            [tracks[index] for index in unmatched_track_indices],
+            [detections[index] for index in unmatched_det_indices],
+            accepted_tracks,
+        )
 
     def _activate_new_tracks(
         self,
-        detections,
-        u_detection,
-        surviving_unconfirmed_tracks,
+        detections: list[STrack],
+        surviving_unconfirmed_tracks: list[STrack],
         *,
         activated_tracks,
         refound_tracks,
@@ -181,19 +181,22 @@ class ByteTrackPipelineSteps:
             activated_tracks,
             refound_tracks,
         )
-        candidate_indices = [inew for inew in u_detection if detections[inew].score >= self.det_thresh]
-        filtered_candidate_indices, filter_reasons_by_index = self._filter_new_track_candidate_indices(
-            detections=detections,
-            candidate_indices=candidate_indices,
-            active_tracked_pool=active_tracked_pool,
-            reference_unconfirmed_pool=surviving_unconfirmed_tracks,
-            return_reasons=True,
+        candidate_indices = [
+            index for index, det in enumerate(detections) if det.score >= self.det_thresh
+        ]
+        filtered_candidate_indices, filter_reasons_by_index = (
+            self._filter_new_track_candidate_indices(
+                detections=detections,
+                candidate_indices=candidate_indices,
+                active_tracked_pool=active_tracked_pool,
+                reference_unconfirmed_pool=surviving_unconfirmed_tracks,
+                return_reasons=True,
+            )
         )
 
-        for inew in u_detection:
-            if inew in candidate_indices:
+        for index, det in enumerate(detections):
+            if index in candidate_indices:
                 continue
-            det = detections[inew]
             self._set_detection_debug_reason(
                 getattr(det, "raw_det_idx", None),
                 "below_new_track_init_threshold",
@@ -202,10 +205,10 @@ class ByteTrackPipelineSteps:
                 stage="new_track_init",
             )
 
-        for idx, reason in filter_reasons_by_index.items():
-            if idx in filtered_candidate_indices:
+        for index, reason in filter_reasons_by_index.items():
+            if index in filtered_candidate_indices:
                 continue
-            det = detections[idx]
+            det = detections[index]
             self._set_detection_debug_reason(
                 getattr(det, "raw_det_idx", None),
                 reason,
@@ -214,8 +217,8 @@ class ByteTrackPipelineSteps:
                 stage="new_track_filter",
             )
 
-        for inew in filtered_candidate_indices:
-            track = detections[inew]
+        for index in filtered_candidate_indices:
+            track = detections[index]
             track.activate(self.kalman_filter, self.frame_id)
             self._apply_track_metadata(track, track)
             self._set_detection_debug_reason(

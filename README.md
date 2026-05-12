@@ -1003,11 +1003,9 @@ tracking:
     ball: 1
     referee: 3
   # Anti-ID-switch por clase y movimiento
-  use_field_position_as_primary_cost: false
-  use_bbox_center_for_matching: false
-  bbox_center_distance_weight: 0.7
-  bbox_center_distance_gate_px: 120.0
-  bbox_size_mismatch_penalty: 1000.0
+  low_conf_threshold: 0.01
+  track_activation_threshold: 0.10
+  bbox_center_distance_gate_px: 90.0
   bbox_height_ratio_threshold: 0.20
   bbox_width_ratio_threshold: 0.30
   lost_time_penalty_weight: 0.12
@@ -1082,18 +1080,16 @@ Puntos importantes:
 Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/tracker.py` y `football_ai/bytetrack/byte_tracker.py`):
 
 - `max_total_tracks`
-- `team_mismatch_penalty`
 - `second_match_threshold`
 - `unconfirmed_match_threshold`
+- `low_conf_threshold`
+- `track_activation_threshold`
 - `reassign_motion_factor`
 - `reassign_min_distance`
 - `reassign_min_samples`
 - `reassign_motion_growth_cap_frames` (solo aplica a clases sin homografía)
-- `use_field_position_as_primary_cost`
-- `use_bbox_center_for_matching`
-- `bbox_center_distance_weight`
 - `bbox_center_distance_gate_px`
-- `bbox_size_mismatch_penalty`
+- Valor baseline actual recomendado tras la auditoría larga de `ucl_30s`: `90.0`
 - `bbox_height_ratio_threshold`
 - `bbox_width_ratio_threshold`
 - `lost_time_penalty_weight`

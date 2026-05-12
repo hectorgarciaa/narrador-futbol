@@ -210,8 +210,8 @@ tracking:
         validation_target_field_coverage_ratio: 0.20
 
   bytetracker:
-    track_activation_threshold: 0.01
-    extra_conf_to_init_a_track: 0
+    track_activation_threshold: 0.10
+    low_conf_threshold: 0.01
     lost_track_buffer: 90
     minimum_matching_threshold: 0.945
     frame_rate: 25
@@ -219,15 +219,11 @@ tracking:
     new_track_active_overlap_iou: 0.2
     new_track_unconfirmed_overlap_iou: 0.1
     new_track_candidate_overlap_iou: 0.0
-    team_mismatch_penalty: 1000.0
     second_match_threshold: 0.9
     unconfirmed_match_threshold: 0.9
-    use_field_positions: true
-    use_field_positions_for_unconfirmed: true
     field_position_classes: ["player", "goalkeeper"]
     
     field_distance_gate_m: 8.0
-    field_distance_weight: 0.25 # 0.5
     field_distance_gate_max_lost_frames: 10
     field_distance_gate_cap_m: 8.0
     field_distance_growth_mode: linear_decay
@@ -235,19 +231,12 @@ tracking:
     field_distance_decay_per_frame: 0.3
     lost_time_penalty_weight: 0.12  # Peso de la penalización por tiempo perdido en el coste de matching
     lost_time_penalty_max_frames: 10  # Máximo número de frames perdidos para aplicar penalización en el coste de matching
-    use_field_position_as_primary_cost: false  # Si true, usa como coste principal la distancia en campo en lugar de IoU para player/goalkeeper. Recomendado si quieres usar señal visual y geométrica a la vez.
-    use_bbox_center_for_matching: false  # Si true, usa BB-Overlap en lugar de IoU para el coste de matching. Recomendado para detecciones con bounding boxes muy ajustados al jugador.
-    bbox_center_distance_weight: 0.7  # Peso de la distancia entre centros de bounding box en el coste de matching (si use_bbox_center_for_matching es false)
-    bbox_center_distance_gate_px: 120.0  # Distancia máxima en píxeles entre centros de bounding box para considerar un match (si use_bbox_center_for_matching es false)
-    class_mismatch_penalty: 1000.0  # Penalización fuerte por mismatch de clase en el matching interno
-    class_mismatch_relaxed_penalty: 180.0  # Penalización reducida si clase YOLO y clase reetiquetada discrepan (permite remapeos)
-    allow_class_remap_when_signals_disagree: true  # Si true, habilita la vía de remapeo cuando las dos señales de clase no coinciden
+    bbox_center_distance_gate_px: 90.0  # Baseline ganador tras auditoría larga en ucl_30s para rescates con IoU=0
     class_vote_weight_relabel: 1.0  # Peso del voto de clase reetiquetada (TeamDetector) en el consenso por track
     class_vote_weight_yolo: 1.0  # Peso del voto de clase original YOLO en el consenso por track
     class_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para permitir cambio de clase del track interno
-    bbox_size_mismatch_penalty: 1000.0  # Penalización por cambio brusco de tamaño entre bbox previa y bbox candidata
-    bbox_height_ratio_threshold: 0.50  # Penaliza si la altura cambia más de un 50%
-    bbox_width_ratio_threshold: 1  # Penaliza si el ancho cambia más de un 100%
+    bbox_height_ratio_threshold: 0.50  # Gate duro si la altura cambia más de un 50%
+    bbox_width_ratio_threshold: 1  # Gate duro si el ancho cambia más de un 100%
     team_vote_weight: 1.0  # Peso del voto de equipo observado en cada frame para consenso temporal por track
     team_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para cambiar el equipo canónico de un track
     max_tracks_per_class:   # Límite de tracks por clase en la salida final del tracker

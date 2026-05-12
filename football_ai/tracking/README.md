@@ -65,7 +65,7 @@ Por cada frame del vídeo:
    - Además, una detección actualmente relabelada como `player` o `referee` puede promocionarse a `goalkeeper` si su color de camiseta es un outlier robusto respecto a los dos equipos de campo y su `x` proyectada queda fuera del corredor delimitado por la tercera persona más a la izquierda y la tercera más a la derecha visibles en ese frame. Para evitar confundir linieres con porteros, esta promoción solo se permite si la detección queda a más de 3 metros de las bandas laterales.
 5. **BYTETRACK** (`football_ai.bytetrack.ByteTrackPhase.track_packet`): consume `IDENTIFICATION.clean` como fase desacoplada y emite `BYTETRACK`.
    - `clean` conserva todas las señales de `IDENTIFICATION` y añade `tracker_id`, `class_tracker`, `tracked_mask`, `tracked_count` y `tracked_detections`.
-   - `trace` publica `detection_debug` alineado por `det_id`, `unconfirmed_association_debug` y un resumen de entradas trackeadas/no trackeadas.
+   - `trace` publica `detection_debug` alineado por `det_id`, `matching_debug` por subfase (`high_iou`, `low_iou`, `unconfirmed_iou`, `high_bbox`, `low_bbox`, `unconfirmed_bbox`) y un resumen de entradas trackeadas/no trackeadas.
    - Esta fase ya no vive dentro de `tracking`: el tracker canónico la consume como entrada intermedia del pipeline.
 6. **CANONICALTRACK** (`football_ai.canonicaltrack.CanonicalTrackPhase.canonicalize_packet`): consume exclusivamente `BYTETRACK` y emite `CANONICALTRACK`.
    - `clean` publica `tracks_frame` por clase (`player`, `goalkeeper`, `referee`, `ball`), `summary` y `canonical_ids_in_frame`.
@@ -189,17 +189,21 @@ ByteTrack es un algoritmo de tracking multi-objeto que mejora otros métodos al 
 4. **Confirmación**: un track pasa a activo después de `minimum_consecutive_frames` frames consecutivos.
 5. **Eliminación**: un track perdido se elimina tras `lost_track_buffer` frames sin detección.
 
-### Extensión: penalización por equipo
-
-Se ha añadido un atributo `team` a cada `STrack`. Si en la primera asociación se intenta asociar una detección de un equipo distinto al del track, se añade una **penalización** (configurable vía `team_penalty` en config.yaml, por defecto 1000) a la matriz de costes IoU, haciendo esa asociación prácticamente imposible.
-
-### Extensión: doble señal de clase y consenso por track
+### Extensión: gates duros + consenso por track
 
 Cada detección de persona llega al tracking con dos clases:
 - `class_yolo`: clase original de YOLO.
 - `class_name_td`: clase reetiquetada por `TeamDetector` (`class` se mantiene como alias interno de compatibilidad).
 
-El matching interno aplica la penalización de clase con este patrón: si `class_team == track.class` no penaliza; si `class_team != track.class` pero `class_yolo == track.class` aplica la relajada (`class_mismatch_relaxed_penalty`); y si ninguna señal apoya al track aplica la fuerte (`class_mismatch_penalty`). Además, cada `STrack` acumula evidencia temporal (`class_vote_weight_relabel`, `class_vote_weight_yolo`) y solo cambia su clase interna cuando la nueva hipótesis supera un margen de consenso (`class_consensus_switch_margin`).
+El matching raw ya no usa penalizaciones aditivas grandes ni `fuse_score`. En su lugar, cada subfase construye un `base_cost` y un `feasible_mask` común:
+- `class` es siempre gate duro;
+- `team` es gate duro solo para `player`, y se omite si falta el equipo en track o detección;
+- `bbox_size` es gate duro;
+- `field_position` solo actúa como gate cuando existen ambas posiciones válidas;
+- las tres primeras pasadas exigen `IoU > 0`;
+- las tres segundas pasadas exigen `IoU = 0` y rescatan por `bbox_center_distance`.
+
+Además, cada `STrack` sigue acumulando evidencia temporal (`class_vote_weight_relabel`, `class_vote_weight_yolo`) y solo cambia su clase interna cuando la nueva hipótesis supera un margen de consenso (`class_consensus_switch_margin`).
 
 ### Extensión: color de camiseta como metadata (sin coste/gate)
 
@@ -218,13 +222,13 @@ Parámetros en `config.yaml`:
 
 En `auto-bootstrap`, una vez cerrada la fase inicial, cada equipo queda fijado con la **mediana de su cluster** para evitar intercambio de etiquetas entre frames. Si aparece un cluster pequeño (<=3), se descarta como ruido y se re-clusteriza sobre el cluster mayor.
 
-### Extensión: coste espacial en campo 2D
+### Extensión: gate espacial en campo 2D
 
 Para `player` y `goalkeeper`, si existe homografía válida en el frame:
 - cada detección se proyecta a una coordenada real del campo `[x_m, y_m]`;
 - cada track mantiene su última posición proyectada;
-- el coste de matching añade una penalización proporcional a la distancia recorrida sobre el campo;
-- además se bloquean asociaciones físicamente imposibles si la distancia en metros supera el umbral configurado.
+- el matching raw no usa esa distancia como coste principal;
+- sí bloquea asociaciones físicamente imposibles si la distancia en metros supera el umbral configurado.
 
 Esto reduce cambios de ID provocados solo por movimiento de cámara o paneos fuertes.
 
@@ -236,18 +240,13 @@ En `Tracker` se aplica además un filtro de movimiento por track canónico:
 - bloquea reasignaciones cuya distancia supere ese límite (escalado por frames perdidos), con un suelo mínimo de movimiento permitido.
 
 Parámetros en `config.yaml`:
-- `use_field_position_as_primary_cost` (si `true`, para `player/goalkeeper` el coste base del matching es distancia en campo)
-- `use_bbox_center_for_matching` (mezcla distancia entre centros de bbox en el coste de matching)
-- `bbox_center_distance_weight` (0..1, cuánto pesa bbox frente a IoU)
-- `bbox_center_distance_gate_px` (normalización en píxeles; escala con frames perdidos)
+- `track_activation_threshold` y `low_conf_threshold` (separan detecciones `high_conf` y `low_conf`)
+- `bbox_center_distance_gate_px` (gate para rescates con `IoU = 0`; escala con frames perdidos)
 - `lost_time_penalty_weight` (penaliza candidatos con más frames perdidos)
 - `lost_time_penalty_max_frames` (normalización del penalizador temporal)
-- `class_mismatch_penalty` (penalización fuerte por mismatch de clase en matching interno)
-- `class_mismatch_relaxed_penalty` (penalización reducida cuando clase YOLO y clase reetiquetada discrepan)
-- `allow_class_remap_when_signals_disagree` (habilita la vía de remapeo por clase cuando hay desacuerdo de señales)
 - `class_vote_weight_relabel` / `class_vote_weight_yolo` (peso de cada señal de clase en el consenso temporal)
 - `class_consensus_switch_margin` (ventaja mínima acumulada para permitir cambio de clase en el track interno)
-- `bbox_size_mismatch_penalty` (penalización por cambio brusco de tamaño entre bbox previa y bbox candidata)
+- `bbox_height_ratio_threshold` / `bbox_width_ratio_threshold` (gates duros de cambio de tamaño)
 - `bbox_height_ratio_threshold` (desviación relativa máxima permitida en altura antes de penalizar)
 - `bbox_width_ratio_threshold` (desviación relativa máxima permitida en ancho antes de penalizar)
 - `field_position_match_distance_gate_m` (base del gate espacial en metros)

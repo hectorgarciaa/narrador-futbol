@@ -105,9 +105,7 @@ class Tracker:
             raw_detections = trace_detector.get("detections", [])
         
         trace_bytetrack = bytetrack_packet.get("trace", {})
-        bytetrack_unconfirmed_association_debug = trace_bytetrack.get(
-            "unconfirmed_association_debug", []
-        )
+        bytetrack_matching_debug = trace_bytetrack.get("matching_debug", {})
         
         trace_canonical = canonical_packet.get("trace", {})
         discarded = trace_canonical.get("discarded_detections", [])
@@ -120,7 +118,7 @@ class Tracker:
             "discarded_detections": discarded,
             "discarded_yolo_not_tracked": discarded_not_tracked,
             "discarded_bytetrack_not_canonical": discarded_tracked_no_canonical,
-            "bytetrack_unconfirmed_association": bytetrack_unconfirmed_association_debug,
+            "bytetrack_matching_debug": bytetrack_matching_debug,
         }
 
     def process_frame(

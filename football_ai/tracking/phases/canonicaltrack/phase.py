@@ -627,8 +627,8 @@ class CanonicalTrackPhase(
             "bytetrack_not_tracked_reason_by_raw_idx": serialize_for_trace(
                 bytetrack_not_tracked_reason_by_raw_idx
             ),
-            "unconfirmed_association_debug": serialize_for_trace(
-                bytetrack_packet["trace"].get("unconfirmed_association_debug", [])
+            "matching_debug": serialize_for_trace(
+                bytetrack_packet["trace"].get("matching_debug", {})
             ),
             "discarded_yolo_not_tracked": serialize_for_trace(
                 discarded_yolo_not_tracked

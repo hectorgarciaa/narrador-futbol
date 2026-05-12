@@ -135,8 +135,8 @@ class ByteTrackPhase(Phase):
         }
         trace = {
             "detection_debug": detection_debug,
-            "unconfirmed_association_debug": _serialize_value(
-                getattr(self.tracker, "last_unconfirmed_association_debug", []) or []
+            "matching_debug": _serialize_value(
+                getattr(self.tracker, "last_matching_debug", {}) or {}
             ),
             "summary": {
                 "total_input_detections": int(clean_in["num_detections"]),

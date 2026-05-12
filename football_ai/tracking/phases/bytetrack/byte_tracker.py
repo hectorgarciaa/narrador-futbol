@@ -3,7 +3,7 @@ from typing import Optional
 
 from supervision.detection.core import Detections
 from supervision.tracker.byte_tracker.kalman_filter import KalmanFilter
-from supervision.tracker.byte_tracker.single_object_track import STrack
+from supervision.tracker.byte_tracker.single_object_track import STrack, TrackState
 from supervision.tracker.byte_tracker.utils import IdCounter
 
 from .debug_tools import ByteTrackDebugTools
@@ -12,6 +12,7 @@ from .detection_metadata import ByteTrackDetectionMetadata
 from .new_track_filter import ByteTrackNewTrackFilter
 from .pipeline_steps import ByteTrackPipelineSteps
 from .utils import joint_tracks
+
 
 class ByteTrack(
     ByteTrackDebugTools,
@@ -22,19 +23,16 @@ class ByteTrack(
 ):
     def __init__(
         self,
-        track_activation_threshold: float = 0.25,
+        track_activation_threshold: float = 0.10,
+        low_conf_threshold: float = 0.01,
         lost_track_buffer: int = 30,
         minimum_matching_threshold: float = 0.8,
         frame_rate: int = 30,
         minimum_consecutive_frames: int = 1,
-        team_mismatch_penalty: float = 1000.0,
         second_match_threshold: float = 0.7,
         unconfirmed_match_threshold: float = 0.8,
-        use_field_positions: bool = False,
-        use_field_positions_for_unconfirmed: bool = True,
         field_position_classes: Optional[list[str]] = None,
         field_distance_gate_m: float = 8.0,
-        field_distance_weight: float = 0.25,
         field_distance_gate_max_lost_frames: Optional[int] = None,
         field_distance_gate_cap_m: Optional[float] = None,
         field_distance_growth_mode: str = "power",
@@ -42,17 +40,10 @@ class ByteTrack(
         field_distance_decay_per_frame: float = 0.0,
         lost_time_penalty_weight: float = 0.0,
         lost_time_penalty_max_frames: int = 10,
-        use_field_position_as_primary_cost: bool = False,
-        use_bbox_center_for_matching: bool = True,
-        bbox_center_distance_weight: float = 0.5,
         bbox_center_distance_gate_px: float = 120.0,
-        class_mismatch_penalty: float = 1000.0,
-        class_mismatch_relaxed_penalty: float = 180.0,
-        allow_class_remap_when_signals_disagree: bool = True,
         class_vote_weight_relabel: float = 1.0,
         class_vote_weight_yolo: float = 1.0,
         class_consensus_switch_margin: float = 2.0,
-        bbox_size_mismatch_penalty: float = 1000.0,
         bbox_height_ratio_threshold: float = 0.20,
         bbox_width_ratio_threshold: float = 0.30,
         team_vote_weight: float = 1.0,
@@ -60,23 +51,16 @@ class ByteTrack(
         new_track_active_overlap_iou: float = 0.0,
         new_track_unconfirmed_overlap_iou: float = 0.0,
         new_track_candidate_overlap_iou: float = 0.0,
-        extra_conf_to_init_a_track: float = 0.1,
     ):
-        self.track_activation_threshold = track_activation_threshold
-        self.extra_conf_to_init_a_track = extra_conf_to_init_a_track
-        self.minimum_matching_threshold = minimum_matching_threshold
-        self.team_mismatch_penalty = team_mismatch_penalty
-        self.second_match_threshold = second_match_threshold
-        self.unconfirmed_match_threshold = unconfirmed_match_threshold
-        self.use_field_positions = bool(use_field_positions)
-        self.use_field_positions_for_unconfirmed = bool(
-            use_field_positions_for_unconfirmed
-        )
+        self.track_activation_threshold = float(track_activation_threshold)
+        self.low_conf_threshold = float(max(0.0, low_conf_threshold))
+        self.minimum_matching_threshold = float(minimum_matching_threshold)
+        self.second_match_threshold = float(second_match_threshold)
+        self.unconfirmed_match_threshold = float(unconfirmed_match_threshold)
         self.field_position_classes = frozenset(
             field_position_classes or ["player", "goalkeeper"]
         )
         self.field_distance_gate_m = float(field_distance_gate_m)
-        self.field_distance_weight = float(field_distance_weight)
         if field_distance_gate_max_lost_frames is None:
             self.field_distance_gate_max_lost_frames = None
         else:
@@ -109,27 +93,10 @@ class ByteTrack(
             self.field_distance_decay_per_frame = 0.0
         self.lost_time_penalty_weight = float(max(0.0, lost_time_penalty_weight))
         self.lost_time_penalty_max_frames = max(1, int(lost_time_penalty_max_frames))
-        self.use_field_position_as_primary_cost = bool(
-            use_field_position_as_primary_cost
-        )
-        self.use_bbox_center_for_matching = bool(use_bbox_center_for_matching)
-        self.bbox_center_distance_weight = float(
-            min(1.0, max(0.0, bbox_center_distance_weight))
-        )
         self.bbox_center_distance_gate_px = float(max(1.0, bbox_center_distance_gate_px))
-        self.class_mismatch_penalty = float(max(0.0, class_mismatch_penalty))
-        relaxed_penalty = float(max(0.0, class_mismatch_relaxed_penalty))
-        self.class_mismatch_relaxed_penalty = min(
-            self.class_mismatch_penalty,
-            relaxed_penalty,
-        )
-        self.allow_class_remap_when_signals_disagree = bool(
-            allow_class_remap_when_signals_disagree
-        )
         self.class_vote_weight_relabel = float(max(0.0, class_vote_weight_relabel))
         self.class_vote_weight_yolo = float(max(0.0, class_vote_weight_yolo))
         self.class_consensus_switch_margin = float(max(0.0, class_consensus_switch_margin))
-        self.bbox_size_mismatch_penalty = float(max(0.0, bbox_size_mismatch_penalty))
         self.bbox_height_ratio_threshold = float(max(0.0, bbox_height_ratio_threshold))
         self.bbox_width_ratio_threshold = float(max(0.0, bbox_width_ratio_threshold))
         self.team_vote_weight = float(max(0.0, team_vote_weight))
@@ -145,9 +112,10 @@ class ByteTrack(
         )
 
         self.frame_id = 0
-        self.det_thresh = self.track_activation_threshold + self.extra_conf_to_init_a_track
+        self.det_thresh = self.track_activation_threshold
         self.max_time_lost = int(frame_rate / 30.0 * lost_track_buffer)
         self.minimum_consecutive_frames = minimum_consecutive_frames
+        self.large_match_cost = 1e6
         self.kalman_filter = KalmanFilter()
         self.shared_kalman = KalmanFilter()
 
@@ -155,13 +123,11 @@ class ByteTrack(
         self.lost_tracks: list[STrack] = []
         self.removed_tracks: list[STrack] = []
 
-        # Warning, possible bug: If you also set internal_id to start at 1,
-        # all traces will be connected across objects.
         self.internal_id_counter = IdCounter()
         self.external_id_counter = IdCounter(start_id=1)
         self.collect_internal_matching_debug = False
         self.last_detection_debug_by_raw_idx = {}
-        self.last_unconfirmed_association_debug = []
+        self.last_matching_debug = {}
 
     def update_with_detections(self, detections: Detections) -> Detections:
         tensors = np.hstack(
@@ -170,13 +136,15 @@ class ByteTrack(
                 detections.confidence[:, np.newaxis],
             )
         )
-        
+
         team_labels = detections.data.get("team")
         class_labels = detections.data.get("class_td")
         yolo_class_labels = detections.data.get("class_yolo")
         field_positions = detections.data.get("field_position")
         shirt_colors = detections.data.get("shirt_color")
-        raw_det_indices = detections.data.get("raw_det_idx") if detections.data is not None else None
+        raw_det_indices = (
+            detections.data.get("raw_det_idx") if detections.data is not None else None
+        )
         raw_det_indices = (
             np.asarray(raw_det_indices, dtype=np.int32).reshape(-1)
             if raw_det_indices is not None
@@ -214,14 +182,6 @@ class ByteTrack(
         return detections[detections.tracker_id != -1]
 
     def reset(self) -> None:
-        """
-        Resets the internal state of the ByteTrack tracker.
-
-        This method clears the tracking data, including tracked, lost,
-        and removed tracks, as well as resetting the frame counter. It's
-        particularly useful when processing multiple videos sequentially,
-        ensuring the tracker starts with a clean state for each new video.
-        """
         self.frame_id = 0
         self.internal_id_counter.reset()
         self.external_id_counter.reset()
@@ -229,7 +189,7 @@ class ByteTrack(
         self.lost_tracks = []
         self.removed_tracks = []
         self.last_detection_debug_by_raw_idx = {}
-        self.last_unconfirmed_association_debug = []
+        self.last_matching_debug = {}
 
     def update_with_tensors(
         self,
@@ -241,18 +201,9 @@ class ByteTrack(
         shirt_colors=None,
         raw_det_indices=None,
     ) -> list[STrack]:
-        """
-        Updates the tracker with the provided tensors and returns the updated tracks.
-
-        Parameters:
-            tensors: The new tensors to update with.
-
-        Returns:
-            List[STrack]: Updated tracks.
-        """
         self.frame_id += 1
         self.last_detection_debug_by_raw_idx = {}
-        self.last_unconfirmed_association_debug = []
+        self.last_matching_debug = {}
         activated_tracks = []
         refound_tracks = []
         lost_tracks = []
@@ -261,8 +212,11 @@ class ByteTrack(
         scores = tensors[:, 4]
         bboxes = tensors[:, :4]
 
-        high_conf_mask = scores > self.track_activation_threshold
-        low_conf_mask = np.logical_and(scores > 0.1, scores < self.track_activation_threshold)
+        high_conf_mask = scores >= self.track_activation_threshold
+        low_conf_mask = np.logical_and(
+            scores >= self.low_conf_threshold,
+            scores < self.track_activation_threshold,
+        )
         keep_indices = np.where(high_conf_mask)[0]
         second_indices = np.where(low_conf_mask)[0]
         raw_det_indices = (
@@ -271,10 +225,21 @@ class ByteTrack(
             else np.arange(len(tensors), dtype=np.int32)
         )
 
-        detections = self._build_detection_batch(
+        high_conf_detections = self._build_detection_batch(
             keep_indices,
             bboxes[high_conf_mask],
             scores[high_conf_mask],
+            team_labels=team_labels,
+            class_labels=class_labels,
+            yolo_class_labels=yolo_class_labels,
+            field_positions=field_positions,
+            shirt_colors=shirt_colors,
+            raw_det_indices=raw_det_indices,
+        )
+        low_conf_detections = self._build_detection_batch(
+            second_indices,
+            bboxes[low_conf_mask],
+            scores[low_conf_mask],
             team_labels=team_labels,
             class_labels=class_labels,
             yolo_class_labels=yolo_class_labels,
@@ -286,44 +251,91 @@ class ByteTrack(
         tracked_tracks, unconfirmed = self._partition_existing_tracks()
         strack_pool = joint_tracks(tracked_tracks, self.lost_tracks)
         STrack.multi_predict(strack_pool, self.shared_kalman)
-        u_track, u_detection = self._associate_high_confidence(
+
+        remaining_pool, remaining_high = self._associate_confirmed_phase(
             strack_pool,
-            detections,
+            high_conf_detections,
+            phase_name="high_iou",
+            cost_mode="iou",
+            threshold=self.minimum_matching_threshold,
             activated_tracks=activated_tracks,
             refound_tracks=refound_tracks,
+            reason="matched_existing_track_high_iou",
         )
-
-        detections_second = self._build_detection_batch(
-            second_indices,
-            bboxes[low_conf_mask],
-            scores[low_conf_mask],
-            team_labels=team_labels,
-            class_labels=class_labels,
-            yolo_class_labels=yolo_class_labels,
-            field_positions=field_positions,
-            shirt_colors=shirt_colors,
-            raw_det_indices=raw_det_indices,
-        )
-        self._associate_low_confidence(
-            strack_pool,
-            u_track,
-            detections_second,
+        remaining_pool, remaining_low = self._associate_confirmed_phase(
+            remaining_pool,
+            low_conf_detections,
+            phase_name="low_iou",
+            cost_mode="iou",
+            threshold=self.second_match_threshold,
             activated_tracks=activated_tracks,
             refound_tracks=refound_tracks,
-            lost_tracks=lost_tracks,
+            reason="matched_existing_track_low_iou",
         )
 
-        detections = [detections[i] for i in u_detection]
-        u_detection, surviving_unconfirmed_tracks = self._associate_unconfirmed(
-            unconfirmed,
-            detections,
-            activated_tracks=activated_tracks,
-            removed_tracks=removed_tracks,
+        remaining_unconfirmed, remaining_high, accepted_unconfirmed_iou = (
+            self._associate_unconfirmed_phase(
+                unconfirmed,
+                remaining_high,
+                phase_name="unconfirmed_iou",
+                cost_mode="iou",
+                threshold=self.unconfirmed_match_threshold,
+                activated_tracks=activated_tracks,
+                reason="matched_unconfirmed_track_iou",
+            )
         )
+
+        remaining_pool, remaining_high = self._associate_confirmed_phase(
+            remaining_pool,
+            remaining_high,
+            phase_name="high_bbox",
+            cost_mode="bbox_center",
+            threshold=None,
+            activated_tracks=activated_tracks,
+            refound_tracks=refound_tracks,
+            reason="matched_existing_track_high_bbox",
+        )
+        remaining_pool, remaining_low = self._associate_confirmed_phase(
+            remaining_pool,
+            remaining_low,
+            phase_name="low_bbox",
+            cost_mode="bbox_center",
+            threshold=None,
+            activated_tracks=activated_tracks,
+            refound_tracks=refound_tracks,
+            reason="matched_existing_track_low_bbox",
+        )
+
+        remaining_unconfirmed, remaining_high, accepted_unconfirmed_bbox = (
+            self._associate_unconfirmed_phase(
+                remaining_unconfirmed,
+                remaining_high,
+                phase_name="unconfirmed_bbox",
+                cost_mode="bbox_center",
+                threshold=None,
+                activated_tracks=activated_tracks,
+                reason="matched_unconfirmed_track_bbox",
+            )
+        )
+
+        for track in remaining_unconfirmed:
+            track.state = TrackState.Removed
+            removed_tracks.append(track)
+
+        for track in remaining_pool:
+            if track.state != TrackState.Lost:
+                track.state = TrackState.Lost
+                lost_tracks.append(track)
+
+        surviving_unconfirmed_tracks = [
+            track
+            for track in (accepted_unconfirmed_iou + accepted_unconfirmed_bbox)
+            if getattr(track, "state", None) == TrackState.Tracked
+            and not bool(getattr(track, "is_activated", False))
+        ]
 
         self._activate_new_tracks(
-            detections,
-            u_detection,
+            remaining_high,
             surviving_unconfirmed_tracks,
             activated_tracks=activated_tracks,
             refound_tracks=refound_tracks,
