@@ -115,6 +115,8 @@ narrador-futbol/
 
 Nota de arquitectura: el runtime productivo vive en `football_ai/` y `experiments/` actúa como capa de experimentación sobre ese runtime (sin dependencias inversas desde `football_ai` hacia `experiments`).
 
+Los notebooks de `experiments/visualization/` que inspeccionan el relabel de equipos deben apoyarse en las fases actuales del tracker (`detection_phase`, `projection_phase`, `filtering_phase`, `identification_phase`) y no en atributos legacy del `Tracker`. En concreto, `team_detector_relabel_flow_utils.py` ya está adaptado a ese flujo y el notebook `team_detector_relabel_flow_ucl.ipynb` usa el clip UCL correcto también en las celdas de overlay final.
+
 ---
 
 ## 🧪 Depuración de tracking (four-panel)

@@ -33,6 +33,7 @@ class TeamDetector:
         self.updated = self.color_model.updated
         self.class_samples = self.color_model.class_samples
         self.outfield_team_distance_stats = self.color_model.outfield_team_distance_stats
+        self.referee_distance_stats = self.color_model.referee_distance_stats
         self.n_frame = -1
 
     def identify_packet(
@@ -265,8 +266,13 @@ class TeamDetector:
         can_be_goalkeeper,
     ):
         team, distances = self.color_model.assign_team(shirt_color)
+        referee_cluster_match = self.color_model.matches_referee_cluster(distances)
 
         if team == "referee":
+            if not referee_cluster_match:
+                return class_name, self.color_model.nearest_outfield_team(distances), distances, self._relabel_trace(
+                    "referee_cluster_outlier_fallback",
+                )
             if class_name == "referee":
                 return "referee", None, distances, self._relabel_trace("referee_confirmed")
             if field_position is None:

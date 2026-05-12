@@ -45,6 +45,7 @@ class TeamColorModel:
             "referee": -1,
         }
         self.outfield_team_distance_stats = {}
+        self.referee_distance_stats = None
 
     def trace_snapshot(self, cluster_events):
         return {
@@ -66,6 +67,11 @@ class TeamColorModel:
                 )
                 for team_name, stats in self.outfield_team_distance_stats.items()
             },
+            "referee_distance_stats": (
+                {key: float(value) for key, value in self.referee_distance_stats.items()}
+                if isinstance(self.referee_distance_stats, dict)
+                else None
+            ),
         }
 
     def decide_sample_class(self, shirt_color, can_be_goalkeeper, can_be_middle_ref):
@@ -80,11 +86,11 @@ class TeamColorModel:
 
         if self.updated["referee"]:
             nearest_team = self._nearest_team(distances)
-            if nearest_team == "referee" and can_be_middle_ref:
+            if nearest_team == "referee" and can_be_middle_ref and self.matches_referee_cluster(distances):
                 return "referee", "referee", "referee_color_and_position_gate"
             if nearest_team != "referee":
                 return "player", "player", "nearest_color_is_outfield_team"
-            return None, None, "referee_color_without_valid_position"
+            return None, None, "referee_cluster_outlier_or_invalid_position"
 
         if not can_be_middle_ref:
             return None, None, "no_position_gate_matched"
@@ -150,6 +156,14 @@ class TeamColorModel:
             if stats is not None and float(distance) < stats["upper_bound"]:
                 return True
         return False
+
+    def matches_referee_cluster(self, distances):
+        if not distances or not isinstance(self.referee_distance_stats, dict):
+            return False
+        referee_distance = distances.get("referee")
+        if referee_distance is None:
+            return False
+        return float(referee_distance) < float(self.referee_distance_stats["upper_bound"])
 
     @staticmethod
     def nearest_outfield_team(distances):
@@ -228,11 +242,13 @@ class TeamColorModel:
             [trim_mean(samples[:, channel], proportiontocut=0.15) for channel in range(samples.shape[1])],
             dtype=np.float32,
         )
+        self.referee_distance_stats = self._distance_stats(samples, self.team_colors["referee"])
         return True, {
             "event_type": "referee_color_update",
             "success": True,
             "sample_count": len(samples),
             "center": serialize_color(self.team_colors["referee"]),
+            "distance_stats": self.referee_distance_stats,
         }
 
     def _shrink_small_clusters(self, km, samples):

@@ -82,6 +82,8 @@ Cuando el color más cercano es el del árbitro, el detector puede proponer una 
 
 Además, cuando ya existen referencias actualizadas para los dos equipos de campo, el detector mantiene una estadística robusta de la distribución de distancias LAB dentro de cada equipo (`Q1`, `mediana`, `Q3`, `IQR`). Con esa referencia, el tracking también puede relabelar `player/referee -> goalkeeper` si la detección es un outlier simultáneo respecto a ambos equipos de campo y, tras la homografía, cae fuera del corredor delimitado por la tercera persona más a la izquierda y la tercera más a la derecha visibles en ese frame, manteniéndose además a más de 3 metros de las bandas laterales.
 
+Para `referee` también se calcula ahora un `distance_stats` robusto sobre sus muestras bootstrap. Tanto la lógica de sample election como el relabel hacia `referee` exigen que la detección caiga dentro del `upper_bound` de ese cluster de árbitro (además de las gates posicionales), para evitar falsos positivos por colores cercanos.
+
 #### 5. Contrato desacoplado de fase
 Además del método legacy `detect_teams(...)`, `TeamDetector` expone ahora `identify_packet(frame_bgr, filtering_packet, ...)`.
 

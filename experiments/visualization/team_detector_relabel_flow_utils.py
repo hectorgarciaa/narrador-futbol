@@ -9,13 +9,22 @@ import cv2
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import supervision as sv
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from sklearn.cluster import KMeans
 
 from football_ai.core.config import Config
 from football_ai.tracking.tracker import Tracker
+from football_ai.tracking.phases.detection.utils import normalize_detection_class_name
+from football_ai.tracking.phases.identification.team_detector_utils import (
+    bbox_area,
+    extract_shirt_crop,
+    field_position_to_tuple,
+    goalkeeper_position_gate,
+    person_axis_positions,
+    referee_position_gate,
+    serialize_color,
+)
 
 
 SUPPORTED_CLASSES = frozenset({"player", "goalkeeper", "referee", "ball"})
@@ -105,7 +114,7 @@ def build_tracker_for_analysis(
 
 def _filter_supported_detection_boxes(results) -> None:
     names = {
-        key: Tracker._normalize_detection_class_name(value)
+        key: normalize_detection_class_name(value)
         for key, value in results.names.items()
     }
     results.names = names
@@ -137,14 +146,12 @@ def _should_accept_sample_for_bucket(team_detector, sample_bucket: str, confiden
     if sample_bucket not in team_detector.updated:
         return False
     conf_value = 0.0 if confidence is None else float(confidence)
-    min_conf = float(team_detector.min_conf.get(sample_bucket, 0.0))
+    min_conf = float(team_detector.color_model.min_conf.get(sample_bucket, 0.0))
     return bool(conf_value >= min_conf or (not bool(team_detector.updated[sample_bucket]) and int(team_detector.n_frame) > 200))
 
 
-def _get_sorted_field_axis_positions(team_detector, field_positions: np.ndarray, yolo_class_labels: list[str], axis: int) -> list[float]:
-    positions = team_detector._get_k_positions(field_positions, yolo_class_labels, axis)
-    positions.sort()
-    return positions
+def _analysis_team_detector(tracker: Tracker):
+    return tracker.identification_phase.team_detector
 
 
 def _crop_to_rgb_uint8(image_bgr: np.ndarray | None, max_side: int = 96) -> np.ndarray | None:
@@ -187,9 +194,8 @@ def _build_kmeans_prediction_image(crop_bgr: np.ndarray, n_clusters: int = 2) ->
 
 def _run_team_detector_with_debug(
     team_detector,
-    frame_detections,
-    field_positions: np.ndarray,
-    yolo_class_labels: list[str],
+    frame_bgr: np.ndarray,
+    filtering_clean: dict[str, Any],
     field_width_m: float,
     sideline_band_distance_m: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -197,14 +203,17 @@ def _run_team_detector_with_debug(
     colors_by_detection_idx: dict[int, np.ndarray | None] = {}
     color_candidate_indices: list[int] = []
     color_candidate_shirts: list[np.ndarray] = []
-    x_positions = _get_sorted_field_axis_positions(team_detector, field_positions, yolo_class_labels, 0)
-    y_positions = _get_sorted_field_axis_positions(team_detector, field_positions, yolo_class_labels, 1)
+    bbox_xyxy = np.asarray(filtering_clean.get("bbox_xyxy", []), dtype=np.float32).reshape(-1, 4)
+    confidences = list(filtering_clean.get("confidence", []))
+    field_positions = np.asarray(filtering_clean.get("field_positions_m", []), dtype=np.float32).reshape(-1, 2)
+    yolo_class_labels = [str(class_name) for class_name in filtering_clean.get("class_name", [])]
+    x_positions = person_axis_positions(field_positions, yolo_class_labels, 0)
+    y_positions = person_axis_positions(field_positions, yolo_class_labels, 1)
 
-    for det_idx, object_detected in enumerate(frame_detections):
-        class_name = object_detected.names[object_detected.boxes.cls.item()]
+    for det_idx, (class_name, bbox) in enumerate(zip(yolo_class_labels, bbox_xyxy)):
         if class_name not in team_detector.candidate_classes:
             continue
-        shirt = team_detector._extract_shirt_crop(object_detected)
+        shirt = extract_shirt_crop(frame_bgr, bbox)
         shirts_by_detection_idx[det_idx] = shirt
         if shirt is None:
             continue
@@ -219,16 +228,16 @@ def _run_team_detector_with_debug(
     teams_of_detected_objects: list[dict[str, Any]] = []
     debug_rows: list[dict[str, Any]] = []
 
-    for det_idx, (object_detected, field_position) in enumerate(zip(frame_detections, field_positions)):
-        field_position = team_detector._field_position_to_tuple(field_position)
-        class_name = object_detected.names[object_detected.boxes.cls.item()]
-        bbox_size = team_detector._extract_bbox_size(object_detected)
+    for det_idx, field_position in enumerate(field_positions):
+        field_position = field_position_to_tuple(field_position)
+        class_name = yolo_class_labels[det_idx]
+        bbox_size = bbox_area(bbox_xyxy[det_idx])
         bootstrap_bucket = None
         bootstrap_index = None
         sample_accepted = False
         confidence = None
         try:
-            confidence = float(object_detected.boxes.conf.item())
+            confidence = float(confidences[det_idx])
         except Exception:
             confidence = None
 
@@ -281,7 +290,7 @@ def _run_team_detector_with_debug(
         nearest_outfield_team = None
 
         if distances_before is not None:
-            nearest_outfield_team = team_detector._nearest_outfield_team_from_distances(distances_before)
+            nearest_outfield_team = team_detector.color_model.nearest_outfield_team(distances_before)
             for team_name, distance_value in distances_before.items():
                 if team_name == "referee":
                     continue
@@ -294,35 +303,43 @@ def _run_team_detector_with_debug(
 
         if field_position is not None and shirt_color is not None and sample_bucket in team_detector.updated:
             if team_detector.updated[sample_bucket]:
-                proposal = team_detector._check_possible_new_class(
+                proposed_bucket, proposed_class, sample_decision_reason = team_detector.color_model.decide_sample_class(
                     shirt_color,
-                    field_position,
-                    field_width_m,
-                    sideline_band_distance_m,
-                    x_positions,
-                    y_positions,
+                    can_be_goalkeeper=goalkeeper_position_gate(
+                        x_positions,
+                        field_position,
+                        field_width_m,
+                        sideline_band_distance_m,
+                    ),
+                    can_be_middle_ref=referee_position_gate(
+                        x_positions,
+                        y_positions,
+                        field_position,
+                        field_width_m,
+                        sideline_band_distance_m,
+                    )[1],
                 )
-                if isinstance(proposal, tuple):
-                    sample_bucket = proposal[0] if proposal[0] is not None else class_name
-                    effective_class = proposal[1] if proposal[1] is not None else class_name
-                    new_possible_class = proposal[1]
-                else:
-                    sample_bucket = proposal if proposal is not None else sample_bucket
-                    effective_class = proposal if proposal is not None else effective_class
-                    new_possible_class = proposal
+                sample_bucket = proposed_bucket if proposed_bucket is not None else sample_bucket
+                effective_class = proposed_class if proposed_class is not None else effective_class
+                new_possible_class = proposed_class
 
-            if sample_bucket in team_detector.updated and _should_accept_sample_for_bucket(team_detector, sample_bucket, confidence):
-                bootstrap_bucket = sample_bucket
-                bootstrap_index = len(team_detector.class_samples[sample_bucket]) + 1
-                team_detector.class_samples[sample_bucket].append(shirt_color)
-                sample_accepted = True
-                if len(team_detector.class_samples[sample_bucket]) > team_detector.min_samples[sample_bucket] and team_detector.n_frame % 5 == 0:
-                    team_detector.updated[sample_bucket] = team_detector._update_class_colors(sample_bucket)
+            if sample_bucket in team_detector.updated:
+                previous_count = len(team_detector.class_samples[sample_bucket])
+                sample_trace, _cluster_event = team_detector.color_model.maybe_add_sample(
+                    sample_bucket,
+                    shirt_color,
+                    0.0 if confidence is None else float(confidence),
+                    int(team_detector.n_frame),
+                )
+                sample_accepted = bool(sample_trace and sample_trace.get("accepted"))
+                if sample_accepted:
+                    bootstrap_bucket = sample_bucket
+                    bootstrap_index = previous_count + 1
 
         can_be_ref = False
         can_be_middle_ref = False
         if field_position is not None:
-            can_be_ref, can_be_middle_ref = team_detector._check_ref_pos(
+            can_be_ref, can_be_middle_ref = referee_position_gate(
                 x_positions,
                 y_positions,
                 field_position,
@@ -331,33 +348,38 @@ def _run_team_detector_with_debug(
             )
         can_be_goalkeeper = bool(
             field_position is not None
-            and team_detector._check_goalkeeper_pos(x_positions, field_position, field_width_m, sideline_band_distance_m)
+            and goalkeeper_position_gate(
+                x_positions,
+                field_position,
+                field_width_m,
+                sideline_band_distance_m,
+            )
         )
-        class_name_aux, team, distances = team_detector._reassign_class(
+        class_name_aux, team, distances, relabel_trace = team_detector._reassign_class(
             shirt_color,
             effective_class,
-            x_positions,
-            y_positions,
             field_position,
-            field_width_m,
-            sideline_band_distance_m,
+            can_be_ref,
+            can_be_middle_ref,
+            can_be_goalkeeper,
         )
         final_class_name = class_name_aux if field_position is not None else class_name
         team_payload = {
             "class": final_class_name,
             "team": team,
-            "shirt_color": team_detector._serialize_color(shirt_color),
+            "shirt_color": serialize_color(shirt_color),
             "distances": distances,
             "bbox_size": float(bbox_size),
         }
         teams_of_detected_objects.append(team_payload)
 
+        relabel_reason = str(relabel_trace.get("reason", ""))
         if new_possible_class is not None:
-            reason_path = f"new_possible:{new_possible_class}->reassign:{final_class_name}"
+            reason_path = f"new_possible:{new_possible_class}|reassign:{final_class_name}|reason:{relabel_reason}"
         elif final_class_name != class_name:
-            reason_path = f"reassign_only:{class_name}->{final_class_name}"
+            reason_path = f"reassign_only:{class_name}->{final_class_name}|reason:{relabel_reason}"
         else:
-            reason_path = "kept_class"
+            reason_path = f"kept_class|reason:{relabel_reason}"
 
         debug_rows.append(
             {
@@ -370,7 +392,7 @@ def _run_team_detector_with_debug(
                 "class_final": final_class_name,
                 "team_final": team,
                 "field_position_m": None if field_position is None else [float(field_position[0]), float(field_position[1])],
-                "shirt_color_lab": team_detector._serialize_color(shirt_color),
+                "shirt_color_lab": serialize_color(shirt_color),
                 "distances": distances,
                 "bbox_size": float(bbox_size),
                 "confidence": confidence,
@@ -388,6 +410,7 @@ def _run_team_detector_with_debug(
                 "shirt_crop": shirts_by_detection_idx.get(det_idx),
                 "within_team_bounds": within_team_bounds,
                 "distances_before": distances_before,
+                "relabel_reason": relabel_reason,
             }
         )
 
@@ -428,8 +451,9 @@ def analyze_team_detector_video(
     if not cap.isOpened():
         raise RuntimeError(f"No se pudo abrir el video: {video_path}")
 
-    field_width_m = float(config.get("tracking", "projector", "constructor", "field_width_m", default=68.0))
-    sideline_band_distance_m = float(config.get("tracking", "referee_sideline_band_distance_m", default=3.0))
+    team_detector = _analysis_team_detector(tracker)
+    field_width_m = float(tracker.identification_phase.referee_field_width_m)
+    sideline_band_distance_m = float(tracker.identification_phase.referee_sideline_band_distance_m)
     records: list[dict[str, Any]] = []
     frame_rows: list[dict[str, Any]] = []
     bootstrap_samples: dict[str, list[dict[str, Any]]] = {"player": [], "referee": []}
@@ -448,70 +472,57 @@ def analyze_team_detector_video(
         if max_frames is not None and processed_frames >= max_frames:
             break
 
-        tracker.team_detector.n_frame += 1
-
-        results = tracker.model.model.predict(
+        frame_time_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC) or 0.0)
+        detection_packet, _detector_ms = tracker.detection_phase.process(
             frame,
-            stream=False,
-            conf=tracker.model.conf,
-            verbose=False,
-        )[0]
-        _filter_supported_detection_boxes(results)
-
-        detections_sv = sv.Detections.from_ultralytics(results)
-        detection_class_labels = [results.names[int(cls_idx)] for cls_idx in results.boxes.cls.tolist()] if results.boxes is not None else []
-        field_projection, field_positions, ground_points_projected = tracker._get_field_projection_and_positions(
-            detections_sv,
-            detection_class_labels,
-            results.orig_img,
+            frame_index=frame_index,
+            frame_time_ms=frame_time_ms,
         )
-        (
-            _results_filtered,
-            detections_sv,
-            _raw_detections,
-            detection_class_labels,
-            field_positions,
-            ground_points_projected,
-        ) = tracker._filter_detections_outside_projected_field(
-            results,
-            detections_sv,
-            [],
-            detection_class_labels,
-            field_projection,
-            field_positions,
-            ground_points_projected,
+        reference_packet, _projection_ms = tracker.projection_phase.process(
+            frame,
+            detection_packet,
         )
-        frame_detections = list(results)
-        yolo_class_labels = list(detection_class_labels)
+        filtering_packet, _filter_ms = tracker.filtering_phase.process(
+            reference_packet,
+            active_track_boxes_xyxy=[],
+            geometry=tracker.projection_phase.geometry,
+        )
+        filtering_clean = filtering_packet["clean"]
+        team_detector.n_frame += 1
         teams_of_detected_objects, debug_rows = _run_team_detector_with_debug(
-            tracker.team_detector,
-            frame_detections,
-            field_positions,
-            yolo_class_labels,
+            team_detector,
+            frame,
+            filtering_clean,
             field_width_m,
             sideline_band_distance_m,
         )
 
-        quality_diagnostics = getattr(field_projection, "quality_diagnostics", None)
+        quality_diagnostics = dict(reference_packet.get("trace", {}).get("diagnostics", {}) or {})
+        frame_detections_count = int(filtering_clean.get("num_detections", 0))
+        field_positions = np.asarray(filtering_clean.get("field_positions_m", []), dtype=np.float32).reshape(-1, 2)
+        ground_points_projected = np.asarray(
+            filtering_clean.get("ground_points_image_original", []),
+            dtype=np.float32,
+        ).reshape(-1, 2)
+        bbox_xyxy = np.asarray(filtering_clean.get("bbox_xyxy", []), dtype=np.float32).reshape(-1, 4)
         frame_row = {
             "frame_idx": int(frame_index),
-            "num_detections": int(len(frame_detections)),
+            "num_detections": frame_detections_count,
             "homography_quality_status": None if quality_diagnostics is None else quality_diagnostics.get("quality_status"),
             "homography_quality_score": None if quality_diagnostics is None else quality_diagnostics.get("quality_score"),
-            "field_positions_usable_for_tracking": None
-            if quality_diagnostics is None
-            else quality_diagnostics.get("field_positions_usable_for_tracking"),
+            "field_positions_usable_for_tracking": bool(reference_packet["clean"].get("field_positions_usable_for_tracking")),
             "team_colors": {
                 team_name: None if color is None else [float(x) for x in np.asarray(color, dtype=np.float32).reshape(-1).tolist()]
-                for team_name, color in tracker.team_detector.team_colors.items()
+                for team_name, color in team_detector.team_colors.items()
             },
-            "outfield_team_distance_stats": _ensure_serializable(tracker.team_detector.outfield_team_distance_stats),
-            "updated": {name: bool(value) for name, value in tracker.team_detector.updated.items()},
+            "outfield_team_distance_stats": _ensure_serializable(team_detector.outfield_team_distance_stats),
+            "referee_distance_stats": _ensure_serializable(team_detector.color_model.referee_distance_stats),
+            "updated": {name: bool(value) for name, value in team_detector.updated.items()},
         }
         frame_rows.append(frame_row)
 
-        for det_idx, (det_result, team_result, debug_row) in enumerate(zip(frame_detections, teams_of_detected_objects, debug_rows)):
-            bbox = det_result.boxes.xyxy[0].detach().cpu().numpy().astype(np.float32).reshape(-1)
+        for det_idx, (team_result, debug_row) in enumerate(zip(teams_of_detected_objects, debug_rows)):
+            bbox = bbox_xyxy[det_idx].reshape(-1) if det_idx < len(bbox_xyxy) else np.zeros(4, dtype=np.float32)
             field_position = field_positions[det_idx] if det_idx < len(field_positions) else np.array([np.nan, np.nan], dtype=np.float32)
             ground_point = ground_points_projected[det_idx] if det_idx < len(ground_points_projected) else np.array([np.nan, np.nan], dtype=np.float32)
             distances = team_result.get("distances")
@@ -576,6 +587,10 @@ def analyze_team_detector_video(
                 row[f"upper_bound_{team_name}"] = None if not isinstance(stats, dict) else stats.get("upper_bound")
                 row[f"median_dist_{team_name}"] = None if not isinstance(stats, dict) else stats.get("median")
                 row[f"iqr_dist_{team_name}"] = None if not isinstance(stats, dict) else stats.get("iqr")
+            referee_stats = frame_row.get("referee_distance_stats")
+            row["upper_bound_referee"] = None if not isinstance(referee_stats, dict) else referee_stats.get("upper_bound")
+            row["median_dist_referee"] = None if not isinstance(referee_stats, dict) else referee_stats.get("median")
+            row["iqr_dist_referee"] = None if not isinstance(referee_stats, dict) else referee_stats.get("iqr")
             records.append(row)
 
             bootstrap_bucket = debug_row.get("bootstrap_bucket")
@@ -608,7 +623,7 @@ def analyze_team_detector_video(
                             "crop_path": str(crop_path),
                         }
                     )
-                    if bool(tracker.team_detector.updated.get(str(bootstrap_bucket), False)):
+                    if bool(team_detector.updated.get(str(bootstrap_bucket), False)):
                         bootstrap_closed_for_artifact[str(bootstrap_bucket)] = True
 
         processed_frames += 1
@@ -635,7 +650,7 @@ def analyze_team_detector_video(
         "relabelled_total": int(detections_df["relabelled"].sum()) if not detections_df.empty else 0,
         "relabelled_to_referee": int(detections_df["relabeled_to_referee"].sum()) if not detections_df.empty else 0,
         "relabelled_to_goalkeeper": int(detections_df["relabeled_to_goalkeeper"].sum()) if not detections_df.empty else 0,
-        "bootstrap_min_samples": _ensure_serializable(tracker.team_detector.min_samples),
+        "bootstrap_min_samples": _ensure_serializable(team_detector.color_model.min_samples),
         "bootstrap_samples_used": {bucket: int(len(samples)) for bucket, samples in bootstrap_samples.items()},
         "bootstrap_samples_json": str(bootstrap_samples_json),
         "output_dir": str(resolved_output_dir),
@@ -865,8 +880,8 @@ def build_lab_scatter_3d(
                 )
             )
 
-            if include_spheres and team_name != "referee":
-                stats_col = f"upper_bound_{team_name}"
+            if include_spheres:
+                stats_col = "upper_bound_referee" if team_name == "referee" else f"upper_bound_{team_name}"
                 sphere_df = ref_df.dropna(subset=[stats_col]).copy()
                 if sphere_df.empty:
                     continue
