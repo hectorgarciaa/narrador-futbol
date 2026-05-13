@@ -18,13 +18,21 @@ class IdentificationPhase(Phase):
             referee_sideline_band_distance_m
         )
 
-    def execute(self, frame_bgr, filtering_packet, show_kmeans=False):
+    def execute(
+        self,
+        frame_bgr,
+        filtering_packet,
+        show_kmeans=False,
+        *,
+        execution_mode="runtime",
+    ):
         return self.team_detector.identify_packet(
             frame_bgr,
             filtering_packet,
             self.referee_field_width_m,
             self.referee_sideline_band_distance_m,
             show_kmeans,
+            execution_mode=execution_mode,
         )
 
 

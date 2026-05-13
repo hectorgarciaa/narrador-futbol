@@ -43,8 +43,11 @@ class TeamDetector:
         field_width_m,
         sideline_band_distance_m,
         show_plot=False,
+        *,
+        execution_mode="runtime",
     ):
         filtering_clean = filtering_packet["clean"]
+        collect_debug = str(execution_mode).strip().lower() == "debug"
         entries, cluster_events = self._run_detection_pass(
             frame_bgr=frame_bgr,
             bbox_xyxy=filtering_clean["bbox_xyxy"],
@@ -54,9 +57,18 @@ class TeamDetector:
             field_width_m=field_width_m,
             sideline_band_distance_m=sideline_band_distance_m,
             show_plot=show_plot,
+            collect_debug=collect_debug,
         )
         clean = {
-            **filtering_clean,
+            "num_detections": int(filtering_clean["num_detections"]),
+            "det_id": list(filtering_clean["det_id"]),
+            "bbox_xyxy": [list(bbox) for bbox in filtering_clean["bbox_xyxy"]],
+            "confidence": list(filtering_clean["confidence"]),
+            "class_name": list(filtering_clean["class_name"]),
+            "field_positions_m": [list(point) for point in filtering_clean["field_positions_m"]],
+            "ground_points_image_original": [
+                list(point) for point in filtering_clean["ground_points_image_original"]
+            ],
             "class_td": [entry["class_td"] for entry in entries],
             "team": [entry["team"] for entry in entries],
             "shirt_color": [entry["shirt_color"] for entry in entries],
@@ -70,11 +82,15 @@ class TeamDetector:
             image_width=filtering_packet["image_width"],
             image_height=filtering_packet["image_height"],
             clean=clean,
-            trace={
-                "detections": [entry["trace"] for entry in entries],
-                "clusters": self.color_model.trace_snapshot(cluster_events),
-                "summary": self._summary(entries),
-            },
+            trace=(
+                {
+                    "detections": [entry["trace"] for entry in entries],
+                    "clusters": self.color_model.trace_snapshot(cluster_events),
+                    "summary": self._summary(entries),
+                }
+                if collect_debug
+                else {}
+            ),
         )
 
     def _run_detection_pass(
@@ -87,6 +103,7 @@ class TeamDetector:
         field_width_m,
         sideline_band_distance_m,
         show_plot,
+        collect_debug,
     ):
         self.n_frame += 1
         boxes = np.asarray(bbox_xyxy, dtype=np.float32).reshape(-1, 4)
@@ -116,6 +133,7 @@ class TeamDetector:
                 y_positions=y_positions,
                 field_width_m=field_width_m,
                 sideline_band_distance_m=sideline_band_distance_m,
+                collect_debug=collect_debug,
             )
             entries.append(entry)
             if cluster_event is not None:
@@ -159,32 +177,41 @@ class TeamDetector:
         y_positions,
         field_width_m,
         sideline_band_distance_m,
+        collect_debug,
     ):
         field_position = field_position_to_tuple(field_position)
         bbox_size = bbox_area(bbox_xyxy)
         serialized_color = serialize_color(shirt_color)
-        trace = {
-            "det_index": int(det_index),
-            "class_name_yolo": class_name,
-            "field_position_m": list(field_position) if field_position is not None else None,
-            "shirt_crop_available": shirt_color is not None,
-            "shirt_color_available": shirt_color is not None,
-            "bbox_size": bbox_size,
-        }
-        if class_name not in self.candidate_classes:
-            trace["relabel"] = {
-                "reason": "non_candidate_class",
-                "class_name_input": class_name,
-                "class_td": class_name,
-                "team": None,
-                "distances": None,
+        trace = (
+            {
+                "det_index": int(det_index),
+                "class_name_yolo": class_name,
+                "field_position_m": list(field_position) if field_position is not None else None,
+                "shirt_crop_available": shirt_color is not None,
+                "shirt_color_available": shirt_color is not None,
+                "bbox_size": bbox_size,
             }
+            if collect_debug
+            else None
+        )
+        if class_name not in self.candidate_classes:
+            if trace is not None:
+                trace["relabel"] = {
+                    "reason": "non_candidate_class",
+                    "class_name_input": class_name,
+                    "class_td": class_name,
+                    "team": None,
+                    "distances": None,
+                }
             return {
                 "class_td": class_name,
                 "team": None,
                 "shirt_color": None,
                 "distances": None,
                 "bbox_size": bbox_size,
+                "class_name_yolo": class_name,
+                "shirt_crop_available": False,
+                "shirt_color_available": False,
                 "trace": trace,
             }, None
 
@@ -220,15 +247,17 @@ class TeamDetector:
                 shirt_color,
                 confidence,
                 self.n_frame,
+                collect_debug=collect_debug,
             )
-            if sample_trace is not None:
+            if trace is not None and sample_trace is not None:
                 trace["sample_candidate"] = sample_trace
 
-        trace["sample_decision"] = {
-            "sample_bucket": sample_bucket,
-            "effective_class": effective_class,
-            "reason": sample_reason,
-        }
+        if trace is not None:
+            trace["sample_decision"] = {
+                "sample_bucket": sample_bucket,
+                "effective_class": effective_class,
+                "reason": sample_reason,
+            }
 
         resolved_class, team, distances, relabel_trace = self._reassign_class(
             shirt_color,
@@ -240,19 +269,23 @@ class TeamDetector:
         )
         final_class = class_name if field_position is None else resolved_class
         serialized_distances = serialize_distances(distances)
-        trace["relabel"] = {
-            **relabel_trace,
-            "class_name_input": effective_class,
-            "class_td": final_class,
-            "team": team,
-            "distances": serialized_distances,
-        }
+        if trace is not None:
+            trace["relabel"] = {
+                **relabel_trace,
+                "class_name_input": effective_class,
+                "class_td": final_class,
+                "team": team,
+                "distances": serialized_distances,
+            }
         return {
             "class_td": final_class,
             "team": team,
             "shirt_color": serialized_color,
             "distances": serialized_distances,
             "bbox_size": bbox_size,
+            "class_name_yolo": class_name,
+            "shirt_crop_available": shirt_color is not None,
+            "shirt_color_available": shirt_color is not None,
             "trace": trace,
         }, cluster_event
 
@@ -295,6 +328,10 @@ class TeamDetector:
             return "goalkeeper", None, distances, self._relabel_trace("goalkeeper_confirmed")
 
         if team in self.team_colors and (self.updated["player"] or len(self.outfield_team_distance_stats) >= 2):
+            if class_name == "referee" and not self.updated["referee"]:
+                return class_name, team, distances, self._relabel_trace(
+                    "outfield_cluster_decision_without_referee_cluster",
+                )
             if self.color_model.matches_outfield_cluster(distances):
                 return "player", team, distances, self._relabel_trace(
                     "relabel_to_player_by_outfield_cluster",
@@ -314,17 +351,17 @@ class TeamDetector:
         return {
             "total_detections": len(entries),
             "candidate_detections": sum(
-                1 for entry in entries if entry["trace"]["class_name_yolo"] in self.candidate_classes
+                1 for entry in entries if entry["class_name_yolo"] in self.candidate_classes
             ),
             "detections_with_shirt_crop": sum(
-                1 for entry in entries if entry["trace"]["shirt_crop_available"]
+                1 for entry in entries if entry["shirt_crop_available"]
             ),
             "detections_with_shirt_color": sum(
-                1 for entry in entries if entry["trace"]["shirt_color_available"]
+                1 for entry in entries if entry["shirt_color_available"]
             ),
             "relabelled_detections": sum(
                 1
                 for entry in entries
-                if entry["trace"]["relabel"]["class_td"] != entry["trace"]["class_name_yolo"]
+                if entry["class_td"] != entry["class_name_yolo"]
             ),
         }

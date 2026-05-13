@@ -91,6 +91,7 @@ team_detector:
     min_conf: {"player": 0.8, "referee": 0.7}  # Confianza mínima de detección para usar la muestra en el cálculo de color
     max_samples_per_class: 500       # Máximo de muestras a almacenar por clase para el cálculo de color (ventana móvil)
     referee_bootstrap_margin: 10
+    referee_upper_bound_cap: 20.0
     allow_referee_bootstrap_sampling_from_outfield: false  # legacy: permite enviar samples outfield al bucket referee antes de cerrar bootstrap del arbitro
   shirt_detector_conf:
     pixels_resize: 1536
@@ -104,6 +105,7 @@ team_detector:
 
 # Configuración de tracking (ByteTrack)
 tracking:
+  execution_mode: runtime  # runtime = clean sin trazas ricas; debug = auditoría completa
   lineup_spec:
     teams:
       - formation: "4-3-3"
@@ -213,7 +215,6 @@ tracking:
   bytetracker:
     track_activation_threshold: 0.10
     low_conf_threshold: 0.01
-    emit_debug_trace: false  # Solo activa detection_debug/matching_debug detallado en auditoria visual
     lost_track_buffer: 90
     minimum_matching_threshold: 0.945
     frame_rate: 25
@@ -422,8 +423,9 @@ visualization:
   show_kmeans: false
   # Mostrar salida en tiempo real durante procesamiento
   show_output: true
-  # Si true, renderiza salida en mosaico 2x2 con paneles de depuración.
-  four_panel_enabled: true
+  # El vídeo final se renderiza siempre en 4 paneles.
+  # El panel C solo muestra descartes cuando tracking.execution_mode=debug;
+  # en runtime queda negro para evitar depender de trazas internas.
   # Si true, en el panel D mantiene visibles todos los IDs ya observados
   # (no solo hasta el cupo esperado por clase).
   continuity_keep_all_seen_ids: true

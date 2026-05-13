@@ -75,6 +75,8 @@ Si además se usa un `lineup_spec.json` generado por la interfaz, por defecto se
 
 Por defecto, el bootstrap del árbitro no acepta muestras prestadas desde `player/goalkeeper` mientras su cluster siga abierto. Si se necesita recuperar el comportamiento legacy para modelos YOLO que no devuelven clase de árbitro, puede activarse `team_color_model_conf.allow_referee_bootstrap_sampling_from_outfield=true`, que vuelve a permitir ese arranque heurístico por margen respecto a los clusters de campo.
 
+También puede limitarse el radio robusto del árbitro con `team_color_model_conf.referee_upper_bound_cap`. Si se define, el `upper_bound` calculado por IQR para `referee` nunca superará ese valor, lo que ayuda a frenar la deriva del cluster cuando el bootstrap inicial nace con muestras demasiado heterogéneas. El valor por defecto actual en `config.yaml` es `20.0`.
+
 Hasta que el bootstrap queda fijado, `detect_teams` puede devolver `team=None` para las detecciones candidatas.
 
 #### 4. Asignación (`assign_team`)
@@ -91,8 +93,10 @@ Además del método legacy `detect_teams(...)`, `TeamDetector` expone ahora `ide
 
 - Entrada: `filtering_packet["clean"]`, ya alineado y filtrado respecto a `REFERENCE_POINTS`.
 - Salida: packet `IDENTIFICATION`.
-- `clean`: conserva el contenido de entrada y añade `class_name_td`, `team`, `shirt_color`, `distances`, `bbox_size`, `referee_reassign_gate` y `goalkeeper_reassign_gate`.
-- `trace`: incluye la traza por detección (`sample_decision`, motivo de relabel, gates de referee/goalkeeper) y el estado/eventos de clustering.
+- `clean`: conserva solo las señales que usa ByteTrack después y añade `class_td`, `team`, `shirt_color`, `distances` y `bbox_size`.
+- `trace` depende de `tracking.execution_mode`:
+  - `runtime`: `trace={}` para minimizar latencia y evitar serialización innecesaria.
+  - `debug`: incluye la traza por detección (`sample_decision`, motivo de relabel, gates de referee/goalkeeper) y el estado/eventos de clustering.
 
 Ejemplo:
 

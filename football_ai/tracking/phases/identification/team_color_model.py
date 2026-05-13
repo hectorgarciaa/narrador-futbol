@@ -19,6 +19,7 @@ class TeamColorModel:
         max_samples_per_class=500,
         referee_bootstrap_margin=10,
         allow_referee_bootstrap_sampling_from_outfield=False,
+        referee_upper_bound_cap=30,
     ):
         self.min_samples = {"player": 60, "referee": 15, **dict(min_samples or {})}
         self.min_conf = {"player": 0.8, "referee": 0.7, **dict(min_conf or {})}
@@ -27,6 +28,11 @@ class TeamColorModel:
         self.referee_bootstrap_margin = float(referee_bootstrap_margin)
         self.allow_referee_bootstrap_sampling_from_outfield = bool(
             allow_referee_bootstrap_sampling_from_outfield
+        )
+        
+        cap_value = float(referee_upper_bound_cap)
+        self.referee_upper_bound_cap = (
+            cap_value if np.isfinite(cap_value) and cap_value > 0.0 else None
         )
         self.goalkeeper_outlier_iqr_factor = 1.5
         self.n_teams = 2
@@ -110,27 +116,41 @@ class TeamColorModel:
             return "referee", "player", "bootstrap_referee_margin_passed"
         return None, None, "bootstrap_referee_margin_too_small"
 
-    def maybe_add_sample(self, sample_bucket, shirt_color, confidence, frame_index):
+    def maybe_add_sample(
+        self,
+        sample_bucket,
+        shirt_color,
+        confidence,
+        frame_index,
+        *,
+        collect_debug=True,
+    ):
         if sample_bucket not in self.updated:
             return None, None
 
         accepted = confidence >= self.min_conf[sample_bucket] or (
             not self.updated[sample_bucket] and frame_index > 200
         )
-        trace = {
-            "bucket": sample_bucket,
-            "confidence": float(confidence),
-            "accepted": bool(accepted),
-        }
+        trace = (
+            {
+                "bucket": sample_bucket,
+                "confidence": float(confidence),
+                "accepted": bool(accepted),
+            }
+            if collect_debug
+            else None
+        )
         if not accepted:
             return trace, None
 
         self.class_samples[sample_bucket].append(shirt_color)
-        trace["sample_count_after_append"] = len(self.class_samples[sample_bucket])
+        if trace is not None:
+            trace["sample_count_after_append"] = len(self.class_samples[sample_bucket])
         if len(self.class_samples[sample_bucket]) <= self.min_samples[sample_bucket] or frame_index % 5 != 0:
             return trace, None
         if self._last_cluster_update_frame[sample_bucket] == frame_index:
-            trace["cluster_update_skipped"] = "already_updated_this_frame"
+            if trace is not None:
+                trace["cluster_update_skipped"] = "already_updated_this_frame"
             return trace, None
 
         updated, cluster_event = (
@@ -140,7 +160,7 @@ class TeamColorModel:
         )
         self._last_cluster_update_frame[sample_bucket] = frame_index
         self.updated[sample_bucket] = updated
-        if cluster_event is not None:
+        if trace is not None and cluster_event is not None:
             trace["cluster_update"] = {
                 "bucket": sample_bucket,
                 "success": bool(updated),
@@ -248,7 +268,11 @@ class TeamColorModel:
             [trim_mean(samples[:, channel], proportiontocut=0.15) for channel in range(samples.shape[1])],
             dtype=np.float32,
         )
-        self.referee_distance_stats = self._distance_stats(samples, self.team_colors["referee"])
+        self.referee_distance_stats = self._distance_stats(
+            samples,
+            self.team_colors["referee"],
+            upper_bound_cap=self.referee_upper_bound_cap,
+        )
         return True, {
             "event_type": "referee_color_update",
             "success": True,
@@ -310,17 +334,20 @@ class TeamColorModel:
             }
         return trace
 
-    def _distance_stats(self, samples, center):
+    def _distance_stats(self, samples, center, *, upper_bound_cap=None):
         distances = np.linalg.norm(np.asarray(samples, dtype=np.float32) - np.asarray(center, dtype=np.float32), axis=1)
         if distances.size == 0:
             return None
         q1, median, q3 = np.quantile(distances, [0.25, 0.5, 0.75])
         iqr = max(0.0, float(q3 - q1))
+        upper_bound = float(q3 + self.goalkeeper_outlier_iqr_factor * iqr)
+        if upper_bound_cap is not None:
+            upper_bound = min(upper_bound, float(upper_bound_cap))
         return {
             "sample_count": int(distances.size),
             "median": float(median),
             "q1": float(q1),
             "q3": float(q3),
             "iqr": float(iqr),
-            "upper_bound": float(q3 + self.goalkeeper_outlier_iqr_factor * iqr),
+            "upper_bound": upper_bound,
         }
