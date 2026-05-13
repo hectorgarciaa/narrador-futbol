@@ -65,7 +65,8 @@ Por cada frame del vídeo:
    - Además, una detección actualmente relabelada como `player` o `referee` puede promocionarse a `goalkeeper` si su color de camiseta es un outlier robusto respecto a los dos equipos de campo y su `x` proyectada queda fuera del corredor delimitado por la tercera persona más a la izquierda y la tercera más a la derecha visibles en ese frame. Para evitar confundir linieres con porteros, esta promoción solo se permite si la detección queda a más de 3 metros de las bandas laterales.
 5. **BYTETRACK** (`football_ai.bytetrack.ByteTrackPhase.track_packet`): consume `IDENTIFICATION.clean` como fase desacoplada y emite `BYTETRACK`.
    - `clean` conserva todas las señales de `IDENTIFICATION` y añade `tracker_id`, `class_tracker`, `tracked_mask`, `tracked_count` y `tracked_detections`.
-   - `trace` publica `detection_debug` alineado por `det_id`, `matching_debug` por subfase (`high_iou`, `low_iou`, `unconfirmed_iou`, `high_bbox`, `low_bbox`, `unconfirmed_bbox`) y un resumen de entradas trackeadas/no trackeadas.
+   - `trace` en runtime normal publica solo un resumen de entradas trackeadas/no trackeadas.
+   - `detection_debug` alineado por `det_id` y `matching_debug` por subfase (`high_iou`, `low_iou`, `unconfirmed_iou`, `high_bbox`, `low_bbox`, `unconfirmed_bbox`) solo se construyen en auditoría explícita (`collect_visual_debug=true` o `tracking.bytetracker.emit_debug_trace=true`).
    - Esta fase ya no vive dentro de `tracking`: el tracker canónico la consume como entrada intermedia del pipeline.
 6. **CANONICALTRACK** (`football_ai.canonicaltrack.CanonicalTrackPhase.canonicalize_packet`): consume exclusivamente `BYTETRACK` y emite `CANONICALTRACK`.
    - `clean` publica `tracks_frame` por clase (`player`, `goalkeeper`, `referee`, `ball`), `summary` y `canonical_ids_in_frame`.
@@ -219,6 +220,7 @@ Parámetros en `config.yaml`:
 - `team_bootstrap_min_cluster_samples`: mínimo de muestras por cluster al cerrar bootstrap (por defecto 4, es decir, >3 nodos por cluster).
 - `team_auto_name_prefix`: prefijo de nombres automáticos (`Equipo 1`, `Equipo 2`, ...).
 - `team_candidate_classes`: clases que aportan muestras de color (por defecto `player`, `goalkeeper`).
+- `team_color_model_conf.allow_referee_bootstrap_sampling_from_outfield`: por defecto `false`. Si se activa, permite que una detección `player/goalkeeper` entre en `sample_bucket=referee` antes de cerrar el bootstrap del árbitro usando el margen respecto a los clusters de campo.
 
 En `auto-bootstrap`, una vez cerrada la fase inicial, cada equipo queda fijado con la **mediana de su cluster** para evitar intercambio de etiquetas entre frames. Si aparece un cluster pequeño (<=3), se descarta como ruido y se re-clusteriza sobre el cluster mayor.
 
@@ -241,7 +243,9 @@ En `Tracker` se aplica además un filtro de movimiento por track canónico:
 
 Parámetros en `config.yaml`:
 - `track_activation_threshold` y `low_conf_threshold` (separan detecciones `high_conf` y `low_conf`)
-- `bbox_center_distance_gate_px` (gate para rescates con `IoU = 0`; escala con frames perdidos)
+- `bbox_center_distance_gate_px` (gate base para rescates con `IoU = 0`)
+- `bbox_center_distance_gate_max_lost_frames` (tope de frames perdidos a partir del cual el gate bbox deja de crecer)
+- `bbox_center_distance_gate_cap_px` (cap absoluto del gate bbox en píxeles)
 - `lost_time_penalty_weight` (penaliza candidatos con más frames perdidos)
 - `lost_time_penalty_max_frames` (normalización del penalizador temporal)
 - `class_vote_weight_relabel` / `class_vote_weight_yolo` (peso de cada señal de clase en el consenso temporal)

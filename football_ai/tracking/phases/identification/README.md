@@ -73,6 +73,8 @@ Cuando `team_assignment_mode=auto-bootstrap`:
 
 Si además se usa un `lineup_spec.json` generado por la interfaz, por defecto se usan los colores de equipo introducidos por el usuario como referencias directas. Solo si se fuerza `auto-bootstrap` se arranca sin referencias y se aprenden centroides neutrales del propio vídeo.
 
+Por defecto, el bootstrap del árbitro no acepta muestras prestadas desde `player/goalkeeper` mientras su cluster siga abierto. Si se necesita recuperar el comportamiento legacy para modelos YOLO que no devuelven clase de árbitro, puede activarse `team_color_model_conf.allow_referee_bootstrap_sampling_from_outfield=true`, que vuelve a permitir ese arranque heurístico por margen respecto a los clusters de campo.
+
 Hasta que el bootstrap queda fijado, `detect_teams` puede devolver `team=None` para las detecciones candidatas.
 
 #### 4. Asignación (`assign_team`)

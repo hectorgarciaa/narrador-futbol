@@ -18,12 +18,16 @@ class TeamColorModel:
         min_conf={"player": 0.8, "referee": 0.7},
         max_samples_per_class=500,
         referee_bootstrap_margin=10,
+        allow_referee_bootstrap_sampling_from_outfield=False,
     ):
         self.min_samples = {"player": 60, "referee": 15, **dict(min_samples or {})}
         self.min_conf = {"player": 0.8, "referee": 0.7, **dict(min_conf or {})}
         self.min_size_cluster = int(min_size_cluster)
         self.max_samples_per_class = int(max_samples_per_class)
         self.referee_bootstrap_margin = float(referee_bootstrap_margin)
+        self.allow_referee_bootstrap_sampling_from_outfield = bool(
+            allow_referee_bootstrap_sampling_from_outfield
+        )
         self.goalkeeper_outlier_iqr_factor = 1.5
         self.n_teams = 2
         self.with_reference_colors = team_colors is not None
@@ -94,6 +98,8 @@ class TeamColorModel:
 
         if not can_be_middle_ref:
             return None, None, "no_position_gate_matched"
+        if not self.allow_referee_bootstrap_sampling_from_outfield:
+            return None, None, "referee_bootstrap_sampling_disabled"
 
         margins = [
             float(distance) - self.outfield_team_distance_stats[team_name]["upper_bound"]
