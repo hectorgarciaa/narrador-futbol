@@ -143,10 +143,10 @@ Si pasas `--lineup-spec`, `track.py` usa por defecto el mismo comportamiento que
 3. Guarda los tracks en JSON con `json.dump` + `convert_to_serializable` en:
    - `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (ruta principal para `experiments/positions`)
    - `output/tracks_json/tracker/tracks.json` (legacy, compatibilidad)
-   - Si `visualization.four_panel_enabled=true`, también guarda:
+   - Si `tracking.execution_mode=debug`, también guarda:
      - `output/tracks_json/tracker/<video_sanitizado>_debug_frames.json` (metadatos por frame para depuración)
 4. Genera el video anotado con `Drawer.draw_tracks()` e incluye `field_position_m` bajo los `player` cuando está disponible.
-   - Si `visualization.four_panel_enabled=true`, la salida pasa a mosaico 2x2 (tracking compacto, mapa de campo, detecciones YOLO descartadas y vista con continuidad).
+   - La salida se renderiza siempre como mosaico 2x2 (tracking compacto, mapa de campo, detecciones YOLO descartadas y vista con continuidad). En `runtime`, el panel de descartes queda en negro.
    - En ese mosaico, los paneles de tracking/campo/continuidad colorean `player/gk` por cluster de equipo, y el panel de descartes separa YOLO no trackeadas por ByteTrack de detecciones sí trackeadas pero descartadas al entrar en la capa canónica.
    - Si `tracking.possession.enabled=true`, resalta al poseedor con un segundo recuadro amarillo y muestra `POS: <equipo>` en overlays (modo 1 panel y 4 paneles).
 5. El nombre del MP4 de salida se construye con el nombre del vídeo de entrada + `_tracking.mp4`.

@@ -22,6 +22,11 @@ from football_ai.tracking.phases.reference_points import PnLCalibFieldProjector,
 PHASE_TRACKING = "TRACKING"
 
 
+def _normalize_execution_mode(raw_mode):
+    mode = str(raw_mode or "runtime").strip().lower()
+    return "debug" if mode == "debug" else "runtime"
+
+
 class Tracker:
     """
     Orquesta las 6 subfases de tracking para un único frame.
@@ -71,6 +76,9 @@ class Tracker:
             team_detector_conf,
             referee_field_width_m=referee_field_width_m,
             referee_sideline_band_distance_m=referee_sideline_band_distance_m,
+        )
+        self.execution_mode = _normalize_execution_mode(
+            tracker_conf.get("execution_mode", "runtime")
         )
 
         # ── subfase 5: ByteTrack ─────────────────────────────────────────
@@ -129,6 +137,7 @@ class Tracker:
         *,
         show_kmeans: bool = False,
         collect_visual_debug: bool = False,
+        execution_mode: str | None = None,
     ) -> dict:
         """
         Ejecuta las 6 subfases sobre un único frame y devuelve el
@@ -143,23 +152,27 @@ class Tracker:
                 "image_height":  int,
                 "clean": {
                     "tracks_frame":            dict,   # {class: {id: payload}}
-                    "canonical_ids_in_frame":  list,
-                    "summary":                 dict,
                 },
                 "trace": { ... },   # datos de depuración internos
             }
         """
         # 1. Detección
+        effective_execution_mode = _normalize_execution_mode(
+            execution_mode if execution_mode is not None else self.execution_mode
+        )
+
         detector_packet, detector_ms = self.detection_phase.process(
             frame_bgr,
             frame_index=frame_index,
             frame_time_ms=frame_time_ms,
+            execution_mode=effective_execution_mode,
         )
 
         # 2. Proyección
         reference_packet, proj_ms = self.projection_phase.process(
             frame_bgr,
             detector_packet,
+            execution_mode=effective_execution_mode,
         )
 
         # 3. Filtrado
@@ -167,6 +180,7 @@ class Tracker:
             reference_packet,
             active_track_boxes_xyxy=self.bytetrack_phase.active_track_boxes_xyxy(),
             geometry=self.projection_phase.geometry,
+            execution_mode=effective_execution_mode,
         )
 
         # 4. Identificación de equipos / clases
@@ -174,18 +188,19 @@ class Tracker:
             frame_bgr,
             filtering_packet,
             show_kmeans=show_kmeans,
+            execution_mode=effective_execution_mode,
         )
 
         # 5. ByteTrack
         bytetrack_packet, byte_ms = self.bytetrack_phase.process(
             identification_packet,
-            collect_visual_debug=collect_visual_debug,
+            execution_mode=effective_execution_mode,
         )
 
         # 6. Canonización → salida pública
         canonical_packet, canon_ms = self.canonical_phase.process(
             bytetrack_packet,
-            collect_visual_debug=collect_visual_debug,
+            execution_mode=effective_execution_mode,
         )
 
         canonical_packet.setdefault("trace", {})["profile_ms"] = {
@@ -197,7 +212,7 @@ class Tracker:
             "canon_ms": canon_ms,
         }
 
-        if collect_visual_debug:
+        if collect_visual_debug and effective_execution_mode == "debug":
             canonical_packet["trace"]["visual_debug"] = self._phase_build_visual_debug_frame(
                 frame_index, detector_packet, bytetrack_packet, canonical_packet
             )

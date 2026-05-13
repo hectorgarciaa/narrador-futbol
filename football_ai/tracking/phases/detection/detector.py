@@ -16,7 +16,15 @@ class Detector:
         self.conf = conf
         self.verbose = verbose
 
-    def predict_frame(self, frame_bgr, frame_index=0, frame_time_ms=0.0):
+    def predict_frame(
+        self,
+        frame_bgr,
+        frame_index=0,
+        frame_time_ms=0.0,
+        *,
+        execution_mode="runtime",
+    ):
+        collect_debug = str(execution_mode).strip().lower() == "debug"
         result = self.model.predict(
             frame_bgr,
             stream=False,
@@ -29,9 +37,7 @@ class Detector:
 
         bbox_xyxy = []
         confidence = []
-        class_id = []
         class_name = []
-        class_name_raw = []
         trace_detections = []
         total_raw = 0
 
@@ -51,38 +57,39 @@ class Detector:
 
                 bbox_xyxy.append(serialized_bbox)
                 confidence.append(float(score))
-                class_id.append(int(cid))
                 class_name.append(normalized_name)
-                class_name_raw.append(raw_name)
-                trace_detections.append(
-                    {
-                        "det_id": int(det_id),
-                        "bbox_xyxy": serialized_bbox,
-                        "confidence": float(score),
-                        "class_id": int(cid),
-                        "class_name": normalized_name,
-                        "class_name_raw": raw_name,
-                        "render_color_bgr": color[:3],
-                    }
-                )
+                if collect_debug:
+                    trace_detections.append(
+                        {
+                            "det_id": int(det_id),
+                            "bbox_xyxy": serialized_bbox,
+                            "confidence": float(score),
+                            "class_id": int(cid),
+                            "class_name": normalized_name,
+                            "class_name_raw": raw_name,
+                            "render_color_bgr": color[:3],
+                        }
+                    )
 
         clean = {
             "num_detections": len(bbox_xyxy),
             "det_id": list(range(len(bbox_xyxy))),
             "bbox_xyxy": bbox_xyxy,
             "confidence": confidence,
-            "class_id": class_id,
             "class_name": class_name,
-            "class_name_raw": class_name_raw,
         }
-        trace = {
-            "detections": trace_detections,
-            "summary": {
-                "total_raw": total_raw,
-                "total_supported": len(bbox_xyxy),
-                "total_discarded": total_raw - len(bbox_xyxy),
-            },
-        }
+        trace = (
+            {
+                "detections": trace_detections,
+                "summary": {
+                    "total_raw": total_raw,
+                    "total_supported": len(bbox_xyxy),
+                    "total_discarded": total_raw - len(bbox_xyxy),
+                },
+            }
+            if collect_debug
+            else {}
+        )
         return make_phase_packet(
             phase_name=PHASE_DETECTOR,
             frame_index=frame_index,

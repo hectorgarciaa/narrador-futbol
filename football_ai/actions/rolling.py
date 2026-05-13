@@ -144,7 +144,8 @@ class RollingActionsPhase(Phase):
         self._last_checkpoint_result = None
         reset_postprocess_state()
 
-    def execute(self, position_packet: dict) -> dict:
+    def execute(self, position_packet: dict, *, execution_mode="runtime") -> dict:
+        collect_debug = str(execution_mode).strip().lower() == "debug"
         clean_in = dict(position_packet["clean"])
         trace_in = dict(position_packet["trace"])
         frame_index = int(position_packet["frame_index"])
@@ -221,9 +222,12 @@ class RollingActionsPhase(Phase):
         }
         self._last_checkpoint_result = None
 
-        clean_out = dict(clean_in)
-        clean_out["actions_packet"] = actions_packet
-        trace_out = dict(trace_in)
+        clean_out = {
+            "tracks_frame": clean_in.get("tracks_frame", {}),
+            "possession": dict(clean_in.get("possession", {})),
+            "actions_packet": actions_packet,
+        }
+        trace_out = dict(trace_in) if collect_debug else {}
 
         return make_phase_packet(
             phase_name=PHASE_ACTIONS_DETECTOR,

@@ -53,7 +53,6 @@ class ByteTrack(
         new_track_active_overlap_iou: float = 0.0,
         new_track_unconfirmed_overlap_iou: float = 0.0,
         new_track_candidate_overlap_iou: float = 0.0,
-        emit_debug_trace: bool = False,
     ):
         self.track_activation_threshold = float(track_activation_threshold)
         self.low_conf_threshold = float(max(0.0, low_conf_threshold))
@@ -126,8 +125,6 @@ class ByteTrack(
         self.new_track_candidate_overlap_iou = float(
             min(1.0, max(0.0, new_track_candidate_overlap_iou))
         )
-        self.emit_debug_trace = bool(emit_debug_trace)
-
         self.frame_id = 0
         self.det_thresh = self.track_activation_threshold
         self.max_time_lost = int(frame_rate / 30.0 * lost_track_buffer)
@@ -159,6 +156,7 @@ class ByteTrack(
         yolo_class_labels = detections.data.get("class_yolo")
         field_positions = detections.data.get("field_position")
         shirt_colors = detections.data.get("shirt_color")
+        bbox_sizes = detections.data.get("bbox_size")
         raw_det_indices = (
             detections.data.get("raw_det_idx") if detections.data is not None else None
         )
@@ -175,6 +173,7 @@ class ByteTrack(
             field_positions=field_positions,
             yolo_class_labels=yolo_class_labels,
             shirt_colors=shirt_colors,
+            bbox_sizes=bbox_sizes,
             raw_det_indices=raw_det_indices,
         )
         track_by_raw_idx = {}
@@ -216,6 +215,7 @@ class ByteTrack(
         field_positions=None,
         yolo_class_labels=None,
         shirt_colors=None,
+        bbox_sizes=None,
         raw_det_indices=None,
     ) -> list[STrack]:
         self.frame_id += 1
@@ -255,6 +255,7 @@ class ByteTrack(
             yolo_class_labels=yolo_class_labels,
             field_positions=field_positions,
             shirt_colors=shirt_colors,
+            bbox_sizes=bbox_sizes,
             raw_det_indices=raw_det_indices,
         )
         low_conf_detections = self._build_detection_batch(
@@ -266,6 +267,7 @@ class ByteTrack(
             yolo_class_labels=yolo_class_labels,
             field_positions=field_positions,
             shirt_colors=shirt_colors,
+            bbox_sizes=bbox_sizes,
             raw_det_indices=raw_det_indices,
         )
 

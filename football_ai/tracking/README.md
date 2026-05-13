@@ -4,6 +4,11 @@ Pipeline completo de tracking canónico para un partido de fútbol. Consume fase
 
 Nota de desacoplo: la lógica de canonización (matching canónico, seeds, balón y gates de continuidad) vive en `football_ai/canonicaltrack`, y la posesión vive en `football_ai/posession`. `tracking` se mantiene como orquestador del pipeline.
 
+Modo de ejecución:
+- `tracking.execution_mode=runtime`: las fases publican `clean` y desactivan trazas ricas. El único bloque de `trace` que se mantiene al final del `TRACKING` packet es `profile_ms`, inyectado por el orquestador para profiling.
+- `tracking.execution_mode=debug`: se restauran las trazas completas para auditoría, scripts offline y four-panel.
+- `execution_mode` puede venir de `config.yaml`, sobrescribirse por CLI (`--execution-mode`) o pasarse como override al llamar a `run_tracking_pipeline(...)`.
+
 ---
 
 ## `tracker.py` — `Tracker`
@@ -45,32 +50,36 @@ tracker = Tracker(
 Si no pasas `field_tracking_conf`, el tracker puede funcionar solo con `bbox` en imagen. En `scripts/track.py`, por defecto se lee esta configuración desde `config.yaml` y se activa la proyección 2D del campo.
 `PnLCalib` no se guarda dentro de este repositorio como código versionado: el propio tracker lo clona en `external/pnlcalib/` y descarga sus pesos en `models/pnlcalib/` durante la primera ejecución. Por tanto, otra persona que ya tenga este repo solo necesita `git pull`; no tiene que clonar `PnLCalib` manualmente.
 
-### Pipeline interno de `get_tracks(video, show_kmeans, frame_hook=None, collect_visual_debug=False, profile_phases=False)`
+### Pipeline interno de `get_tracks(video, show_kmeans, frame_hook=None, profile_phases=False)`
 
 Por cada frame del vídeo:
 
 1. **Detector** (`Detector.predict_frame`): emite un `PhaseFramePacket` `DETECTOR` con dos vistas fijas del frame:
    - `clean`: arrays paralelos (`det_id`, `bbox_xyxy`, `confidence`, `class_name`, ...).
-   - `trace`: objetos serializables para JSON/debug/render.
+   - `trace`: solo en `debug`; en `runtime` vale `{}`.
 2. **Reference Points** (`PnLCalibFieldProjector.project_frame`): consume `frame_bgr + detector_packet` y emite `REFERENCE_POINTS`. Ejecuta un único forward de `PnLCalib` por frame, reutiliza esos heatmaps en los intentos adaptativos y publica la homografía final en coordenadas de imagen original.
-   - `clean` contiene solo las señales que consumen fases posteriores del pipeline: `num_detections`, `det_id`, `bbox_xyxy`, `confidence`, `class_name`, `class_name_raw`, `field_positions_m`, `ground_points_image_original`, `field_positions_usable_for_tracking`, `homography_valid` y `homography_image_to_field_3x3`.
-   - `trace` agrupa el resto de metadatos de calibración y depuración: `ground_points_image_projected`, métricas de calidad (`quality_status`, `quality_score`, `reprojection_error_px`, recuentos visibles, thresholds usados, `attempt_count`, `estimation_mode`) y el detalle extendido (`attempts`, `keypoints`, `lines`, rechazos).
+   - `clean` contiene solo las señales consumidas después: `num_detections`, `det_id`, `bbox_xyxy`, `confidence`, `class_name`, `field_positions_m`, `ground_points_image_original`, `field_positions_usable_for_tracking`, `homography_valid` y `homography_image_to_field_3x3`.
+   - En `runtime`, `trace={}`.
+   - En `debug`, `trace` agrupa el resto de metadatos de calibración y depuración: `ground_points_image_projected`, métricas de calidad (`quality_status`, `quality_score`, `reprojection_error_px`, recuentos visibles, thresholds usados, `attempt_count`, `estimation_mode`) y el detalle extendido (`attempts`, `keypoints`, `lines`, rechazos).
 3. **Filtering** (`filter_reference_points`): consume `REFERENCE_POINTS` y emite `FILTERING`.
    - `clean` conserva el mismo esquema que `REFERENCE_POINTS`, pero ya filtrado: solo quedan las detecciones aceptadas por la validación geométrica.
-   - `trace` separa `accepted_detections` y `rejected_detections`, con `reject_code`, `reject_label`, flags geométricos y resumen agregado.
+   - En `runtime`, `trace={}`.
+   - En `debug`, `trace` separa `accepted_detections` y `rejected_detections`, con flags geométricos y resumen agregado.
 4. **Identificación de equipo** (`TeamDetector.identify_packet`): consume `FILTERING.clean`, trabaja ya con `frame_bgr + arrays alineados por detección` y emite `IDENTIFICATION`, sin depender de objetos `Results` de YOLO. Puede operar en modo `reference` o `auto-bootstrap`. Si el tracking se lanza desde la interfaz con un `lineup_spec.json`, por defecto usa los colores definidos por el usuario como referencias directas de equipo, igual que el tracking normal. Si se fuerza `auto-bootstrap`, el detector arranca sin referencias y aprende equipos neutrales. A partir de este punto, `goalkeeper` ya no se colapsa con `player`: tanto ByteTrack como la capa canónica distinguen ambas clases.
-   - `clean` mantiene `class_name` como clase YOLO original y añade `class_name_td`, `team`, `shirt_color`, `distances`, `bbox_size`, `referee_reassign_gate` y `goalkeeper_reassign_gate`.
-   - `trace` incluye detalle por detección (`sample_decision`, motivo de relabel, gates de referee/goalkeeper) y el estado/eventos de clustering (`clusters.events`, colores activos, distancias robustas por equipo).
+   - `clean` mantiene `class_name` como clase YOLO original y añade `class_td`, `team`, `shirt_color`, `distances` y `bbox_size`.
+   - En `runtime`, `trace={}`.
+   - En `debug`, `trace` incluye detalle por detección (`sample_decision`, motivo de relabel, gates de referee/goalkeeper) y el estado/eventos de clustering (`clusters.events`, colores activos, distancias robustas por equipo).
    - Si `TeamDetector` ha propuesto relabelar una detección `player/goalkeeper` a `referee` por color, esa reasignación solo se acepta si la detección cumple al menos una de estas condiciones: estar dentro de la banda `+- tracking.referee_sideline_band_distance_m` respecto a las líneas laterales, o caer entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles en ese frame. Si no cumple ninguna de las dos, la detección vuelve a su clase original de YOLO y recupera el equipo de campo más cercano por color.
    - Además, una detección actualmente relabelada como `player` o `referee` puede promocionarse a `goalkeeper` si su color de camiseta es un outlier robusto respecto a los dos equipos de campo y su `x` proyectada queda fuera del corredor delimitado por la tercera persona más a la izquierda y la tercera más a la derecha visibles en ese frame. Para evitar confundir linieres con porteros, esta promoción solo se permite si la detección queda a más de 3 metros de las bandas laterales.
 5. **BYTETRACK** (`football_ai.bytetrack.ByteTrackPhase.track_packet`): consume `IDENTIFICATION.clean` como fase desacoplada y emite `BYTETRACK`.
-   - `clean` conserva todas las señales de `IDENTIFICATION` y añade `tracker_id`, `class_tracker`, `tracked_mask`, `tracked_count` y `tracked_detections`.
-   - `trace` en runtime normal publica solo un resumen de entradas trackeadas/no trackeadas.
-   - `detection_debug` alineado por `det_id` y `matching_debug` por subfase (`high_iou`, `low_iou`, `unconfirmed_iou`, `high_bbox`, `low_bbox`, `unconfirmed_bbox`) solo se construyen en auditoría explícita (`collect_visual_debug=true` o `tracking.bytetracker.emit_debug_trace=true`).
+   - `clean` publica solo lo que necesita la capa canónica: `det_id`, `bbox_xyxy`, `confidence`, `class_name`, `field_positions_m`, `ground_points_image_original` y `tracked_detections`.
+   - `trace` en runtime normal publica solo un resumen y la alineación básica track/detección.
+   - `detection_debug` alineado por `det_id` y `matching_debug` por subfase (`high_iou`, `low_iou`, `unconfirmed_iou`, `high_bbox`, `low_bbox`, `unconfirmed_bbox`) solo se construyen cuando `tracking.execution_mode=debug`.
    - Esta fase ya no vive dentro de `tracking`: el tracker canónico la consume como entrada intermedia del pipeline.
 6. **CANONICALTRACK** (`football_ai.canonicaltrack.CanonicalTrackPhase.canonicalize_packet`): consume exclusivamente `BYTETRACK` y emite `CANONICALTRACK`.
-   - `clean` publica `tracks_frame` por clase (`player`, `goalkeeper`, `referee`, `ball`), `summary` y `canonical_ids_in_frame`.
-   - `trace` publica depuración de asignaciones y descartes (`pending_assignments_debug`, `discard_reason_by_raw_idx`, `forced_absorption_debug`, `canonical_state_debug_snapshot`, `ball_selection_debug`).
+   - `clean` publica solo `tracks_frame` por clase (`player`, `goalkeeper`, `referee`, `ball`).
+   - En `runtime`, `trace={}`.
+   - En `debug`, `summary`, `canonical_ids_in_frame` y la depuración de asignaciones/descarte (`pending_assignments_debug`, `discard_reason_by_raw_idx`, `forced_absorption_debug`, `canonical_state_debug_snapshot`, `ball_selection_debug`) viven en `trace`.
    - `Tracker` reconstruye los acumulados históricos de salida a partir de `CANONICALTRACK.clean.tracks_frame`, sin ejecutar inline la capa canónica.
 7. **Seeds canónicos opcionales en punto de penalti**: si `reserve_penalty_spot_seed_players=true`, el tracker crea dos tracks semilla sintéticos de clase `goalkeeper` en los puntos de penalti. No pasan por `TeamDetector`, así que no contaminan el clustering de colores ni tienen equipo asignado. Sí participan en la reasignación canónica por posición de campo, reservando los IDs 1 y 2 para porteros no visibles al inicio. Mientras no absorban una detección real, también se escriben en el JSON final con `synthetic_seed=true`.
 8. **Lógica especial para los IDs reservados y roles online**: esos dos IDs quedan reservados a porteros. Solo detecciones cuya clase resuelta sea `goalkeeper` pueden ocupar los IDs 1 y 2, tanto en la capa canónica como al absorber sobre los seeds especiales. Su equipo se sigue asignando por el modelo de roles posicionales y el defensa más cercano. Como ya se consideran porteros conocidos, no entran al Set Transformer y se etiquetan manualmente como `POR`. La memoria táctica se sigue acumulando por segmentos semánticos y puede reiniciarse si hay un salto espacial fuerte, una reasignación/reabsorción canónica (`canonical_relinked`) o una deriva sostenida del track hacia otro slot/jugador del lineup.
@@ -91,12 +100,14 @@ Por cada frame del vídeo:
    - y, si hay varias candidatas plausibles, se prioriza la más coherente con la posición esperada y la confianza.
    Si ninguna candidata es físicamente plausible, ese frame queda sin balón en vez de aceptar un teletransporte. Cuando la trayectoria prevista saca el balón fuera de la imagen, la búsqueda queda anclada al borde por el que salió; no se aceptan reapariciones “hacia atrás” dentro de la pantalla. Solo tras `tracking.ball.max_reassign_lost_frames` frames perdidos se permite una redetección libre por máxima confianza.
 11. **POSESSION** (`football_ai.posession.PosessionPhase.process`): consume `CANONICALTRACK`, estima posesión con heurísticas temporales (distancia balón-pie, contacto estricto/flexible y señales de movimiento), y emite un packet con `clean`+`trace`.
-   - `clean` conserva toda la salida previa de `CANONICALTRACK`, añade `possession` y enriquece `tracks_frame` con metadatos de posesión por track.
-   - `trace` conserva la traza de `CANONICALTRACK` y añade el bloque `possession`.
-12. **POSITION_INFERING** (`football_ai.positions.PositionInferingPhase.process`): consume el mismo `CANONICALTRACK` en paralelo, anota `tracks_frame` con roles online y emite un packet propio con `clean`+`trace`.
-   - `clean` conserva la salida canónica, reescribe `tracks_frame` con metadatos de rol y añade un resumen del frame en `position_infering`.
-   - `trace` conserva la traza de `CANONICALTRACK` y añade `position_infering.frame_summary` más estadísticas acumuladas.
-13. **Merge final del tracker**: `Tracker` fusiona `POSESSION` y `POSITION_INFERING` sobre el mismo `tracks_frame` canónico antes de reconstruir el `tracks` final y antes de ejecutar hooks per-frame opcionales como PathCRF live.
+   - `clean` conserva `tracks_frame`, añade `possession` y enriquece `tracks_frame` con metadatos de posesión por track.
+   - En `runtime`, `trace={}`.
+   - En `debug`, conserva la traza de `CANONICALTRACK` y añade el bloque `possession`.
+12. **POSITION_INFERING** (`football_ai.positions.PositionInferingPhase.process`): consume el mismo `POSESSION` enriquecido, anota `tracks_frame` con roles online y emite un packet propio con `clean`+`trace`.
+   - `clean` conserva `tracks_frame` y `possession`, reescribe `tracks_frame` con metadatos de rol.
+   - En `runtime`, `trace={}`.
+   - En `debug`, conserva la traza de `CANONICALTRACK` y añade `position_infering.frame_summary` más estadísticas acumuladas.
+13. **Merge final del tracker**: `Tracker` fusiona `POSESSION` y `POSITION_INFERING` sobre el mismo `tracks_frame` canónico antes de reconstruir el `tracks` final y antes de ejecutar hooks per-frame opcionales como PathCRF live. El render final del pipeline sale siempre en 4 paneles; en `runtime`, el panel C queda negro porque no se emiten descartes enriquecidos.
 
 Todas las fases heredan de `football_ai.core.Phase` y exponen `process()`, que mide automáticamente el tiempo de ejecución e inyecta `elapsed_ms` en el packet. Las fases iniciales viven en sus módulos dueños (`football_ai.detection.DetectionPhase`, `football_ai.reference_points.ProjectionPhase`, `football_ai.filtering.FilteringPhase`, `football_ai.identification.IdentificationPhase`) y `tracking` solo orquesta. Si `profile_phases=True`, el tracker imprime por frame solo las 8 fases funcionales del pipeline (`Detection`, `Projection`, `Filtering`, `Identification`, `ByteTrack`, `CanonicalTrack`, `Posession`, `PositionInfering`) y su total. Las tareas auxiliares fuera de fase, como construir debug visual o ejecutar `frame_hook`, siguen ocurriendo pero ya no entran en ese profiling.
 
@@ -221,6 +232,7 @@ Parámetros en `config.yaml`:
 - `team_auto_name_prefix`: prefijo de nombres automáticos (`Equipo 1`, `Equipo 2`, ...).
 - `team_candidate_classes`: clases que aportan muestras de color (por defecto `player`, `goalkeeper`).
 - `team_color_model_conf.allow_referee_bootstrap_sampling_from_outfield`: por defecto `false`. Si se activa, permite que una detección `player/goalkeeper` entre en `sample_bucket=referee` antes de cerrar el bootstrap del árbitro usando el margen respecto a los clusters de campo.
+- `team_color_model_conf.referee_upper_bound_cap`: cap opcional del `upper_bound` robusto del cluster `referee`. Útil para evitar que un bootstrap inicial demasiado sucio deje un radio excesivo y empiece a absorber detecciones lejanas. El valor por defecto actual en `config.yaml` es `20.0`.
 
 En `auto-bootstrap`, una vez cerrada la fase inicial, cada equipo queda fijado con la **mediana de su cluster** para evitar intercambio de etiquetas entre frames. Si aparece un cluster pequeño (<=3), se descarta como ruido y se re-clusteriza sobre el cluster mayor.
 

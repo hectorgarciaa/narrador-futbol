@@ -57,6 +57,7 @@ class TrackingPhase(Phase):
         *,
         show_kmeans: bool = False,
         collect_visual_debug: bool = False,
+        execution_mode: str | None = None,
     ) -> dict:
         """
         Ejecuta el pipeline de tracking completo y devuelve el packet
@@ -68,6 +69,7 @@ class TrackingPhase(Phase):
             frame_time_ms,
             show_kmeans=show_kmeans,
             collect_visual_debug=collect_visual_debug,
+            execution_mode=execution_mode,
         )
 
 

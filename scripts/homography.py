@@ -106,7 +106,11 @@ def main():
             frame_index=frame_index,
             frame_time_ms=frame_time_ms,
         )
-        reference_packet = projector.project_frame(frame_bgr, detector_packet)
+        reference_packet = projector.project_frame(
+            frame_bgr,
+            detector_packet,
+            execution_mode="debug",
+        )
         filtering_packet = filter_reference_points(
             reference_packet,
             active_track_boxes_xyxy=[],

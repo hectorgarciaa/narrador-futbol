@@ -8,10 +8,12 @@ Este módulo vive entre `IDENTIFICATION` y la capa de tracking canónico:
 
 `IDENTIFICATION.clean` → `ByteTrackPhase.track_packet(...)` → packet `BYTETRACK` → tracking canónico
 
-- `clean`: conserva todas las señales de entrada y añade `tracker_id`, `class_tracker`, `tracked_mask`, `tracked_count` y `tracked_detections`.
-- `trace`: en runtime normal expone solo un resumen agregado; `detection_debug` y `matching_debug`
-  solo se construyen cuando hay una señal explícita de auditoría (`collect_visual_debug=true`
-  o `tracking.bytetracker.emit_debug_trace=true`).
+- `clean`: publica solo las señales que consume `CANONICALTRACK`: `det_id`, `bbox_xyxy`,
+  `confidence`, `class_name`, `field_positions_m`, `ground_points_image_original`
+  y `tracked_detections`.
+- `trace`: en runtime normal expone solo un resumen agregado y la alineación básica
+  track/detección; `detection_debug` y `matching_debug` solo se construyen cuando
+  `tracking.execution_mode=debug`.
 
 ## Piezas principales
 

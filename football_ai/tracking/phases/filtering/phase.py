@@ -13,12 +13,14 @@ class FilteringPhase(Phase):
         active_track_boxes_xyxy=None,
         sideline_margin_m=0.75,
         geometry=None,
+        execution_mode="runtime",
     ):
         return filter_reference_points(
             reference_packet,
             active_track_boxes_xyxy=active_track_boxes_xyxy,
             sideline_margin_m=sideline_margin_m,
             geometry=geometry,
+            execution_mode=execution_mode,
         )
 
 

@@ -16,10 +16,17 @@ class ProjectionPhase(Phase):
     def geometry(self):
         return getattr(self.projector, "geometry", None)
 
-    def execute(self, frame_bgr, detector_packet):
+    def execute(self, frame_bgr, detector_packet, *, execution_mode="runtime"):
         if self.projector is None:
-            return build_reference_points_packet_without_homography(detector_packet)
-        return self.projector.project_frame(frame_bgr, detector_packet)
+            return build_reference_points_packet_without_homography(
+                detector_packet,
+                execution_mode=execution_mode,
+            )
+        return self.projector.project_frame(
+            frame_bgr,
+            detector_packet,
+            execution_mode=execution_mode,
+        )
 
 
 __all__ = ["ProjectionPhase"]

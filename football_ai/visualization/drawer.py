@@ -933,6 +933,9 @@ class Drawer:
         return panel
 
     def _draw_discarded_panel(self, base_frame, debug_frame):
+        if not debug_frame:
+            return np.zeros_like(base_frame)
+
         panel = base_frame.copy()
         debug_frame = debug_frame or {}
         show_reasons = bool(self.visualization_conf.get("discarded_panel_show_reasons", False))
@@ -1114,7 +1117,6 @@ class Drawer:
         output_path,
         show=False,
         window_name="Tracking",
-        four_panel=False,
         debug_frames=None,
         expected_counts=None,
         print_equipos=True,
@@ -1137,7 +1139,7 @@ class Drawer:
             height = int(temp_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             temp_cap.release()
 
-            output_size = (width * 2, height * 2) if four_panel else (width, height)
+            output_size = (width * 2, height * 2)
             cap, out = self.create_writer(video, output_path, output_size=output_size)
             num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             carry_state = {}
@@ -1148,39 +1150,15 @@ class Drawer:
                 if not ret or frame_id >= num_frames:
                     break
 
-                if four_panel:
-                    output_frame = self._compose_four_panel_frame(
-                        frame,
-                        tracks,
-                        frame_id,
-                        debug_frames,
-                        carry_state,
-                        expected_counts,
-                        print_equipos=print_equipos,
-                    )
-                else:
-                    output_frame = frame
-                    frame_tracks = self._extract_frame_tracks(tracks, frame_id)
-                    actions_info = self._frame_actions_from_tracks(tracks, frame_id)
-                    possession_info = self._merge_possession_info(
-                        self._frame_possession_from_tracks(tracks, frame_id),
-                        self._frame_possession_info(frame_tracks),
-                    )
-                    output_frame = self._draw_tracks_frame(
-                        output_frame,
-                        frame_tracks,
-                        compact=False,
-                        possession_info=possession_info,
-                        print_equipos=print_equipos,
-                    )
-                    self._draw_possession_banner(
-                        output_frame,
-                        possession_info,
-                        compact=False,
-                        top_margin_px=8,
-                        print_equipos=print_equipos,
-                    )
-                    self._draw_actions_overlay(output_frame, frame_tracks, actions_info)
+                output_frame = self._compose_four_panel_frame(
+                    frame,
+                    tracks,
+                    frame_id,
+                    debug_frames,
+                    carry_state,
+                    expected_counts,
+                    print_equipos=print_equipos,
+                )
 
                 out.write(output_frame)
                 if show_window:

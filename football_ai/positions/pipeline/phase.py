@@ -29,7 +29,8 @@ class PositionInferingPhase(Phase):
     def reset(self):
         self.assigner.reset()
 
-    def execute(self, canonical_packet):
+    def execute(self, canonical_packet, *, execution_mode="runtime"):
+        collect_debug = str(execution_mode).strip().lower() == "debug"
         tracks_frame_in = canonical_packet["clean"]["tracks_frame"]
         tracks_frame = {
             "player": {
@@ -52,15 +53,18 @@ class PositionInferingPhase(Phase):
             int(canonical_packet["frame_index"]),
         )
 
-        clean_out = dict(canonical_packet["clean"])
-        clean_out["tracks_frame"] = tracks_frame
-        clean_out["position_infering"] = dict(frame_summary)
-
-        trace_out = dict(canonical_packet["trace"])
-        trace_out["position_infering"] = {
-            "frame_summary": dict(frame_summary),
-            "stats": self.assigner.summary(),
+        clean_out = {
+            "tracks_frame": tracks_frame,
+            "possession": dict(canonical_packet["clean"].get("possession", {})),
         }
+
+        trace_out = {}
+        if collect_debug:
+            trace_out = dict(canonical_packet["trace"])
+            trace_out["position_infering"] = {
+                "frame_summary": dict(frame_summary),
+                "stats": self.assigner.summary(),
+            }
 
         return make_phase_packet(
             phase_name=PHASE_POSITION_INFERING,

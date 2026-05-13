@@ -1,9 +1,8 @@
 # visualization
 
 Generación de video anotado con los resultados del tracking.
-Soporta dos modos:
-- `single`: overlay clásico sobre el frame original.
-- `four_panel`: mosaico 2x2 con paneles de depuración por frame.
+El render final sale siempre como mosaico 2x2; en `tracking.execution_mode=runtime`
+el panel C queda negro, y en `debug` se rellena con descartes y trazas enriquecidas.
 
 ---
 
@@ -29,7 +28,7 @@ drawer = Drawer(
 ```
 
 Los colores se leen de `config.yaml` vía `config.get_visualization_colors()` en los scripts.
-En modo campo (`four_panel` panel B), el color de relleno por equipo usa los `team_colors` activos del `TeamDetector` (LAB OpenCV convertidos a BGR al pintar).
+En el panel B, el color de relleno por equipo usa los `team_colors` activos del `TeamDetector` (LAB OpenCV convertidos a BGR al pintar).
 
 ### Método principal: `draw_tracks`
 
@@ -39,8 +38,7 @@ drawer.draw_tracks(
     video="partido.mp4",    # video original para leer los frames
     output_path="output/resultado.mp4",
     show=False,             # si True, muestra en ventana en tiempo real
-    four_panel=False,       # si True, genera mosaico 2x2
-    debug_frames=None,      # metadata cruda/descartada (solo four_panel)
+    debug_frames=None,      # metadata cruda/descartada (solo en debug)
     expected_counts=None    # límites por clase para panel de continuidad
 )
 ```
@@ -63,9 +61,9 @@ En Linux sin entorno gráfico (sin `DISPLAY` ni `WAYLAND_DISPLAY`), si `show=Tru
 5. Escribe el frame anotado con `out.write(frame)`.
 6. En el bloque `finally`, libera `cap` y `out` siempre, incluso si hubo error.
 
-### Modo `four_panel`
+### Render 4 paneles
 
-Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
+Cada frame de salida se divide en 4 paneles:
 1. `A) Tracking compact`: video anotado en formato compacto (`p`, `gk`, `ref`, sin distancias de equipo, roles sin prefijo, posición `x, y` sin decimales y texto más pequeño).
    - Bajo cada track compacto se muestran `tr:<cls>` (clase actual del track), `y:<cls>` (YOLO) y `td:<cls>` (TeamDetector).
    - En `player/gk`, el color de `bbox` se toma de los `team_colors` activos del `TeamDetector` para el equipo resuelto. Si `team` viene vacío, primero intenta resolverlo por `distances`.
@@ -86,7 +84,7 @@ Cuando `four_panel=True`, cada frame de salida se divide en 4 paneles:
    - En las detecciones que nunca llegaron a salir de ByteTrack, `tr:-` indica explícitamente que no hubo clase de track disponible.
    - Para las detecciones devueltas por ByteTrack pero descartadas en canónico, el panel incluye también `bt#<id>` (el `tracker_id` devuelto por ByteTrack).
    - Si `visualization.discarded_panel_show_reasons=true`, el panel añade una abreviatura compacta del `discard_reason` en la etiqueta (útil para depurar gates/límites sin desbordar el overlay). El JSON `*_debug_frames.json` sigue guardando el motivo completo.
-   - Cuando `four_panel_enabled=true`, el pipeline guarda además un JSON `*_debug_frames.json` junto al `*_tracks.json` con estas listas y motivos, para análisis offline.
+   - Cuando `tracking.execution_mode=debug`, el pipeline guarda además un JSON `*_debug_frames.json` junto al `*_tracks.json` con estas listas y motivos, para análisis offline.
 4. `D) Tracking con continuidad`: overlay compacto con relleno de continuidad (usa la última posición conocida por ID cuando falta detección en el frame) y mantiene el resaltado de posesión.
    - Igual que el panel A, muestra `tr:<cls>`, `y:<cls>` y `td:<cls>` de cada track y colorea `player/gk` con el color de equipo resuelto en `team_colors` del `TeamDetector`.
    - Añade además `seg:<id>` bajo cada track para mostrar el segmento semántico activo del `canonical_id`.
@@ -110,7 +108,7 @@ Compatibilidad de clases en `tracks`:
 | `create_writer(video, output_path)` | Prepara `VideoCapture` y `VideoWriter`, añade `.mp4` si falta extensión |
 | `draw_detection(frame, class_name, data, color, track_id)` | Dibuja un único bbox con etiqueta |
 | `draw_all_detections_in_frame(frame, class_name, class_tracks, frame_id)` | Dibuja todos los tracks de una clase en un frame |
-| `draw_tracks(tracks, video, output_path, show, window_name, four_panel, debug_frames, expected_counts)` | Pipeline completo (clásico o 2x2) |
+| `draw_tracks(tracks, video, output_path, show, window_name, debug_frames, expected_counts)` | Pipeline completo 2x2 |
 
 > **Nota:** El método `draw_detection` itera dinámicamente sobre las claves del diccionario `distances` para formatear las distancias, por lo que es compatible con cualquier configuración de equipos en config.yaml.
 

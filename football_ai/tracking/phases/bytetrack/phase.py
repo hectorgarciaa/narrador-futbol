@@ -39,12 +39,10 @@ class ByteTrackPhase(Phase):
                 boxes.append(tlbr[:4])
         return boxes
 
-    def execute(self, identification_packet, *, collect_visual_debug=False):
+    def execute(self, identification_packet, *, execution_mode="runtime"):
         clean_in = identification_packet["clean"]
         detections = self._build_detections(clean_in)
-        collect_debug = bool(collect_visual_debug) or bool(
-            getattr(self.tracker, "emit_debug_trace", False)
-        )
+        collect_debug = str(execution_mode).strip().lower() == "debug"
         setattr(self.tracker, "collect_internal_matching_debug", collect_debug)
         tracked = self.tracker.update_with_detections(detections)
         return self._build_packet(
@@ -53,10 +51,10 @@ class ByteTrackPhase(Phase):
             collect_internal_debug=collect_debug,
         )
 
-    def track_packet(self, identification_packet, *, collect_visual_debug=False):
+    def track_packet(self, identification_packet, *, execution_mode="runtime"):
         return self.execute(
             identification_packet,
-            collect_visual_debug=collect_visual_debug,
+            execution_mode=execution_mode,
         )
 
     @staticmethod
@@ -73,6 +71,7 @@ class ByteTrackPhase(Phase):
             "class_yolo": np.asarray(clean["class_name"], dtype=object),
             "distances": np.asarray(clean["distances"], dtype=object),
             "shirt_color": np.asarray(clean["shirt_color"], dtype=object),
+            "bbox_size": np.asarray(clean["bbox_size"], dtype=np.float32),
             "field_position": np.asarray(clean["field_positions_m"], dtype=np.float32),
             "ground_point_image": np.asarray(clean["ground_points_image_original"], dtype=np.float32),
             "raw_det_idx": np.asarray(clean["det_id"], dtype=np.int32),
@@ -119,11 +118,14 @@ class ByteTrackPhase(Phase):
             )
 
         clean_out = {
-            **clean_in,
-            "tracker_id": tracker_ids,
-            "class_tracker": class_trackers,
-            "tracked_mask": tracked_mask,
-            "tracked_count": int(sum(tracked_mask)),
+            "det_id": list(clean_in["det_id"]),
+            "bbox_xyxy": [list(bbox) for bbox in clean_in["bbox_xyxy"]],
+            "confidence": list(clean_in["confidence"]),
+            "class_name": list(clean_in["class_name"]),
+            "field_positions_m": [list(point) for point in clean_in["field_positions_m"]],
+            "ground_points_image_original": [
+                list(point) for point in clean_in["ground_points_image_original"]
+            ],
             "tracked_detections": tracked_detections,
         }
         trace = {
@@ -132,7 +134,21 @@ class ByteTrackPhase(Phase):
                 "total_tracked_detections": int(sum(tracked_mask)),
                 "total_untracked_detections": int(len(tracked_mask) - sum(tracked_mask)),
             },
+            "tracking_alignment": {
+                "tracker_id": tracker_ids,
+                "class_tracker": class_trackers,
+                "tracked_mask": tracked_mask,
+                "tracked_count": int(sum(tracked_mask)),
+            },
         }
+        if collect_internal_debug:
+            trace["input_detection_metadata"] = {
+                "team": _serialize_value(clean_in["team"]),
+                "class_td": _serialize_value(clean_in["class_td"]),
+                "distances": _serialize_value(clean_in["distances"]),
+                "shirt_color": _serialize_value(clean_in["shirt_color"]),
+                "bbox_size": _serialize_value(clean_in["bbox_size"]),
+            }
         if collect_internal_debug:
             debug_by_raw_idx = dict(
                 getattr(self.tracker, "last_detection_debug_by_raw_idx", {}) or {}

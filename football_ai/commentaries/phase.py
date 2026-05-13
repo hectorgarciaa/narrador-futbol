@@ -148,14 +148,19 @@ class CommentaryPhase(Phase):
                 self._executor = ThreadPoolExecutor(max_workers=max(1, int(self.config.max_workers)))
         self._pending_job = None
 
-    def execute(self, phase_packet: dict) -> dict:
+    def execute(self, phase_packet: dict, *, execution_mode="runtime") -> dict:
+        collect_debug = str(execution_mode).strip().lower() == "debug"
         clean_in = dict(phase_packet["clean"])
         trace_in = dict(phase_packet["trace"])
         frame_index = int(phase_packet["frame_index"])
 
         if not self.config.enabled:
-            clean_out = dict(clean_in)
-            clean_out["commentary_packet"] = {"enabled": False}
+            clean_out = {
+                "tracks_frame": clean_in.get("tracks_frame", {}),
+                "possession": dict(clean_in.get("possession", {})),
+                "actions_packet": dict(clean_in.get("actions_packet", {})),
+                "commentary_packet": {"enabled": False},
+            }
             return make_phase_packet(
                 phase_name=PHASE_COMMENTARY,
                 frame_index=frame_index,
@@ -163,7 +168,7 @@ class CommentaryPhase(Phase):
                 image_width=phase_packet["image_width"],
                 image_height=phase_packet["image_height"],
                 clean=clean_out,
-                trace=trace_in,
+                trace=(dict(trace_in) if collect_debug else {}),
             )
 
         actions_pkt = clean_in.get("actions_packet", {})
@@ -210,9 +215,13 @@ class CommentaryPhase(Phase):
             "last_audio_path": last_audio,
         }
 
-        clean_out = dict(clean_in)
-        clean_out["commentary_packet"] = commentary_packet
-        trace_out = dict(trace_in)
+        clean_out = {
+            "tracks_frame": clean_in.get("tracks_frame", {}),
+            "possession": dict(clean_in.get("possession", {})),
+            "actions_packet": dict(clean_in.get("actions_packet", {})),
+            "commentary_packet": commentary_packet,
+        }
+        trace_out = dict(trace_in) if collect_debug else {}
 
         return make_phase_packet(
             phase_name=PHASE_COMMENTARY,

@@ -47,7 +47,8 @@ class PosessionPhase(Phase):
                 payload["possession_nearest_track_id"] = possession_info["nearest_track_id"]
                 payload["possession_nearest_team_id"] = possession_info["nearest_team_id"]
 
-    def execute(self, canonical_packet):
+    def execute(self, canonical_packet, *, execution_mode="runtime"):
+        collect_debug = str(execution_mode).strip().lower() == "debug"
         tracks_frame_in = canonical_packet["clean"]["tracks_frame"]
         tracks_frame = {
             "player": {
@@ -75,16 +76,15 @@ class PosessionPhase(Phase):
         )
         self._annotate_tracks_frame(tracks_frame, possession_info)
 
-        clean_out = dict(canonical_packet["clean"])
-        clean_out["tracks_frame"] = tracks_frame
-        clean_out["possession"] = dict(possession_info)
-        summary = dict(clean_out.get("summary", {}))
-        summary["possession_team_id"] = possession_info["team_id"]
-        summary["possession_player_id"] = possession_info["player_id"]
-        clean_out["summary"] = summary
+        clean_out = {
+            "tracks_frame": tracks_frame,
+            "possession": dict(possession_info),
+        }
 
-        trace_out = dict(canonical_packet["trace"])
-        trace_out["possession"] = dict(possession_info)
+        trace_out = {}
+        if collect_debug:
+            trace_out = dict(canonical_packet["trace"])
+            trace_out["possession"] = dict(possession_info)
 
         return make_phase_packet(
             phase_name=PHASE_POSESSION,
@@ -96,8 +96,8 @@ class PosessionPhase(Phase):
             trace=trace_out,
         )
 
-    def process_packet(self, canonical_packet):
-        return self.execute(canonical_packet)
+    def process_packet(self, canonical_packet, *, execution_mode="runtime"):
+        return self.execute(canonical_packet, execution_mode=execution_mode)
 
 
 __all__ = ["PosessionPhase"]

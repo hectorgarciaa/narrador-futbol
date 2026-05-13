@@ -77,11 +77,12 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--force-four-panel-debug",
-        action="store_true",
+        "--execution-mode",
+        choices=("runtime", "debug"),
+        default=None,
         help=(
-            "Fuerza la recogida de debug frame a frame aunque la config no tenga "
-            "four_panel_enabled activado."
+            "Sobrescribe tracking.execution_mode para esta ejecución. "
+            "runtime desactiva trazas ricas; debug activa auditoría completa."
         ),
     )
     parser.add_argument(

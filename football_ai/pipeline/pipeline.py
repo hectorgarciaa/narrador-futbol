@@ -203,6 +203,11 @@ def _normalize_team_detector_runtime_conf(team_detector_conf, team_mode=None):
     return runtime_conf
 
 
+def _normalize_tracking_execution_mode(raw_mode):
+    mode = str(raw_mode or "runtime").strip().lower()
+    return "debug" if mode == "debug" else "runtime"
+
+
 def _resolve_runtime_device_label(raw_device):
     normalized = str(raw_device or "cpu").strip().lower()
     if normalized.startswith("cuda"):
@@ -302,7 +307,7 @@ def resolve_lineup_spec(args, config):
     )
 
 
-def run_tracking_pipeline(args):
+def run_tracking_pipeline(args, *, execution_mode_override=None):
     # Load configuration
     config = get_config()
 
@@ -358,9 +363,6 @@ def run_tracking_pipeline(args):
         visualization_conf = dict(config.visualization or {})
         show_kmeans = config.get("visualization", "show_kmeans")
         show_output = config.get("visualization", "show_output")
-        four_panel_enabled = bool(visualization_conf.get("four_panel_enabled", False))
-        if bool(getattr(args, "force_four_panel_debug", False)):
-            four_panel_enabled = True
 
         # Tracking configuration
         detector_conf = config.detection
@@ -369,7 +371,20 @@ def run_tracking_pipeline(args):
         bytetracker_conf = config.bytetracker
         ball_conf = config.ball
 
-        tracker_conf = config.tracking
+        tracker_conf = dict(config.tracking or {})
+        cli_execution_mode = getattr(args, "execution_mode", None)
+        resolved_execution_mode = (
+            execution_mode_override
+            if execution_mode_override is not None
+            else cli_execution_mode
+            if cli_execution_mode is not None
+            else tracker_conf.get("execution_mode", "runtime")
+        )
+        execution_mode = _normalize_tracking_execution_mode(
+            resolved_execution_mode
+        )
+        tracker_conf["execution_mode"] = execution_mode
+        collect_visual_debug = execution_mode == "debug"
         if lineup_spec is not None:
             lineup_colors = _build_team_colors_from_raw_mapping(lineup_team_colors_raw)
             team_detector_conf.setdefault("team_color_model_conf", {})
@@ -436,6 +451,7 @@ def run_tracking_pipeline(args):
         logger.info(f"Greedy role CSV output: {role_greedy_csv_path}")
         logger.info(f"Tracking metrics dataset CSV: {metrics_dataset_path}")
         logger.info(f"Tracking configuration: {tracker_conf}")
+        logger.info(f"Tracking execution mode: {execution_mode}")
         logger.info(f"Field tracking configuration: {projector_conf}")
         logger.info(f"Team detector configuration: {team_detector_conf}")
 
@@ -625,24 +641,37 @@ def run_tracking_pipeline(args):
                 frame_index=frame_index,
                 frame_time_ms=frame_time_ms,
                 show_kmeans=show_kmeans,
-                collect_visual_debug=four_panel_enabled,
+                collect_visual_debug=collect_visual_debug,
+                execution_mode=execution_mode,
             )
             
-            posession_packet, posession_ms = posession_phase.process(tracking_packet)
+            posession_packet, posession_ms = posession_phase.process(
+                tracking_packet,
+                execution_mode=execution_mode,
+            )
             
             final_packet = posession_packet
             position_ms = 0.0
             actions_ms = 0.0
             if position_phase:
-                position_packet, position_ms = position_phase.process(posession_packet)
+                position_packet, position_ms = position_phase.process(
+                    posession_packet,
+                    execution_mode=execution_mode,
+                )
                 final_packet = position_packet
             if actions_phase:
-                actions_packet, actions_ms = actions_phase.process(final_packet)
+                actions_packet, actions_ms = actions_phase.process(
+                    final_packet,
+                    execution_mode=execution_mode,
+                )
                 final_packet = actions_packet
 
             commentary_ms = 0.0
             if commentary_phase:
-                commentary_packet, commentary_ms = commentary_phase.process(final_packet)
+                commentary_packet, commentary_ms = commentary_phase.process(
+                    final_packet,
+                    execution_mode=execution_mode,
+                )
                 final_packet = commentary_packet
             
             tracks_frame = final_packet["clean"]["tracks_frame"]
@@ -656,7 +685,7 @@ def run_tracking_pipeline(args):
             commentary_pkt = final_packet["clean"].get("commentary_packet", {})
             tracks["commentary_packets"].append(dict(commentary_pkt))
 
-            if four_panel_enabled:
+            if collect_visual_debug:
                 trace_debug = final_packet["trace"].get("visual_debug")
                 if trace_debug:
                     visual_debug_frames.append(trace_debug)
@@ -711,7 +740,7 @@ def run_tracking_pipeline(args):
             "ball": 1
         }
 
-        if four_panel_enabled and visual_debug_frames:
+        if collect_visual_debug and visual_debug_frames:
             debug_frames_path = build_debug_frames_output_path(config, video_path)
             save_debug_frames(visual_debug_frames, debug_frames_path, logger)
         
@@ -758,8 +787,7 @@ def run_tracking_pipeline(args):
                 video_path,
                 output,
                 show=show_output,
-                four_panel=four_panel_enabled,
-                debug_frames=(visual_debug_frames if four_panel_enabled else None),
+                debug_frames=(visual_debug_frames if collect_visual_debug else None),
                 expected_counts=max_tracks_per_class,
                 print_equipos=bool(getattr(args, "print_equipos", True)),
             )

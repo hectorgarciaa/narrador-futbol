@@ -27,14 +27,14 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - Tracking multi-objeto con **ByteTrack** extendido con penalización por equipo, doble señal de clase (YOLO + reetiquetado por color) y remapeo controlado por consenso.
 - Proyección automática al campo 2D con **PnLCalib** antes de la identificación de equipos; usa anclajes por clase (`player`/`goalkeeper`/`referee` en pie y `ball` sin offset vertical) y emplea posiciones métricas de `player` y `goalkeeper` en el matching del tracker solo cuando la homografía del frame supera una validación explícita basada en `geometry_fit`, `support_quality` y `coverage_quality`. El proyector puede relajar thresholds para rescatar el frame, compara todos los intentos por score y solo conserva la homografía si queda clasificada como `good`; si no, el pipeline cae a bbox y no usa `field_position_m` para decisiones de tracking/canonización.
 - Si existe homografía válida del frame anterior, el proyector puede aplicar `temporal_blend` como suavizado temporal, pero ese blend solo se adopta cuando también supera la validación de calidad y no empeora el `quality_score`; en caso contrario se mantiene la homografía actual sin suavizar.
-- El pipeline visual y de tracking encadena seis packets por frame: `DETECTOR`, `REFERENCE_POINTS`, `FILTERING`, `IDENTIFICATION`, `BYTETRACK` y `CANONICALTRACK`. `clean` se usa para la lógica del pipeline y `trace` para JSON/debug/drawer.
+- El pipeline visual y de tracking encadena seis packets por frame: `DETECTOR`, `REFERENCE_POINTS`, `FILTERING`, `IDENTIFICATION`, `BYTETRACK` y `CANONICALTRACK`. `clean` se usa para la lógica del pipeline y `trace` queda reservado a auditoría/debug. En `tracking.execution_mode=runtime`, las fases ya no construyen trazas ricas.
 - `FILTERING` sí elimina detecciones en `clean`: conserva el mismo esquema que `REFERENCE_POINTS`, pero solo con las detecciones aceptadas. El detalle de aceptadas/rechazadas y su `reject_code` queda separado en `trace`.
 - Identificación de equipo mediante **KMeans en espacio LAB** sobre el crop de camiseta.
 - Inferencia online de roles futbolísticos con Set Transformer. El modelo trabaja con 11 roles tras fusionar carrileros con laterales (`CI -> LI`, `CD -> LD`); en alineaciones y `expected_roles_by_team` deben usarse directamente `LI` y `LD`. La segunda pasada de Húngaro del tracking reaplica el slot final por segmento real `(track_id, segment_id)` para evitar colisiones entre jugadores distintos de un mismo equipo. Los segmentos siguen rompiéndose por señales duras de relink/cambio estructural, mientras que los cambios tácticos temporales de rol se absorben con el sistema de votos del propio segmento.
 - La fase de comentarios ya no reutiliza un manifiesto global por vídeo: cada ejecución escribe sus eventos y audios en un directorio propio de run, evitando mezclar nombres o `Jugador N` heredados de ejecuciones anteriores al montar el MP4 final con narración.
-- `IDENTIFICATION` consume `FILTERING.clean` y devuelve un `clean` enriquecido con `class_name_td`, `team`, `shirt_color`, `distances`, `bbox_size` y las gates de relabel que usan fases posteriores, manteniendo además la clase YOLO original en `class_name`. Su `trace` incluye el detalle por detección, motivos de relabel y estado/eventos de clustering.
-- `BYTETRACK` consume `IDENTIFICATION.clean` como fase independiente y devuelve un `clean` que conserva las señales de entrada y añade `tracker_id`, `class_tracker`, `tracked_mask` y `tracked_detections`; el `trace` contiene el debug por detección y la traza de asociaciones tentativas.
-- `CANONICALTRACK` consume exclusivamente `BYTETRACK.clean`, aplica canonización/relink/absorción forzada/seeds/selección de balón y devuelve `tracks_frame` por clase junto a trazas de descarte y diagnóstico (`pending_assignments_debug`, `discard_reason_by_raw_idx`, `forced_absorption_debug`, `ball_selection_debug`).
+- `IDENTIFICATION` consume `FILTERING.clean` y devuelve un `clean` enriquecido con `class_td`, `team`, `shirt_color`, `distances` y `bbox_size`, manteniendo la clase YOLO original en `class_name`. Su `trace` solo se construye en `tracking.execution_mode=debug` e incluye el detalle por detección, motivos de relabel y estado/eventos de clustering.
+- `BYTETRACK` consume `IDENTIFICATION.clean` como fase independiente y devuelve un `clean` mínimo para la canonización (`det_id`, `bbox_xyxy`, `confidence`, `class_name`, `field_positions_m`, `ground_points_image_original`, `tracked_detections`). La alineación detección↔track y las trazas ricas de matching viven en `trace`, y solo aparecen en `debug`.
+- `CANONICALTRACK` consume exclusivamente `BYTETRACK.clean`, aplica canonización/relink/absorción forzada/seeds/selección de balón y devuelve `tracks_frame` por clase. Sus trazas de descarte y diagnóstico (`pending_assignments_debug`, `discard_reason_by_raw_idx`, `forced_absorption_debug`, `ball_selection_debug`) solo se construyen en `tracking.execution_mode=debug`.
 - Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
 - Anti-solape de ByteTrack limitado al nacimiento de tracks nuevos: los `unconfirmed` ya nacidos siguen el matching normal y el filtro duro de solape solo se aplica antes de crear un track nuevo frente a activos, `unconfirmed` previos y otros candidatos del mismo frame, con thresholds independientes para cada comparación.
 - Sistema de evaluación cuantitativo por track (cobertura, fragmentación, velocidad, etc.).
@@ -121,7 +121,7 @@ Los notebooks de `experiments/visualization/` que inspeccionan el relabel de equ
 
 ## 🧪 Depuración de tracking (four-panel)
 
-Cuando `visualization.four_panel_enabled=true`, el vídeo de salida se genera como mosaico 2x2. En ese modo, el pipeline guarda además un JSON con metadatos por frame para depurar por qué se pierden IDs:
+El vídeo de salida se genera siempre como mosaico 2x2. Cuando `tracking.execution_mode=debug`, el pipeline guarda además un JSON con metadatos por frame para depurar por qué se pierden IDs:
 
 - `output/tracks_json/tracker/<video>_debug_frames.json`
 
@@ -132,7 +132,7 @@ Incluye, por frame:
 
 En la salida 2x2, los paneles compacto/continuidad muestran además `tr:<cls>`, `y:<cls>` y `td:<cls>` para distinguir la clase actual del track, la clase YOLO y la clase relabelada por `TeamDetector`. El panel inferior izquierdo usa ese mismo trío de etiquetas en las detecciones descartadas junto a la confianza; cuando una detección no llegó a salir de ByteTrack, aparece como `tr:-`. Si activas `visualization.discarded_panel_show_reasons`, el vídeo muestra una versión compacta del `discard_reason` para que quepa en overlay, mientras que el JSON `*_debug_frames.json` conserva el motivo completo.
 Además, los paneles superior izquierdo, superior derecho e inferior derecho colorean `player/gk` usando los `team_colors` activos del `TeamDetector` (centros/refs LAB del clustering convertidos a BGR para render). Si un track no tiene equipo resoluble, caen al color por clase.
-Ese JSON también puede incluir `frame_num`, `bytetrack_reason`, `bytetrack_stage` y `bytetrack_unconfirmed_association` para auditar por qué un track tentativo no llegó a confirmarse: mejor candidato, IoU, penalizaciones de clase/tamaño/campo y conflicto de asignación. La información de homografía queda ahora en el packet `REFERENCE_POINTS`: `trace.attempts`, `trace.diagnostics`, `clean.quality_status`, `clean.quality_score` y el desglose de intentos aceptados/rechazados por frame.
+Ese JSON también puede incluir `frame_num`, `bytetrack_reason` y `bytetrack_stage` para auditar por qué una detección no llegó a consolidarse. La información de homografía rica vive en `REFERENCE_POINTS.trace` solo en `debug`; en runtime, el pipeline conserva en `clean` únicamente las señales funcionales que necesita el resto de fases.
 
 Para un resumen offline rápido puedes usar:
 
@@ -558,13 +558,13 @@ python scripts/track.py video_prueba \
   --model-path models/finetuning/yolov11m/weights/best.pt \
   --output-root output/analysis/run_video_prueba_best \
   --experiment-label video_prueba__best \
-  --force-four-panel-debug \
+  --execution-mode debug \
   --skip-render-video \
   --skip-metrics-dataset
 ```
 - `--model-path`: usa un checkpoint distinto sin tocar `config.yaml`.
 - `--output-root`: guarda `tracks.json`, `summary.json`, `debug_frames.json` y logs en un directorio dedicado.
-- `--force-four-panel-debug`: fuerza el guardado de decisiones frame a frame (`debug_frames.json`).
+- `--execution-mode debug`: activa las trazas ricas del pipeline y el guardado de `debug_frames.json`.
 - `--skip-render-video`: evita renderizar el MP4 anotado final.
 - `--skip-metrics-dataset`: no modifica `data/posiciones_etiquetadas/common/tracking_metrics.csv`.
 
@@ -674,7 +674,7 @@ Si `tracking.special_seed_role_team_assignment_enabled=true`, el tracking princi
 Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa exactamente el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), sin suelo extra ni expansión por velocidad en la capa 2. Así un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
-En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida. También puedes activar `visualization.four_panel_enabled=true` para generar una salida 2x2 de depuración (tracking compacto, mapa de campo, YOLO descartadas y continuidad), incluyendo el indicador de posesión en los paneles.
+En Linux headless, si `visualization.show_output=true` pero no hay `DISPLAY`/`WAYLAND_DISPLAY`, el sistema desactiva automáticamente la ventana de preview y continúa guardando el video de salida. El render final sale siempre en 4 paneles: en `tracking.execution_mode=runtime`, el panel de descartes queda negro porque no se construyen trazas internas; en `debug`, se rellenan los overlays completos y se guarda `debug_frames.json`.
 Si otra persona ya tiene este repositorio clonado, le basta con hacer `git pull`; no tiene que clonar `PnLCalib` manualmente. En la primera ejecución, el código clona `PnLCalib` en `external/pnlcalib/` y descarga sus pesos automáticamente en `models/pnlcalib/`. Si no tiene este repositorio principal en local, entonces sí tiene que clonar `narrador-futbol` una vez antes de hacer `git pull` en el futuro.
 
 ### Detección básica
@@ -973,6 +973,7 @@ detection:
 team_detector:
   team_color_model_conf:
     allow_referee_bootstrap_sampling_from_outfield: false  # permite enviar muestras outfield al bucket referee antes de cerrar su bootstrap
+    referee_upper_bound_cap: 20.0  # cap maximo del upper_bound robusto del cluster referee
   shirt_detector_conf:
     init: "k-means++"
     n_init: 3

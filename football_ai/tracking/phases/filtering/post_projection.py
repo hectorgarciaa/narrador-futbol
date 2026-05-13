@@ -35,7 +35,9 @@ def filter_reference_points(
     active_track_boxes_xyxy=None,
     sideline_margin_m=0.75,
     geometry=None,
+    execution_mode="runtime",
 ):
+    collect_debug = str(execution_mode).strip().lower() == "debug"
     clean_in = reference_packet["clean"]
     num_detections = int(clean_in["num_detections"])
     homography_valid = bool(clean_in["homography_valid"])
@@ -119,12 +121,16 @@ def filter_reference_points(
             rejected_trace.append(trace_item)
 
     clean_out = {
-        key: [value[index] for index in kept_indices]
-        if isinstance(value, list) and len(value) == num_detections
-        else value
-        for key, value in clean_in.items()
+        "num_detections": len(kept_indices),
+        "det_id": [clean_in["det_id"][index] for index in kept_indices],
+        "bbox_xyxy": [clean_in["bbox_xyxy"][index] for index in kept_indices],
+        "confidence": [clean_in["confidence"][index] for index in kept_indices],
+        "class_name": [clean_in["class_name"][index] for index in kept_indices],
+        "field_positions_m": [clean_in["field_positions_m"][index] for index in kept_indices],
+        "ground_points_image_original": [
+            clean_in["ground_points_image_original"][index] for index in kept_indices
+        ],
     }
-    clean_out["num_detections"] = len(kept_indices)
 
     return make_phase_packet(
         phase_name=PHASE_FILTERING,
@@ -133,18 +139,22 @@ def filter_reference_points(
         image_width=reference_packet["image_width"],
         image_height=reference_packet["image_height"],
         clean=clean_out,
-        trace={
-            "accepted_detections": accepted_trace,
-            "rejected_detections": rejected_trace,
-            "summary": {
-                "total_before_filter": num_detections,
-                "total_kept": len(kept_indices),
-                "total_rejected": len(rejected_trace),
-                "total_rescued_by_iou": rescued_count,
-                "homography_valid": homography_valid,
-                "field_positions_usable_for_tracking": field_positions_usable,
-            },
-        },
+        trace=(
+            {
+                "accepted_detections": accepted_trace,
+                "rejected_detections": rejected_trace,
+                "summary": {
+                    "total_before_filter": num_detections,
+                    "total_kept": len(kept_indices),
+                    "total_rejected": len(rejected_trace),
+                    "total_rescued_by_iou": rescued_count,
+                    "homography_valid": homography_valid,
+                    "field_positions_usable_for_tracking": field_positions_usable,
+                },
+            }
+            if collect_debug
+            else {}
+        ),
     )
 
 

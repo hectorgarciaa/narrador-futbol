@@ -89,6 +89,7 @@ class ByteTrackDetectionMetadata:
         yolo_class_labels,
         field_positions,
         shirt_colors,
+        bbox_sizes,
         raw_det_indices,
     ) -> STrack:
         det = STrack(
@@ -113,6 +114,11 @@ class ByteTrackDetectionMetadata:
             if shirt_colors is not None and source_index < len(shirt_colors)
             else None
         )
+        det.bbox_size = (
+            float(bbox_sizes[source_index])
+            if bbox_sizes is not None and source_index < len(bbox_sizes)
+            else None
+        )
         det.raw_det_idx = int(raw_det_indices[source_index]) if source_index < len(raw_det_indices) else int(source_index)
         return det
 
@@ -127,6 +133,7 @@ class ByteTrackDetectionMetadata:
         yolo_class_labels,
         field_positions,
         shirt_colors,
+        bbox_sizes,
         raw_det_indices,
     ) -> list[STrack]:
         return [
@@ -139,6 +146,7 @@ class ByteTrackDetectionMetadata:
                 yolo_class_labels=yolo_class_labels,
                 field_positions=field_positions,
                 shirt_colors=shirt_colors,
+                bbox_sizes=bbox_sizes,
                 raw_det_indices=raw_det_indices,
             )
             for source_index, tlbr, score in zip(source_indices, boxes, scores)

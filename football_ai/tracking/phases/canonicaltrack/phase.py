@@ -331,7 +331,8 @@ class CanonicalTrackPhase(
         )
         return updated_state, selected_ball
 
-    def execute(self, bytetrack_packet, collect_visual_debug=False):
+    def execute(self, bytetrack_packet, *, execution_mode="runtime"):
+        collect_visual_debug = str(execution_mode).strip().lower() == "debug"
         n_frame = int(bytetrack_packet["frame_index"])
         self._ensure_frame_slot(n_frame)
 
@@ -533,6 +534,12 @@ class CanonicalTrackPhase(
         discarded_yolo_not_tracked = []
         discarded_bytetrack_not_canonical = []
         if collect_visual_debug:
+            input_detection_metadata = bytetrack_packet["trace"].get(
+                "input_detection_metadata", {}
+            )
+            class_td_values = list(input_detection_metadata.get("class_td") or [])
+            team_values = list(input_detection_metadata.get("team") or [])
+            distance_values = list(input_detection_metadata.get("distances") or [])
             detection_payload_by_raw_idx = {}
             for det_index, raw_det_idx in enumerate(clean_in.get("det_id", [])):
                 try:
@@ -542,9 +549,11 @@ class CanonicalTrackPhase(
                 bbox = clean_in["bbox_xyxy"][det_index] if det_index < len(clean_in["bbox_xyxy"]) else None
                 confidence = clean_in["confidence"][det_index] if det_index < len(clean_in["confidence"]) else None
                 class_yolo = clean_in["class_name"][det_index] if det_index < len(clean_in["class_name"]) else None
-                class_td = clean_in["class_td"][det_index] if det_index < len(clean_in["class_td"]) else None
-                team = clean_in["team"][det_index] if det_index < len(clean_in["team"]) else None
-                distances = clean_in["distances"][det_index] if det_index < len(clean_in["distances"]) else None
+                class_td = class_td_values[det_index] if det_index < len(class_td_values) else None
+                team = team_values[det_index] if det_index < len(team_values) else None
+                distances = (
+                    distance_values[det_index] if det_index < len(distance_values) else None
+                )
                 detection_payload_by_raw_idx[raw_idx_int] = {
                     "raw_det_idx": raw_idx_int,
                     "bbox": self._bbox_to_list(bbox),
@@ -598,45 +607,47 @@ class CanonicalTrackPhase(
 
         clean_out = {
             "tracks_frame": tracks_frame,
-            "summary": summary,
-            "canonical_ids_in_frame": canonical_ids_in_frame,
         }
 
-        trace = {
-            "pending_assignments_debug": serialize_for_trace(pending_assignments_debug),
-            "discard_reason_by_raw_idx": serialize_for_trace(
-                bytetrack_discard_reason_by_raw_idx
-            ),
-            "forced_absorption_debug": serialize_for_trace(
-                {
-                    "assignments": forced_absorption_assignments,
-                    "active_candidates_state": self.state.forced_absorption_state,
-                }
-            ),
-            "canonical_state_debug_snapshot": serialize_for_trace(
-                self.state.canonical_state
-            ),
-            "ball_selection_debug": serialize_for_trace(ball_selection_debug),
-            "accepted_raw_detection_indexes": sorted(
-                int(raw_idx) for raw_idx in accepted_raw_detection_indexes
-            ),
-            "bytetrack_raw_detection_indexes": sorted(
-                int(raw_idx) for raw_idx in bytetrack_raw_detection_indexes
-            ),
-            "bytetrack_id_by_raw_idx": serialize_for_trace(bytetrack_id_by_raw_idx),
-            "bytetrack_not_tracked_reason_by_raw_idx": serialize_for_trace(
-                bytetrack_not_tracked_reason_by_raw_idx
-            ),
-            "matching_debug": serialize_for_trace(
-                bytetrack_packet["trace"].get("matching_debug", {})
-            ),
-            "discarded_yolo_not_tracked": serialize_for_trace(
-                discarded_yolo_not_tracked
-            ),
-            "discarded_bytetrack_not_canonical": serialize_for_trace(
-                discarded_bytetrack_not_canonical
-            ),
-        }
+        trace = {}
+        if collect_visual_debug:
+            trace = {
+                "summary": serialize_for_trace(summary),
+                "canonical_ids_in_frame": serialize_for_trace(canonical_ids_in_frame),
+                "pending_assignments_debug": serialize_for_trace(pending_assignments_debug),
+                "discard_reason_by_raw_idx": serialize_for_trace(
+                    bytetrack_discard_reason_by_raw_idx
+                ),
+                "forced_absorption_debug": serialize_for_trace(
+                    {
+                        "assignments": forced_absorption_assignments,
+                        "active_candidates_state": self.state.forced_absorption_state,
+                    }
+                ),
+                "canonical_state_debug_snapshot": serialize_for_trace(
+                    self.state.canonical_state
+                ),
+                "ball_selection_debug": serialize_for_trace(ball_selection_debug),
+                "accepted_raw_detection_indexes": sorted(
+                    int(raw_idx) for raw_idx in accepted_raw_detection_indexes
+                ),
+                "bytetrack_raw_detection_indexes": sorted(
+                    int(raw_idx) for raw_idx in bytetrack_raw_detection_indexes
+                ),
+                "bytetrack_id_by_raw_idx": serialize_for_trace(bytetrack_id_by_raw_idx),
+                "bytetrack_not_tracked_reason_by_raw_idx": serialize_for_trace(
+                    bytetrack_not_tracked_reason_by_raw_idx
+                ),
+                "matching_debug": serialize_for_trace(
+                    bytetrack_packet["trace"].get("matching_debug", {})
+                ),
+                "discarded_yolo_not_tracked": serialize_for_trace(
+                    discarded_yolo_not_tracked
+                ),
+                "discarded_bytetrack_not_canonical": serialize_for_trace(
+                    discarded_bytetrack_not_canonical
+                ),
+            }
 
         return make_phase_packet(
             phase_name=PHASE_CANONICALTRACK,
@@ -648,10 +659,10 @@ class CanonicalTrackPhase(
             trace=trace,
         )
 
-    def canonicalize_packet(self, bytetrack_packet, collect_visual_debug=False):
+    def canonicalize_packet(self, bytetrack_packet, *, execution_mode="runtime"):
         return self.execute(
             bytetrack_packet,
-            collect_visual_debug=collect_visual_debug,
+            execution_mode=execution_mode,
         )
 
 
