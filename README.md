@@ -971,6 +971,8 @@ detection:
   ball_min_conf: 0.0035
 
 team_detector:
+  team_color_model_conf:
+    allow_referee_bootstrap_sampling_from_outfield: false  # permite enviar muestras outfield al bucket referee antes de cerrar su bootstrap
   shirt_detector_conf:
     init: "k-means++"
     n_init: 3
@@ -1006,6 +1008,8 @@ tracking:
   low_conf_threshold: 0.01
   track_activation_threshold: 0.10
   bbox_center_distance_gate_px: 90.0
+  bbox_center_distance_gate_max_lost_frames: 4
+  bbox_center_distance_gate_cap_px: 360.0
   bbox_height_ratio_threshold: 0.20
   bbox_width_ratio_threshold: 0.30
   lost_time_penalty_weight: 0.12
@@ -1090,6 +1094,8 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `reassign_motion_growth_cap_frames` (solo aplica a clases sin homografía)
 - `bbox_center_distance_gate_px`
 - Valor baseline actual recomendado tras la auditoría larga de `ucl_30s`: `90.0`
+- `bbox_center_distance_gate_max_lost_frames`
+- `bbox_center_distance_gate_cap_px`
 - `bbox_height_ratio_threshold`
 - `bbox_width_ratio_threshold`
 - `lost_time_penalty_weight`

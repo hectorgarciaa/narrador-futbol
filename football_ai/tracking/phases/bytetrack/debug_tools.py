@@ -15,6 +15,8 @@ class ByteTrackDebugTools:
         stage=None,
         tracker_id=None,
     ) -> None:
+        if not self.collect_internal_matching_debug:
+            return
         if raw_det_idx is None:
             return
         try:
@@ -145,7 +147,6 @@ class ByteTrackDebugTools:
         threshold: float | None,
     ) -> None:
         if not self.collect_internal_matching_debug:
-            self.last_matching_debug[phase_name] = []
             return
 
         diagnostics = []

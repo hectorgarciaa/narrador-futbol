@@ -42,9 +42,16 @@ class ByteTrackPhase(Phase):
     def execute(self, identification_packet, *, collect_visual_debug=False):
         clean_in = identification_packet["clean"]
         detections = self._build_detections(clean_in)
-        setattr(self.tracker, "collect_internal_matching_debug", bool(collect_visual_debug))
+        collect_debug = bool(collect_visual_debug) or bool(
+            getattr(self.tracker, "emit_debug_trace", False)
+        )
+        setattr(self.tracker, "collect_internal_matching_debug", collect_debug)
         tracked = self.tracker.update_with_detections(detections)
-        return self._build_packet(identification_packet, tracked)
+        return self._build_packet(
+            identification_packet,
+            tracked,
+            collect_internal_debug=collect_debug,
+        )
 
     def track_packet(self, identification_packet, *, collect_visual_debug=False):
         return self.execute(
@@ -72,7 +79,7 @@ class ByteTrackPhase(Phase):
         }
         return detections
 
-    def _build_packet(self, identification_packet, tracked):
+    def _build_packet(self, identification_packet, tracked, *, collect_internal_debug=False):
         clean_in = identification_packet["clean"]
         det_id_to_index = {
             int(det_id): index for index, det_id in enumerate(clean_in["det_id"])
@@ -111,20 +118,6 @@ class ByteTrackPhase(Phase):
                 }
             )
 
-        debug_by_raw_idx = dict(getattr(self.tracker, "last_detection_debug_by_raw_idx", {}) or {})
-        detection_debug = []
-        for index, det_id in enumerate(clean_in["det_id"]):
-            debug_payload = dict(debug_by_raw_idx.get(int(det_id), {}) or {})
-            detection_debug.append(
-                {
-                    "det_id": int(det_id),
-                    "tracked": bool(tracked_mask[index]),
-                    "tracker_id": tracker_ids[index],
-                    "class_tracker": class_trackers[index],
-                    **{str(key): _serialize_value(value) for key, value in debug_payload.items()},
-                }
-            )
-
         clean_out = {
             **clean_in,
             "tracker_id": tracker_ids,
@@ -134,16 +127,35 @@ class ByteTrackPhase(Phase):
             "tracked_detections": tracked_detections,
         }
         trace = {
-            "detection_debug": detection_debug,
-            "matching_debug": _serialize_value(
-                getattr(self.tracker, "last_matching_debug", {}) or {}
-            ),
             "summary": {
                 "total_input_detections": int(clean_in["num_detections"]),
                 "total_tracked_detections": int(sum(tracked_mask)),
                 "total_untracked_detections": int(len(tracked_mask) - sum(tracked_mask)),
             },
         }
+        if collect_internal_debug:
+            debug_by_raw_idx = dict(
+                getattr(self.tracker, "last_detection_debug_by_raw_idx", {}) or {}
+            )
+            detection_debug = []
+            for index, det_id in enumerate(clean_in["det_id"]):
+                debug_payload = dict(debug_by_raw_idx.get(int(det_id), {}) or {})
+                detection_debug.append(
+                    {
+                        "det_id": int(det_id),
+                        "tracked": bool(tracked_mask[index]),
+                        "tracker_id": tracker_ids[index],
+                        "class_tracker": class_trackers[index],
+                        **{
+                            str(key): _serialize_value(value)
+                            for key, value in debug_payload.items()
+                        },
+                    }
+                )
+            trace["detection_debug"] = detection_debug
+            trace["matching_debug"] = _serialize_value(
+                getattr(self.tracker, "last_matching_debug", {}) or {}
+            )
         return make_phase_packet(
             phase_name=PHASE_BYTETRACK,
             frame_index=identification_packet["frame_index"],

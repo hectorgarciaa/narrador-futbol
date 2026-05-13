@@ -41,6 +41,8 @@ class ByteTrack(
         lost_time_penalty_weight: float = 0.0,
         lost_time_penalty_max_frames: int = 10,
         bbox_center_distance_gate_px: float = 120.0,
+        bbox_center_distance_gate_max_lost_frames: Optional[int] = None,
+        bbox_center_distance_gate_cap_px: Optional[float] = None,
         class_vote_weight_relabel: float = 1.0,
         class_vote_weight_yolo: float = 1.0,
         class_consensus_switch_margin: float = 2.0,
@@ -51,6 +53,7 @@ class ByteTrack(
         new_track_active_overlap_iou: float = 0.0,
         new_track_unconfirmed_overlap_iou: float = 0.0,
         new_track_candidate_overlap_iou: float = 0.0,
+        emit_debug_trace: bool = False,
     ):
         self.track_activation_threshold = float(track_activation_threshold)
         self.low_conf_threshold = float(max(0.0, low_conf_threshold))
@@ -94,6 +97,19 @@ class ByteTrack(
         self.lost_time_penalty_weight = float(max(0.0, lost_time_penalty_weight))
         self.lost_time_penalty_max_frames = max(1, int(lost_time_penalty_max_frames))
         self.bbox_center_distance_gate_px = float(max(1.0, bbox_center_distance_gate_px))
+        if bbox_center_distance_gate_max_lost_frames is None:
+            self.bbox_center_distance_gate_max_lost_frames = None
+        else:
+            self.bbox_center_distance_gate_max_lost_frames = max(
+                1, int(bbox_center_distance_gate_max_lost_frames)
+            )
+        if bbox_center_distance_gate_cap_px is None:
+            self.bbox_center_distance_gate_cap_px = None
+        else:
+            gate_cap_px = float(bbox_center_distance_gate_cap_px)
+            self.bbox_center_distance_gate_cap_px = (
+                gate_cap_px if np.isfinite(gate_cap_px) and gate_cap_px > 0.0 else None
+            )
         self.class_vote_weight_relabel = float(max(0.0, class_vote_weight_relabel))
         self.class_vote_weight_yolo = float(max(0.0, class_vote_weight_yolo))
         self.class_consensus_switch_margin = float(max(0.0, class_consensus_switch_margin))
@@ -110,6 +126,7 @@ class ByteTrack(
         self.new_track_candidate_overlap_iou = float(
             min(1.0, max(0.0, new_track_candidate_overlap_iou))
         )
+        self.emit_debug_trace = bool(emit_debug_trace)
 
         self.frame_id = 0
         self.det_thresh = self.track_activation_threshold
@@ -202,8 +219,12 @@ class ByteTrack(
         raw_det_indices=None,
     ) -> list[STrack]:
         self.frame_id += 1
-        self.last_detection_debug_by_raw_idx = {}
-        self.last_matching_debug = {}
+        if self.collect_internal_matching_debug:
+            self.last_detection_debug_by_raw_idx = {}
+            self.last_matching_debug = {}
+        else:
+            self.last_detection_debug_by_raw_idx = {}
+            self.last_matching_debug = {}
         activated_tracks = []
         refound_tracks = []
         lost_tracks = []

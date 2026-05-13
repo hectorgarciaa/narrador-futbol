@@ -6,8 +6,24 @@ from supervision.tracker.byte_tracker.single_object_track import STrack, TrackSt
 
 from .utils import joint_tracks, remove_duplicate_tracks, sub_tracks
 
+try:
+    import lap
+except Exception:  # pragma: no cover - fallback runtime path
+    lap = None
+
 
 class ByteTrackPipelineSteps:
+    def _run_assignment_solver(self, sub_cost: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        if lap is not None:
+            _cost, row_assignments, _ = lap.lapjv(
+                sub_cost.astype(np.float64, copy=False),
+                extend_cost=True,
+            )
+            row_indices = np.arange(len(row_assignments), dtype=np.int32)
+            valid_mask = row_assignments >= 0
+            return row_indices[valid_mask], row_assignments[valid_mask].astype(np.int32)
+        return linear_sum_assignment(sub_cost)
+
     def _partition_existing_tracks(self):
         unconfirmed = []
         tracked_tracks = []
@@ -27,6 +43,29 @@ class ByteTrackPipelineSteps:
         cost_mode: str,
         threshold: float | None,
     ) -> tuple[list[tuple[int, int]], list[int], list[int], dict[str, object]]:
+        shape = (len(tracks), len(detections))
+        if not tracks or not detections:
+            match_data = {
+                "phase_name": phase_name,
+                "cost_mode": cost_mode,
+                "base_cost": np.full(shape, np.inf, dtype=np.float32),
+                "feasible_mask": np.zeros(shape, dtype=bool),
+                "pair_metrics": self._empty_pair_metrics(
+                    shape,
+                    np.zeros(shape, dtype=np.float32),
+                ),
+            }
+            if self.collect_internal_matching_debug:
+                self._collect_phase_matching_debug(
+                    phase_name=phase_name,
+                    tracks=tracks,
+                    detections=detections,
+                    match_data=match_data,
+                    matches=[],
+                    threshold=threshold,
+                )
+            return [], list(range(len(tracks))), list(range(len(detections))), match_data
+
         match_data = self._build_phase_match_data(
             tracks,
             detections,
@@ -55,7 +94,7 @@ class ByteTrackPipelineSteps:
                         track_idx, det_idx
                     ]
 
-            row_ind, col_ind = linear_sum_assignment(sub_cost)
+            row_ind, col_ind = self._run_assignment_solver(sub_cost)
             for row_offset, col_offset in zip(row_ind.tolist(), col_ind.tolist()):
                 track_idx = row_indices[row_offset]
                 det_idx = col_indices[col_offset]
@@ -77,14 +116,15 @@ class ByteTrackPipelineSteps:
             index for index in range(len(detections)) if index not in matched_det_indices
         ]
 
-        self._collect_phase_matching_debug(
-            phase_name=phase_name,
-            tracks=tracks,
-            detections=detections,
-            match_data=match_data,
-            matches=matches,
-            threshold=threshold,
-        )
+        if self.collect_internal_matching_debug:
+            self._collect_phase_matching_debug(
+                phase_name=phase_name,
+                tracks=tracks,
+                detections=detections,
+                match_data=match_data,
+                matches=matches,
+                threshold=threshold,
+            )
         return matches, unmatched_track_indices, unmatched_det_indices, match_data
 
     def _associate_confirmed_phase(

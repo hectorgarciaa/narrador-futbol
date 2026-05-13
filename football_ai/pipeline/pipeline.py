@@ -395,9 +395,15 @@ def run_tracking_pipeline(args):
         team_mode = getattr(args, "team_mode", None)
 
         if getattr(args, "team_bootstrap_min_samples", None) is not None:
-            team_detector_conf["min_samples"] = int(args.team_bootstrap_min_samples)
+            team_detector_conf.setdefault("team_color_model_conf", {})
+            team_detector_conf["team_color_model_conf"]["min_samples"] = int(
+                args.team_bootstrap_min_samples
+            )
         if getattr(args, "team_bootstrap_min_cluster_samples", None) is not None:
-            team_detector_conf["min_size_cluster"] = int(args.team_bootstrap_min_cluster_samples)
+            team_detector_conf.setdefault("team_color_model_conf", {})
+            team_detector_conf["team_color_model_conf"]["min_size_cluster"] = int(
+                args.team_bootstrap_min_cluster_samples
+            )
 
         team_detector_conf = _normalize_team_detector_runtime_conf(
             team_detector_conf,

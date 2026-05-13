@@ -9,7 +9,9 @@ Este módulo vive entre `IDENTIFICATION` y la capa de tracking canónico:
 `IDENTIFICATION.clean` → `ByteTrackPhase.track_packet(...)` → packet `BYTETRACK` → tracking canónico
 
 - `clean`: conserva todas las señales de entrada y añade `tracker_id`, `class_tracker`, `tracked_mask`, `tracked_count` y `tracked_detections`.
-- `trace`: expone `detection_debug`, `matching_debug` y un resumen agregado.
+- `trace`: en runtime normal expone solo un resumen agregado; `detection_debug` y `matching_debug`
+  solo se construyen cuando hay una señal explícita de auditoría (`collect_visual_debug=true`
+  o `tracking.bytetracker.emit_debug_trace=true`).
 
 ## Piezas principales
 
@@ -29,5 +31,20 @@ Tras la auditoría comparativa larga sobre `ucl_30s` (`750` frames, ejecución s
 - `track_activation_threshold = 0.10`
 - `low_conf_threshold = 0.01`
 - `bbox_center_distance_gate_px = 90.0`
+- `bbox_center_distance_gate_max_lost_frames = 4`
+- `bbox_center_distance_gate_cap_px = 360.0`
 
 Ese ajuste (`tight_bbox_gate`) empató en cobertura canónica con `higher_activation_tight_bbox`, pero ganó por un margen pequeño en switches, relinks y fragmentación raw.
+
+## Runtime vs auditoría
+
+El módulo distingue dos caminos:
+
+- **runtime normal**: calcula solo `base_cost`, `feasible_mask` y el coste activo de la subfase.
+  No serializa `detection_debug` ni `matching_debug`, y evita construir métricas de `bbox_center`
+  en fases IoU o métricas de campo para clases donde no aplican.
+- **audit/debug**: activa la traza homogénea completa por detección y por subfase para análisis
+  forense del matching.
+
+Además, el solver de asignación se resuelve de forma interna: usa `lap` cuando está disponible
+y cae a `scipy.optimize.linear_sum_assignment` como fallback. No se expone como hiperparámetro.

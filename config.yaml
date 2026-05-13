@@ -91,6 +91,7 @@ team_detector:
     min_conf: {"player": 0.8, "referee": 0.7}  # Confianza mínima de detección para usar la muestra en el cálculo de color
     max_samples_per_class: 500       # Máximo de muestras a almacenar por clase para el cálculo de color (ventana móvil)
     referee_bootstrap_margin: 10
+    allow_referee_bootstrap_sampling_from_outfield: false  # legacy: permite enviar samples outfield al bucket referee antes de cerrar bootstrap del arbitro
   shirt_detector_conf:
     pixels_resize: 1536
     batched_kmeans_gpu_conf:
@@ -212,6 +213,7 @@ tracking:
   bytetracker:
     track_activation_threshold: 0.10
     low_conf_threshold: 0.01
+    emit_debug_trace: false  # Solo activa detection_debug/matching_debug detallado en auditoria visual
     lost_track_buffer: 90
     minimum_matching_threshold: 0.945
     frame_rate: 25
@@ -232,6 +234,8 @@ tracking:
     lost_time_penalty_weight: 0.12  # Peso de la penalización por tiempo perdido en el coste de matching
     lost_time_penalty_max_frames: 10  # Máximo número de frames perdidos para aplicar penalización en el coste de matching
     bbox_center_distance_gate_px: 90.0  # Baseline ganador tras auditoría larga en ucl_30s para rescates con IoU=0
+    bbox_center_distance_gate_max_lost_frames: 4  # El gate bbox deja de crecer a partir de 4 frames perdidos
+    bbox_center_distance_gate_cap_px: 360.0  # Límite superior del gate bbox para evitar rescates tardíos absurdos
     class_vote_weight_relabel: 1.0  # Peso del voto de clase reetiquetada (TeamDetector) en el consenso por track
     class_vote_weight_yolo: 1.0  # Peso del voto de clase original YOLO en el consenso por track
     class_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para permitir cambio de clase del track interno
