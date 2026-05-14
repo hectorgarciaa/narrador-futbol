@@ -1,90 +1,86 @@
 # detection
 
-Módulo de detección de objetos en fotogramas de vídeo de fútbol usando modelos YOLO de Ultralytics. Expone un wrapper genérico y una cabeza de detección personalizada para el balón.
+Fase de deteccion de objetos para el pipeline de tracking, basada en modelos YOLO de Ultralytics. Esta carpeta contiene el wrapper minimo usado por la fase y un adaptador de fase que invoca ese wrapper.
 
-## Clases detectadas
+## Clases soportadas
 
-El sistema detecta cuatro clases, definidas en el dataset de fine-tuning de Roboflow:
+Se normalizan clases a estas cuatro etiquetas canonicas y todo lo demas se descarta:
 
-| Clase | Descripción |
+| Clase | Descripcion |
 |---|---|
 | `player` | Jugador de campo |
 | `goalkeeper` | Portero |
-| `referee` | Árbitro |
-| `ball` | Balón |
+| `referee` | Arbitro |
+| `ball` | Balon |
+
+La normalizacion acepta alias comunes (`person`, `people`, `gk`, `ref`, `sports ball`, etc.) y los mapea a las etiquetas anteriores.
 
 ---
 
 ## `detector.py` — `Detector`
 
-**Objetivo:** Proporcionar una interfaz mínima sobre `ultralytics.YOLO` para que el resto del sistema no dependa directamente de la API de Ultralytics.
+Wrapper minimo sobre `ultralytics.YOLO`.
 
-**Implementación:**
-- Instancia un modelo YOLO en `__init__` con la ruta y el umbral de confianza.
-- `predict_frame(frame_bgr, frame_index, frame_time_ms)` procesa un único frame y devuelve un `PhaseFramePacket` de fase `DETECTOR`.
-- El paquete filtra desde el primer momento a las clases soportadas del proyecto (`player`, `goalkeeper`, `referee`, `ball`) y solo esas entran en `clean` y `trace`.
-- La salida se divide en:
-  - `clean`: arrays paralelos estables para encadenar pipeline.
-  - `trace`: objetos serializables pensados para JSON y render/debug.
+**Constructor**
+- `Detector(model_path, conf=0.01, verbose=False)`
+
+**Metodo principal**
+- `predict_frame(frame_bgr, frame_index=0, frame_time_ms=0.0, *, execution_mode="runtime")`
+
+`frame_bgr` debe ser un `np.ndarray` con forma `(H, W, 3)` en BGR (formato OpenCV). En `execution_mode="debug"` se incluye `trace` con detalle por deteccion.
+
+**Salida (`PhaseFramePacket`)**
+- `clean`:
+  - `num_detections`: `int`
+  - `det_id`: lista `int` secuencial (0..N-1)
+  - `bbox_xyxy`: lista de listas `[x1, y1, x2, y2]` en `float`
+  - `confidence`: lista `float`
+  - `class_name`: lista `str` (solo clases soportadas)
+- `trace` (solo en debug):
+  - `detections`: lista de detecciones con `det_id`, `bbox_xyxy`, `confidence`, `class_id`, `class_name`, `class_name_raw`, `render_color_bgr`
+  - `summary`: `total_raw`, `total_supported`, `total_discarded`
+
+**Ejemplo minimo**
 
 ```python
-from football_ai.detection import Detector
+from football_ai.tracking.phases.detection import Detector
 import cv2
 
 detector = Detector(
     model_path="models/yolo/v11/yolov11m.pt",
-    conf=0.1
+    conf=0.1,
 )
 
 cap = cv2.VideoCapture("partido.mp4")
 ok, frame_bgr = cap.read()
 if ok:
-    packet = detector.predict_frame(frame_bgr, frame_index=0, frame_time_ms=0.0)
+    packet = detector.predict_frame(
+        frame_bgr,
+        frame_index=0,
+        frame_time_ms=0.0,
+        execution_mode="debug",
+    )
     clean = packet["clean"]
     trace = packet["trace"]
     print(clean["num_detections"])
-    print(trace["summary"])
+    print(trace.get("summary", {}))
 cap.release()
 ```
 
-**¿Por qué un wrapper?** Desacopla el resto del código de Ultralytics: si se cambiase la librería de detección, solo habría que modificar esta clase.
-
-El script [scripts/detect.py](/home/hegarc04/narrador-futbol/scripts/detect.py:1) usa directamente este wrapper y resuelve `video_path` y `model_path` tanto por shortcut de `config.yaml` como por ruta desde la raíz del repo.
-
 ---
 
-## `ball_detector.py` — `DetectR8`
+## `phase.py` — `DetectionPhase`
 
-**Objetivo:** Mejorar la detección del balón, que es el objeto más pequeño y difícil de detectar en un partido, mediante una cabeza de detección con menor `reg_max`.
+Adaptador de fase que instancia `Detector` y delega en `predict_frame`.
 
-**Contexto técnico:** En YOLO, el módulo `Detect` usa Distribution Focal Loss (DFL) donde `reg_max` controla el número de bins para predecir la distribución de cada coordenada del bounding box. Por defecto es 16. Reducirlo a 8 produce un modelo más compacto y potencialmente más estable para objetos pequeños con poco contexto espacial.
-
-**Implementación:**
-- Hereda de `ultralytics.nn.modules.head.Detect`.
-- En `__init__`, sobreescribe `reg_max = 8` y `no = nc + 8*4`.
-- Reconstruye las cabezas `cv2` (regresión de bbox) y `dfl` con los nuevos parámetros.
+**Uso**
 
 ```python
-from football_ai.detection import DetectR8
-from ultralytics import YOLO
+from football_ai.tracking.phases.detection import DetectionPhase
 
-# Cargar modelo fine-tuned de balón
-model = YOLO("models/finetuning-balon/v11/yolov11m/weights/best.pt")
-
-# Sustituir la cabeza de detección estándar por DetectR8
-model.model[-1] = DetectR8(
-    nc=model.model[-1].nc,
-    ch=model.model[-1].ch
+phase = DetectionPhase(
+    model_path="models/yolo/v11/yolov11m.pt",
+    detector_conf={"conf": 0.1, "verbose": False},
 )
-
-# Ahora el modelo detecta con reg_max=8
-results = model("partido.mp4", stream=True)
+packet = phase.execute(frame_bgr, frame_index=0, frame_time_ms=0.0)
 ```
-
-> **Importante:** Este reemplazo debe hacerse **después** de cargar los pesos del modelo fine-tuned (que fue entrenado con `reg_max=8`). Si se aplica antes de cargar pesos, las dimensiones no coincidirán. Ver `scripts/detect_ball.py` para el uso correcto.
-
----
-
-## Relación entre las dos clases
-
-`Detector` y `DetectR8` son **independientes**. `Detector` es el wrapper genérico usado por `Tracker` para detección de jugadores. `DetectR8` es un módulo de bajo nivel que se aplica directamente al modelo YOLO en `scripts/detect_ball.py` para el caso especial de detección de balón.
