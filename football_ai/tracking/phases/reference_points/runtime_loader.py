@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple
+from urllib.error import URLError
 
 import torch
 import torchvision.transforms as T
@@ -51,7 +52,10 @@ PNLCALIB_REQUIRED_MODULES = {
 }
 
 
-def load_pnlcalib_runtime(device: Optional[str] = None) -> PnLCalibRuntime:
+def load_pnlcalib_runtime(
+    device: Optional[str] = None,
+    project_root: Optional[Path] = None,
+) -> PnLCalibRuntime:
     missing_modules = _get_missing_pnlcalib_modules()
     if missing_modules:
         missing_description = ", ".join(
@@ -62,8 +66,8 @@ def load_pnlcalib_runtime(device: Optional[str] = None) -> PnLCalibRuntime:
             f"Faltan dependencias para PnLCalib: {missing_description}"
         )
 
-    resolved_repo_dir = _ensure_pnlcalib_repo()
-    resolved_kp_path, resolved_line_path = _ensure_pnlcalib_weights()
+    resolved_repo_dir = _ensure_pnlcalib_repo(project_root)
+    resolved_kp_path, resolved_line_path = _ensure_pnlcalib_weights(project_root)
     imported = _import_pnlcalib_modules(resolved_repo_dir)
 
     resolved_device = device or ("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -109,10 +113,15 @@ def _ensure_pnlcalib_repo(project_root: Optional[Path] = None, repo_url: str = P
         return target_dir
 
     target_dir.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "clone", "--depth", "1", repo_url, str(target_dir)],
-        check=True,
-    )
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth", "1", repo_url, str(target_dir)],
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"No se pudo clonar PnLCalib en {target_dir} desde {repo_url}."
+        ) from exc
     return target_dir
 
 def _ensure_pnlcalib_weights(project_root: Optional[Path] = None) -> Tuple[Path, Path]:
@@ -122,9 +131,19 @@ def _ensure_pnlcalib_weights(project_root: Optional[Path] = None) -> Tuple[Path,
     line_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not kp_path.exists():
-        urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_kp"], kp_path)
+        try:
+            urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_kp"], kp_path)
+        except (OSError, URLError) as exc:
+            raise RuntimeError(
+                f"No se pudieron descargar los pesos de keypoints de PnLCalib en {kp_path}."
+            ) from exc
     if not line_path.exists():
-        urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_lines"], line_path)
+        try:
+            urllib.request.urlretrieve(PNLCALIB_WEIGHTS["SV_lines"], line_path)
+        except (OSError, URLError) as exc:
+            raise RuntimeError(
+                f"No se pudieron descargar los pesos de lineas de PnLCalib en {line_path}."
+            ) from exc
 
     return kp_path, line_path
 
@@ -145,8 +164,13 @@ def _get_missing_pnlcalib_modules() -> Dict[str, str]:
     for module_name, package_name in PNLCALIB_REQUIRED_MODULES.items():
         try:
             importlib.import_module(module_name)
-        except Exception:
+        except ModuleNotFoundError:
             missing[module_name] = package_name
+        except Exception as exc:
+            raise ImportError(
+                f"No se pudo importar la dependencia requerida '{module_name}' para PnLCalib. "
+                f"La libreria parece instalada pero fallo al importarse: {exc}"
+            ) from exc
     return missing
 
 def _prepend_sys_path(path: Path) -> None:
@@ -206,4 +230,4 @@ def _import_pnlcalib_modules(repo_dir: Path) -> Dict[str, Any]:
         "coords_to_dict": utils_heatmap.coords_to_dict,
     }
 
-__all__ = [ "load_pnlcalib_runtime" ]
+__all__ = ["PnLCalibRuntime", "load_pnlcalib_runtime"]

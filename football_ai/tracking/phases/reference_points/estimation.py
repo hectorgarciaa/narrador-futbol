@@ -67,7 +67,7 @@ def prepare_frame_and_forward(
 def estimate_pnlcalib_from_cached_outputs(
     cached_outputs,
     runtime: PnLCalibRuntime,
-    geometry: Optional[PitchGeometry] = None,
+    geometry: PitchGeometry,
     keypoint_threshold: float = 0.3434,
     line_threshold: float = 0.7867,
     pnl_refine: bool = True,
@@ -128,4 +128,10 @@ def estimate_pnlcalib_from_cached_outputs(
         reprojection_error=reprojection_error,
         estimation_mode=estimation_mode,
     )
-__all__ = ["estimate_pnlcalib_from_cached_outputs"]
+
+
+__all__ = [
+    "PnLCalibEstimate",
+    "estimate_pnlcalib_from_cached_outputs",
+    "prepare_frame_and_forward",
+]

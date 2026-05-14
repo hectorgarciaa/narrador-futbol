@@ -202,7 +202,7 @@ class ProjectionQualityAnalyzer:
     ) -> np.ndarray:
         points = [
             (float(point["x"]), float(point["y"]))
-            for point in getattr(estimate, "keypoints_dict", {}).values()
+            for point in estimate.keypoints_dict.values()
             if "x" in point and "y" in point
         ]
         return self._filter_finite_points(points)
@@ -212,7 +212,7 @@ class ProjectionQualityAnalyzer:
         estimate,
     ) -> np.ndarray:
         points = []
-        for line in getattr(estimate, "lines_dict", {}).values():
+        for line in estimate.lines_dict.values():
             if all(key in line for key in ("x_1", "y_1", "x_2", "y_2")):
                 points.append((float(line["x_1"]), float(line["y_1"])))
                 points.append((float(line["x_2"]), float(line["y_2"])))
@@ -226,7 +226,7 @@ class ProjectionQualityAnalyzer:
         if homography_image_to_field is None:
             return None
         projected_errors = []
-        for keypoint_id, point in getattr(estimate, "keypoints_dict", {}).items():
+        for keypoint_id, point in estimate.keypoints_dict.items():
             if "x" not in point or "y" not in point:
                 continue
             world_point = self._keypoint_world_point_m(int(keypoint_id))
@@ -256,7 +256,7 @@ class ProjectionQualityAnalyzer:
         if homography_image_to_field is None:
             return None
         line_errors = []
-        for line_id, line in getattr(estimate, "lines_dict", {}).items():
+        for line_id, line in estimate.lines_dict.items():
             world_segment = self._line_world_segment_m(int(line_id))
             if world_segment is None:
                 continue
@@ -301,7 +301,7 @@ class ProjectionQualityAnalyzer:
         estimate,
     ) -> float:
         families = set()
-        for line_id in getattr(estimate, "lines_dict", {}).keys():
+        for line_id in estimate.lines_dict.keys():
             world_segment = self._line_world_segment_m(int(line_id))
             if world_segment is None:
                 continue
@@ -320,7 +320,7 @@ class ProjectionQualityAnalyzer:
     ) -> tuple[float, int, int]:
         x_bins = set()
         y_bins = set()
-        for keypoint_id in getattr(estimate, "keypoints_dict", {}).keys():
+        for keypoint_id in estimate.keypoints_dict.keys():
             world_point = self._keypoint_world_point_m(int(keypoint_id))
             if world_point is None:
                 continue
@@ -342,7 +342,7 @@ class ProjectionQualityAnalyzer:
     ) -> Optional[float]:
         confidences = [
             float(point["p"])
-            for point in getattr(estimate, "keypoints_dict", {}).values()
+            for point in estimate.keypoints_dict.values()
             if "p" in point and np.isfinite(float(point["p"]))
         ]
         if not confidences:
@@ -354,7 +354,7 @@ class ProjectionQualityAnalyzer:
         estimate,
     ) -> Optional[float]:
         confidences = []
-        for line in getattr(estimate, "lines_dict", {}).values():
+        for line in estimate.lines_dict.values():
             sample = []
             if "p_1" in line and np.isfinite(float(line["p_1"])):
                 sample.append(float(line["p_1"]))
@@ -371,7 +371,7 @@ class ProjectionQualityAnalyzer:
         estimate,
     ) -> tuple[Optional[float], Dict[str, Any], list[str]]:
 
-        reprojection_error = getattr(estimate, "reprojection_error", None)
+        reprojection_error = estimate.reprojection_error
         reprojection_score = self._inverse_error_score(
             reprojection_error,
             self.validation_reprojection_error_threshold_px,
@@ -498,11 +498,11 @@ class ProjectionQualityAnalyzer:
         estimate,
     ) -> np.ndarray:
         field_points = []
-        for keypoint_id in getattr(estimate, "keypoints_dict", {}).keys():
+        for keypoint_id in estimate.keypoints_dict.keys():
             world_point = self._keypoint_world_point_m(int(keypoint_id))
             if world_point is not None:
                 field_points.append(world_point)
-        for line_id in getattr(estimate, "lines_dict", {}).keys():
+        for line_id in estimate.lines_dict.keys():
             world_segment = self._line_world_segment_m(int(line_id))
             if world_segment is None:
                 continue
@@ -665,8 +665,8 @@ class ProjectionQualityAnalyzer:
             "line_threshold": float(line_threshold),
             "visible_keypoints_count": int(estimate.visible_keypoints_count),
             "visible_lines_count": int(estimate.visible_lines_count),
-            "estimation_mode": str(getattr(estimate, "estimation_mode", "unknown")),
-            "reprojection_error": getattr(estimate, "reprojection_error", None),
+            "estimation_mode": estimate.estimation_mode,
+            "reprojection_error": estimate.reprojection_error,
             "quality_score": quality_score,
             "geometry_fit": geometry_fit,
             "support_quality": support_quality,

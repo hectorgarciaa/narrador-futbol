@@ -22,15 +22,63 @@ from .runtime_loader import load_pnlcalib_runtime
 logger = logging.getLogger(__name__)
 
 
+def _ground_points_from_detector_clean(
+    detector_clean,
+    *,
+    default_bottom_offset_ratio: float,
+):
+    boxes = np.asarray(detector_clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4)
+    if len(boxes) == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    offsets = np.asarray(
+        [
+            (
+                GROUND_POINT_BOTTOM_OFFSET_BY_CLASS["ball"]
+                if name == "ball"
+                else default_bottom_offset_ratio
+            )
+            for name in detector_clean["class_name"]
+        ],
+        dtype=np.float32,
+    )
+    return np.column_stack(
+        [0.5 * (x1 + x2), y2 - offsets * np.maximum(y2 - y1, 1.0)]
+    ).astype(np.float32)
+
+
 def build_reference_points_packet_without_homography(
     detector_packet,
     *,
     execution_mode="runtime",
+    debug_diagnostics: dict | None = None,
+    default_bottom_offset_ratio: float = 0.04,
 ):
     detector_clean = detector_packet["clean"]
     num_detections = detector_clean["num_detections"]
     zeros_2d = [[0.0, 0.0] for _ in range(num_detections)]
+    ground_points_original = _ground_points_from_detector_clean(
+        detector_clean,
+        default_bottom_offset_ratio=default_bottom_offset_ratio,
+    )
     collect_debug = str(execution_mode).strip().lower() == "debug"
+    diagnostics = {
+        "selected_attempt_index": 0,
+        "rejection_type": "",
+        "rejection_reasons": [],
+        "ground_points_image_projected": [point[:] for point in zeros_2d],
+        "estimation_mode": "",
+        "quality_status": "",
+        "quality_score": 0.0,
+        "reprojection_error_px": 0.0,
+        "visible_keypoints_count": 0,
+        "visible_lines_count": 0,
+        "keypoint_threshold_used": 0.0,
+        "line_threshold_used": 0.0,
+        "attempt_count": 0,
+    }
+    if debug_diagnostics:
+        diagnostics.update(debug_diagnostics)
     return make_phase_packet(
         phase_name=PHASE_REFERENCE_POINTS,
         frame_index=detector_packet["frame_index"],
@@ -46,7 +94,7 @@ def build_reference_points_packet_without_homography(
             "homography_valid": False,
             "homography_image_to_field_3x3": [row[:] for row in IDENTITY_HOMOGRAPHY_3X3],
             "field_positions_m": [point[:] for point in zeros_2d],
-            "ground_points_image_original": [point[:] for point in zeros_2d],
+            "ground_points_image_original": ground_points_original.tolist(),
             "field_positions_usable_for_tracking": False,
         },
         trace=(
@@ -54,21 +102,7 @@ def build_reference_points_packet_without_homography(
                 "keypoints": [],
                 "lines": [],
                 "attempts": [],
-                "diagnostics": {
-                    "selected_attempt_index": 0,
-                    "rejection_type": "",
-                    "rejection_reasons": [],
-                    "ground_points_image_projected": [point[:] for point in zeros_2d],
-                    "estimation_mode": "",
-                    "quality_status": "",
-                    "quality_score": 0.0,
-                    "reprojection_error_px": 0.0,
-                    "visible_keypoints_count": 0,
-                    "visible_lines_count": 0,
-                    "keypoint_threshold_used": 0.0,
-                    "line_threshold_used": 0.0,
-                    "attempt_count": 0,
-                },
+                "diagnostics": diagnostics,
             }
             if collect_debug
             else {}
@@ -121,7 +155,7 @@ class PnLCalibFieldProjector:
         
         self.previous_homography_image_to_field = None
 
-        self.runtime = load_pnlcalib_runtime(device=device)
+        self.runtime = load_pnlcalib_runtime(device=device, project_root=project_root)
 
     def _adaptive_threshold_schedule(self):
         schedule = [(self.keypoint_threshold, self.line_threshold)]
@@ -221,17 +255,13 @@ class PnLCalibFieldProjector:
         return estimate, quality
 
     def _ground_points_from_bboxes(self, bbox_xyxy, class_names):
-        boxes = np.asarray(bbox_xyxy, dtype=np.float32).reshape(-1, 4)
-        if len(boxes) == 0:
-            return np.zeros((0, 2), dtype=np.float32)
-        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
-        offsets = np.asarray(
-            [GROUND_POINT_BOTTOM_OFFSET_BY_CLASS.get(name, self.bottom_offset_ratio) for name in class_names],
-            dtype=np.float32,
+        return _ground_points_from_detector_clean(
+            {
+                "bbox_xyxy": bbox_xyxy,
+                "class_name": class_names,
+            },
+            default_bottom_offset_ratio=self.bottom_offset_ratio,
         )
-        return np.column_stack(
-            [0.5 * (x1 + x2), y2 - offsets * np.maximum(y2 - y1, 1.0)]
-        ).astype(np.float32)
 
     @staticmethod
     def _scale_points(points_xy, source_shape_hw, target_shape_hw):
@@ -261,6 +291,21 @@ class PnLCalibFieldProjector:
         )
         homography = homography_projected @ scale
         return homography / homography[2, 2]
+
+    @staticmethod
+    def _is_recoverable_projection_error(exc):
+        if isinstance(exc, (np.linalg.LinAlgError, ValueError)):
+            return True
+        if not isinstance(exc, RuntimeError):
+            return False
+        message = str(exc).strip().lower()
+        non_recoverable_markers = (
+            "out of memory",
+            "cuda out of memory",
+            "cudnn",
+            "device-side assert",
+        )
+        return not any(marker in message for marker in non_recoverable_markers)
 
     @staticmethod
     def _project_trace_point(image_point_xy, homography):
@@ -318,15 +363,7 @@ class PnLCalibFieldProjector:
             detector_clean["bbox_xyxy"],
             detector_clean["class_name"],
         )
-        ground_points_projected = self._scale_points(
-            ground_points_original,
-            original_shape_hw,
-            projected_shape_hw,
-        )
 
-        estimate = None
-        quality = None
-        homography_image_to_field = None
         try:
             estimate, quality = self._estimate_with_adaptive_thresholds(projected_frame)
             homography_image_to_field = self._homography_to_original_frame(
@@ -334,64 +371,88 @@ class PnLCalibFieldProjector:
                 original_shape_hw,
                 projected_shape_hw,
             )
-        except np.linalg.LinAlgError as exc:
-            logger.warning("PnLCalib devolvió homografía singular; se usa packet sin homografía. Error: %s", exc)
-        except Exception as exc:  # pragma: no cover
-            logger.warning("PnLCalib falló en este frame; se usa packet sin homografía. Error: %s", exc)
+        except (np.linalg.LinAlgError, RuntimeError, ValueError) as exc:
+            if not self._is_recoverable_projection_error(exc):
+                raise
+            logger.warning(
+                "PnLCalib falló en este frame; se usa packet sin homografía. Error: %s",
+                exc,
+                exc_info=collect_debug,
+            )
+            error_diagnostics = None
+            if collect_debug:
+                error_diagnostics = {
+                    "rejection_type": "runtime_error",
+                    "rejection_reasons": ["projection_runtime_error"],
+                    "quality_status": "runtime_error",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                }
+            return build_reference_points_packet_without_homography(
+                detector_packet,
+                execution_mode=execution_mode,
+                debug_diagnostics=error_diagnostics,
+                default_bottom_offset_ratio=self.bottom_offset_ratio,
+            )
 
         attempts = []
         diagnostics = {}
-        quality_status = ""
         keypoints = []
         lines = []
-
-        if quality is not None:
-            final_attempt = quality["smoothed_attempt"] or quality["selected_attempt"]
-            quality_status = final_attempt["quality_status"]
-            if collect_debug:
-                attempts = [
-                    {
-                        "attempt_index": int(item["attempt_index"]),
-                        "keypoint_threshold": float(item["keypoint_threshold"]),
-                        "line_threshold": float(item["line_threshold"]),
-                        "accepted": bool(item["accepted"]),
-                        "quality_status": item["quality_status"],
-                        "quality_score": float(item["quality_score"] or 0.0),
-                        "geometry_fit": float(item["geometry_fit"] or 0.0),
-                        "support_quality": float(item["support_quality"] or 0.0),
-                        "coverage_quality": float(item["coverage_quality"] or 0.0),
-                        "rejection_type": item["rejection_type"] or "",
-                        "rejection_reasons": list(item["rejection_reasons"]),
-                    }
-                    for item in quality["attempts"]
-                ]
-                diagnostics = {
-                    "selected_attempt_index": int(final_attempt["attempt_index"]),
-                    "rejection_type": quality["rejection_type"],
-                    "rejection_reasons": list(final_attempt["rejection_reasons"]),
-                    "ground_points_image_projected": ground_points_projected.tolist(),
-                    "estimation_mode": estimate.estimation_mode,
-                    "quality_status": final_attempt["quality_status"],
-                    "quality_score": float(final_attempt["quality_score"] or 0.0),
-                    "reprojection_error_px": float(estimate.reprojection_error or 0.0),
-                    "visible_keypoints_count": int(estimate.visible_keypoints_count),
-                    "visible_lines_count": int(estimate.visible_lines_count),
-                    "keypoint_threshold_used": float(final_attempt["keypoint_threshold"]),
-                    "line_threshold_used": float(final_attempt["line_threshold"]),
-                    "attempt_count": len(attempts),
+        final_attempt = quality["smoothed_attempt"] or quality["selected_attempt"]
+        homography_valid = homography_image_to_field is not None
+        field_positions_usable_for_tracking = (
+            homography_valid and final_attempt["quality_status"] == "good"
+        )
+        if collect_debug:
+            ground_points_projected = self._scale_points(
+                ground_points_original,
+                original_shape_hw,
+                projected_shape_hw,
+            )
+            attempts = [
+                {
+                    "attempt_index": int(item["attempt_index"]),
+                    "keypoint_threshold": float(item["keypoint_threshold"]),
+                    "line_threshold": float(item["line_threshold"]),
+                    "accepted": bool(item["accepted"]),
+                    "quality_status": item["quality_status"],
+                    "quality_score": float(item["quality_score"] or 0.0),
+                    "geometry_fit": float(item["geometry_fit"] or 0.0),
+                    "support_quality": float(item["support_quality"] or 0.0),
+                    "coverage_quality": float(item["coverage_quality"] or 0.0),
+                    "rejection_type": item["rejection_type"] or "",
+                    "rejection_reasons": list(item["rejection_reasons"]),
                 }
-                keypoints = self._keypoints_trace(
-                    estimate,
-                    homography_image_to_field,
-                    original_shape_hw,
-                    projected_shape_hw,
-                )
-                lines = self._lines_trace(
-                    estimate,
-                    homography_image_to_field,
-                    original_shape_hw,
-                    projected_shape_hw,
-                )
+                for item in quality["attempts"]
+            ]
+            diagnostics = {
+                "selected_attempt_index": int(final_attempt["attempt_index"]),
+                "rejection_type": quality["rejection_type"],
+                "rejection_reasons": list(final_attempt["rejection_reasons"]),
+                "ground_points_image_projected": ground_points_projected.tolist(),
+                "estimation_mode": estimate.estimation_mode,
+                "quality_status": final_attempt["quality_status"],
+                "quality_score": float(final_attempt["quality_score"] or 0.0),
+                "reprojection_error_px": float(estimate.reprojection_error or 0.0),
+                "visible_keypoints_count": int(estimate.visible_keypoints_count),
+                "visible_lines_count": int(estimate.visible_lines_count),
+                "keypoint_threshold_used": float(final_attempt["keypoint_threshold"]),
+                "line_threshold_used": float(final_attempt["line_threshold"]),
+                "attempt_count": len(attempts),
+            }
+            keypoints = self._keypoints_trace(
+                estimate,
+                homography_image_to_field,
+                original_shape_hw,
+                projected_shape_hw,
+            )
+            lines = self._lines_trace(
+                estimate,
+                homography_image_to_field,
+                original_shape_hw,
+                projected_shape_hw,
+            )
 
         if homography_image_to_field is None:
             field_positions = np.zeros((detector_clean["num_detections"], 2), dtype=np.float32)
@@ -413,15 +474,15 @@ class PnLCalibFieldProjector:
                 "bbox_xyxy": [list(bbox) for bbox in detector_clean["bbox_xyxy"]],
                 "confidence": list(detector_clean["confidence"]),
                 "class_name": list(detector_clean["class_name"]),
-                "homography_valid": homography_image_to_field is not None,
+                "homography_valid": homography_valid,
                 "homography_image_to_field_3x3": (
                     homography_image_to_field.tolist()
-                    if homography_image_to_field is not None
+                    if homography_valid
                     else [row[:] for row in IDENTITY_HOMOGRAPHY_3X3]
                 ),
                 "field_positions_m": field_positions.tolist(),
                 "ground_points_image_original": ground_points_original.tolist(),
-                "field_positions_usable_for_tracking": quality_status == "good",
+                "field_positions_usable_for_tracking": field_positions_usable_for_tracking,
             },
             trace=(
                 {
