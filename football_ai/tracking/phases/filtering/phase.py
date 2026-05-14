@@ -12,6 +12,7 @@ class FilteringPhase(Phase):
         *,
         active_track_boxes_xyxy=None,
         sideline_margin_m=0.75,
+        rescue_iou_threshold=0.0,
         geometry=None,
         execution_mode="runtime",
     ):
@@ -19,6 +20,7 @@ class FilteringPhase(Phase):
             reference_packet,
             active_track_boxes_xyxy=active_track_boxes_xyxy,
             sideline_margin_m=sideline_margin_m,
+            rescue_iou_threshold=rescue_iou_threshold,
             geometry=geometry,
             execution_mode=execution_mode,
         )

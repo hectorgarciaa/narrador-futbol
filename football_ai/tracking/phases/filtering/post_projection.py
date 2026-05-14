@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from football_ai.core import PHASE_FILTERING, make_phase_packet
-from football_ai.tracking.phases.reference_points.geometry import project_image_points, points_inside_field_mask
+from football_ai.tracking.phases.reference_points.geometry import points_inside_field_mask
 
 
 def _tlbr_iou(box_a, box_b):
@@ -34,6 +34,7 @@ def filter_reference_points(
     reference_packet,
     active_track_boxes_xyxy=None,
     sideline_margin_m=0.75,
+    rescue_iou_threshold=0.0,
     geometry=None,
     execution_mode="runtime",
 ):
@@ -42,24 +43,19 @@ def filter_reference_points(
     num_detections = int(clean_in["num_detections"])
     homography_valid = bool(clean_in["homography_valid"])
     field_positions_usable = bool(clean_in["field_positions_usable_for_tracking"])
+    needs_geometry = homography_valid and field_positions_usable
 
-    field_length_m = float(geometry.field_length_m)
-    field_width_m = float(geometry.field_width_m)
+    if needs_geometry and geometry is None:
+        raise ValueError("geometry is required when filtering usable projected field positions")
 
-    ground_points = np.asarray(
-        clean_in["ground_points_image_original"],
-        dtype=np.float32,
-    ).reshape(-1, 2)
-    homography = np.asarray(
-        clean_in["homography_image_to_field_3x3"],
-        dtype=np.float64,
-    )
-    projected_positions = project_image_points(ground_points, homography).astype(np.float32)
-    finite_mask = np.all(np.isfinite(projected_positions), axis=1)
+    field_positions = np.asarray(clean_in["field_positions_m"], dtype=np.float32).reshape(-1, 2)
+    finite_mask = np.all(np.isfinite(field_positions), axis=1)
     inside_mask = np.zeros(num_detections, dtype=bool)
 
-    if homography_valid and field_positions_usable and np.any(finite_mask):
-        candidates = projected_positions[finite_mask]
+    if needs_geometry and np.any(finite_mask):
+        field_length_m = float(geometry.field_length_m)
+        field_width_m = float(geometry.field_width_m)
+        candidates = field_positions[finite_mask]
         inside_pitch = points_inside_field_mask(candidates, geometry=geometry, margin_m=0.0)
         inside_sideline_band = (
             (candidates[:, 0] >= 0.0)
@@ -69,55 +65,62 @@ def filter_reference_points(
         )
         inside_mask[finite_mask] = np.logical_or(inside_pitch, inside_sideline_band)
 
+    if active_track_boxes_xyxy is None:
+        active_track_boxes_xyxy = []
     active_track_boxes = []
-    for box in active_track_boxes_xyxy or []:
+    for box in active_track_boxes_xyxy:
         box = np.asarray(box, dtype=np.float32).reshape(-1)
         if box.size >= 4:
             active_track_boxes.append(box[:4])
 
     kept_indices = []
-    accepted_trace = []
-    rejected_trace = []
+    accepted_trace = [] if collect_debug else None
+    rejected_trace = [] if collect_debug else None
     rescued_count = 0
 
     for index in range(num_detections):
-        max_iou = max(
-            (_tlbr_iou(clean_in["bbox_xyxy"][index], track_box) for track_box in active_track_boxes),
-            default=0.0,
-        )
         is_finite = bool(finite_mask[index])
         inside_field = bool(inside_mask[index])
         rescued_by_iou = False
+        max_iou = 0.0
 
-        if not homography_valid or not field_positions_usable:
+        if not needs_geometry:
             keep = True
         elif not is_finite:
             keep = False
         elif inside_field:
             keep = True
-        elif max_iou > 0.0:
-            keep = True
-            rescued_by_iou = True
-            rescued_count += 1
         else:
-            keep = False
+            max_iou = max(
+                (_tlbr_iou(clean_in["bbox_xyxy"][index], track_box) for track_box in active_track_boxes),
+                default=0.0,
+            )
+            if max_iou > float(rescue_iou_threshold):
+                keep = True
+                rescued_by_iou = True
+                rescued_count += 1
+            else:
+                keep = False
 
-        trace_item = {
-            "det_id": clean_in["det_id"][index],
-            "bbox_xyxy": list(clean_in["bbox_xyxy"][index]),
-            "confidence": float(clean_in["confidence"][index]),
-            "class_name": str(clean_in["class_name"][index]),
-            "field_position_m": list(clean_in["field_positions_m"][index]),
-            "keep": bool(keep),
-            "is_finite_field_position": is_finite,
-            "inside_field": inside_field,
-            "rescued_by_track_overlap": rescued_by_iou,
-            "max_iou_with_active_tracks": float(max_iou),
-        }
+        if collect_debug:
+            trace_item = {
+                "det_id": clean_in["det_id"][index],
+                "bbox_xyxy": list(clean_in["bbox_xyxy"][index]),
+                "confidence": float(clean_in["confidence"][index]),
+                "class_name": str(clean_in["class_name"][index]),
+                "field_position_m": list(clean_in["field_positions_m"][index]),
+                "keep": bool(keep),
+                "is_finite_field_position": is_finite,
+                "inside_field": inside_field,
+                "rescued_by_track_overlap": rescued_by_iou,
+                "max_iou_with_active_tracks": float(max_iou),
+            }
+
         if keep:
             kept_indices.append(index)
-            accepted_trace.append(trace_item)
-        else:
+            if collect_debug:
+                accepted_trace.append(trace_item)
+        elif collect_debug:
             rejected_trace.append(trace_item)
 
     clean_out = {
@@ -130,6 +133,8 @@ def filter_reference_points(
         "ground_points_image_original": [
             clean_in["ground_points_image_original"][index] for index in kept_indices
         ],
+        "homography_valid": homography_valid,
+        "field_positions_usable_for_tracking": field_positions_usable,
     }
 
     return make_phase_packet(
@@ -150,6 +155,7 @@ def filter_reference_points(
                     "total_rescued_by_iou": rescued_count,
                     "homography_valid": homography_valid,
                     "field_positions_usable_for_tracking": field_positions_usable,
+                    "rescue_iou_threshold": float(rescue_iou_threshold),
                 },
             }
             if collect_debug
