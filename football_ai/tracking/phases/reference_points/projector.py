@@ -293,21 +293,6 @@ class PnLCalibFieldProjector:
         return homography / homography[2, 2]
 
     @staticmethod
-    def _is_recoverable_projection_error(exc):
-        if isinstance(exc, (np.linalg.LinAlgError, ValueError)):
-            return True
-        if not isinstance(exc, RuntimeError):
-            return False
-        message = str(exc).strip().lower()
-        non_recoverable_markers = (
-            "out of memory",
-            "cuda out of memory",
-            "cudnn",
-            "device-side assert",
-        )
-        return not any(marker in message for marker in non_recoverable_markers)
-
-    @staticmethod
     def _project_trace_point(image_point_xy, homography):
         if homography is None:
             return [0.0, 0.0]
@@ -372,8 +357,6 @@ class PnLCalibFieldProjector:
                 projected_shape_hw,
             )
         except (np.linalg.LinAlgError, RuntimeError, ValueError) as exc:
-            if not self._is_recoverable_projection_error(exc):
-                raise
             logger.warning(
                 "PnLCalib falló en este frame; se usa packet sin homografía. Error: %s",
                 exc,
