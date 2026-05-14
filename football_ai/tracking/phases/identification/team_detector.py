@@ -63,12 +63,17 @@ class TeamDetector:
     ):
         filtering_clean = filtering_packet["clean"]
         collect_debug = str(execution_mode).strip().lower() == "debug"
+        positions_usable_for_gates = bool(
+            filtering_clean.get("homography_valid", True)
+            and filtering_clean.get("field_positions_usable_for_tracking", True)
+        )
         entries, cluster_events = self._run_detection_pass(
             frame_bgr=frame_bgr,
             bbox_xyxy=filtering_clean["bbox_xyxy"],
             confidence=filtering_clean["confidence"],
             yolo_class_labels=filtering_clean["class_name"],
             field_positions=filtering_clean["field_positions_m"],
+            positions_usable_for_gates=positions_usable_for_gates,
             field_width_m=field_width_m,
             sideline_band_distance_m=sideline_band_distance_m,
             show_plot=show_plot,
@@ -115,6 +120,7 @@ class TeamDetector:
         confidence,
         yolo_class_labels,
         field_positions,
+        positions_usable_for_gates,
         field_width_m,
         sideline_band_distance_m,
         show_plot,
@@ -143,6 +149,7 @@ class TeamDetector:
                 bbox_xyxy=boxes[index],
                 confidence=float(confidences[index]),
                 field_position=field_positions[index],
+                positions_usable_for_gates=positions_usable_for_gates,
                 shirt_color=shirt_colors.get(index),
                 x_positions=x_positions,
                 y_positions=y_positions,
@@ -187,6 +194,7 @@ class TeamDetector:
         bbox_xyxy,
         confidence,
         field_position,
+        positions_usable_for_gates,
         shirt_color,
         x_positions,
         y_positions,
@@ -195,6 +203,7 @@ class TeamDetector:
         collect_debug,
     ):
         field_position = field_position_to_tuple(field_position)
+        gate_field_position = field_position if positions_usable_for_gates else None
         bbox_size = bbox_area(bbox_xyxy)
         serialized_color = serialize_color(shirt_color)
         trace = (
@@ -202,6 +211,7 @@ class TeamDetector:
                 "det_index": int(det_index),
                 "class_name_yolo": class_name,
                 "field_position_m": list(field_position) if field_position is not None else None,
+                "field_position_usable_for_gates": bool(positions_usable_for_gates),
                 "shirt_crop_available": shirt_color is not None,
                 "shirt_color_available": shirt_color is not None,
                 "bbox_size": bbox_size,
@@ -233,13 +243,13 @@ class TeamDetector:
         can_be_ref, is_middle_ref = referee_position_gate(
             x_positions,
             y_positions,
-            field_position,
+            gate_field_position,
             field_width_m,
             sideline_band_distance_m,
         )
         can_be_goalkeeper = goalkeeper_position_gate(
             x_positions,
-            field_position,
+            gate_field_position,
             field_width_m,
             sideline_band_distance_m,
         )
@@ -277,12 +287,12 @@ class TeamDetector:
         resolved_class, team, distances, relabel_trace = self._reassign_class(
             shirt_color,
             effective_class,
-            field_position,
+            gate_field_position,
             can_be_ref,
             is_middle_ref,
             can_be_goalkeeper,
         )
-        final_class = class_name if field_position is None else resolved_class
+        final_class = class_name if gate_field_position is None else resolved_class
         serialized_distances = serialize_distances(distances)
         if trace is not None:
             trace["relabel"] = {

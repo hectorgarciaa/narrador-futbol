@@ -71,13 +71,14 @@ Las clases de entrada ya están normalizadas: `player`, `goalkeeper`, `referee`,
 
 ## Posición de campo y gates
 
-`IDENTIFICATION` mantiene el comportamiento legacy del tracker: usa `field_positions_m` siempre que la coordenada venga como valor finito en el packet de entrada.
+`IDENTIFICATION` mantiene dos semánticas separadas:
 
 En la práctica:
 
-- si `field_positions_m[i]` llega como coordenada finita, se usa en los gates posicionales;
+- si `field_positions_m[i]` llega como coordenada finita, se conserva en el packet y puede seguir informando otras fases;
 - si llega como `None` o con valores no finitos, esa detección cae a `field_position=None`;
-- el flag `field_positions_usable_for_tracking` puede venir propagado desde `FILTERING`, pero esta fase no fuerza `field_position=None` solo por ese flag, para preservar la semántica histórica del pipeline.
+- los gates posicionales y los relabels que dependen de `field_position` solo se activan cuando `homography_valid == True` y `field_positions_usable_for_tracking == True`;
+- si la homografía no es usable, la fase sigue usando color y distancias, pero desactiva las decisiones de clase que dependan de la posición proyectada.
 
 ## `ShirtDetector`
 
