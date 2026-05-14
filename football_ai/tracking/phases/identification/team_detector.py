@@ -23,18 +23,33 @@ from .team_detector_utils import (
 class TeamDetector:
     def __init__(
         self,
-        team_color_model_conf={},
-        shirt_detector_conf={},
+        team_color_model_conf=None,
+        shirt_detector_conf=None,
     ):
-        self.shirt_detector = ShirtDetector(**shirt_detector_conf)
-        self.color_model = TeamColorModel(**team_color_model_conf)
+        self.shirt_detector = ShirtDetector(**dict(shirt_detector_conf or {}))
+        self.color_model = TeamColorModel(**dict(team_color_model_conf or {}))
         self.candidate_classes = CANDIDATE_CLASSES
-        self.team_colors = self.color_model.team_colors
-        self.updated = self.color_model.updated
-        self.class_samples = self.color_model.class_samples
-        self.outfield_team_distance_stats = self.color_model.outfield_team_distance_stats
-        self.referee_distance_stats = self.color_model.referee_distance_stats
         self.n_frame = -1
+
+    @property
+    def team_colors(self):
+        return self.color_model.team_colors
+
+    @property
+    def updated(self):
+        return self.color_model.updated
+
+    @property
+    def class_samples(self):
+        return self.color_model.class_samples
+
+    @property
+    def outfield_team_distance_stats(self):
+        return self.color_model.outfield_team_distance_stats
+
+    @property
+    def referee_distance_stats(self):
+        return self.color_model.referee_distance_stats
 
     def identify_packet(
         self,
@@ -233,8 +248,8 @@ class TeamDetector:
         effective_class = class_name
         sample_reason = "initial_class"
         cluster_event = None
-        if field_position is not None and shirt_color is not None and class_name in self.updated:
-            if self.updated[class_name]:
+        if field_position is not None and shirt_color is not None and class_name in self.color_model.updated:
+            if self.color_model.updated[class_name]:
                 bucket, effective, sample_reason = self.color_model.decide_sample_class(
                     shirt_color,
                     can_be_goalkeeper=can_be_goalkeeper,
@@ -324,11 +339,13 @@ class TeamDetector:
                 "fallback_to_nearest_outfield_team",
             )
 
-        if team in self.team_colors and class_name == "goalkeeper" and (field_position is None or can_be_goalkeeper):
+        if team in self.color_model.team_colors and class_name == "goalkeeper" and (field_position is None or can_be_goalkeeper):
             return "goalkeeper", None, distances, self._relabel_trace("goalkeeper_confirmed")
 
-        if team in self.team_colors and (self.updated["player"] or len(self.outfield_team_distance_stats) >= 2):
-            if class_name == "referee" and not self.updated["referee"]:
+        if team in self.color_model.team_colors and (
+            self.color_model.updated["player"] or len(self.color_model.outfield_team_distance_stats) >= 2
+        ):
+            if class_name == "referee" and not self.color_model.updated["referee"]:
                 return class_name, team, distances, self._relabel_trace(
                     "outfield_cluster_decision_without_referee_cluster",
                 )

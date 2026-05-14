@@ -8,10 +8,12 @@ class ShirtDetector:
     def __init__(
         self,
         pixels_resize=1536,
-        batched_kmeans_gpu_conf= {},
+        batched_kmeans_gpu_conf=None,
     ):
         self.pixels_resize = max(2, int(pixels_resize))
-        self.kmeans = BatchedKMeansGPU(**batched_kmeans_gpu_conf)
+        self.kmeans = BatchedKMeansGPU(**dict(batched_kmeans_gpu_conf or {}))
+        if self.kmeans.n_clusters != 2:
+            raise ValueError("ShirtDetector requires batched_kmeans_gpu_conf.n_clusters == 2")
 
     def get_color_kmeans_batch(self, images):
         pixels_by_idx = {}
@@ -61,7 +63,7 @@ class ShirtDetector:
 
     def _shirt_color_from_clusters(self, centers, reference_labels):
         if centers is None:
-            return np.array([0, 0, 0], dtype=np.float32)
+            return None
 
         centers = np.asarray(centers, dtype=np.float32)
         if centers.ndim == 1:
@@ -71,9 +73,11 @@ class ShirtDetector:
 
         labels = np.asarray(reference_labels, dtype=np.int32).reshape(-1)
         if labels.size <= 0:
-            return centers[0]
+            return np.asarray(centers[0], dtype=np.float32)
 
         unique_labels, counts = np.unique(labels, return_counts=True)
         background_label = int(unique_labels[np.argmax(counts)])
         shirt_label = 1 - background_label
+        if shirt_label < 0 or shirt_label >= len(centers):
+            return np.asarray(centers[0], dtype=np.float32)
         return np.asarray(centers[shirt_label], dtype=np.float32)

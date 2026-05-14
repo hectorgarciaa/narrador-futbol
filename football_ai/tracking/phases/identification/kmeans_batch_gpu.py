@@ -73,7 +73,7 @@ class BatchedKMeansGPU:
         return self._fit_batch_cpu(samples)
 
     def predict_batch(self, samples):
-        if not samples:
+        if not samples or not isinstance(self.cluster_centers_, dict):
             return {}
 
         if self.use_gpu and self._cp is not None and isinstance(self.cluster_centers_, dict):
@@ -81,7 +81,10 @@ class BatchedKMeansGPU:
 
         predictions = {}
         for sample_id, x in samples.items():
-            centers = np.asarray(self.cluster_centers_[sample_id], dtype=np.float32)
+            centers_raw = self.cluster_centers_.get(sample_id)
+            if centers_raw is None:
+                continue
+            centers = np.asarray(centers_raw, dtype=np.float32)
             points = np.asarray(x, dtype=np.float32)
             distances = np.sum((points[:, None, :] - centers[None, :, :]) ** 2, axis=2)
             predictions[sample_id] = np.argmin(distances, axis=1).astype(np.int32)
@@ -143,7 +146,10 @@ class BatchedKMeansGPU:
             num_points = len(points)
             x[row_idx, :num_points, :] = self._cp.asarray(points, dtype=self._cp.float32)
             valid_mask[row_idx, :num_points] = True
-            centers[row_idx] = self._cp.asarray(self.cluster_centers_[sample_id], dtype=self._cp.float32)
+            centers_raw = self.cluster_centers_.get(sample_id)
+            if centers_raw is None:
+                continue
+            centers[row_idx] = self._cp.asarray(centers_raw, dtype=self._cp.float32)
 
         inf = self._cp.asarray(np.inf, dtype=self._cp.float32)
         distances = self._cp.sum((x[:, :, None, :] - centers[:, None, :, :]) ** 2, axis=3)

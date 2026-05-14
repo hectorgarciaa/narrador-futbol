@@ -34,7 +34,15 @@ def extract_shirt_crop(frame_bgr, bbox_xyxy):
     box = np.asarray(bbox_xyxy, dtype=np.float32).reshape(-1)
     if box.size < 4:
         return None
-    x1, y1, x2, y2 = box[:4].astype(int)
+    image_height, image_width = frame_bgr.shape[:2]
+    x1 = int(np.floor(box[0]))
+    y1 = int(np.floor(box[1]))
+    x2 = int(np.ceil(box[2]))
+    y2 = int(np.ceil(box[3]))
+    x1 = min(max(0, x1), image_width)
+    x2 = min(max(0, x2), image_width)
+    y1 = min(max(0, y1), image_height)
+    y2 = min(max(0, y2), image_height)
     if x2 <= x1 or y2 <= y1:
         return None
     player_pixels = frame_bgr[y1:y2, x1:x2]
