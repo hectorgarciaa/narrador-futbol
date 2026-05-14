@@ -7,7 +7,24 @@ Exports:
   PHASE_TRACKING — constante de nombre de fase.
 """
 
-from .phase import TrackingPhase
-from .tracker import PHASE_TRACKING, Tracker
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .phase import TrackingPhase
+    from .tracker import PHASE_TRACKING, Tracker
+
+
+def __getattr__(name: str):
+    if name == "TrackingPhase":
+        from .phase import TrackingPhase as exported
+
+        return exported
+    if name in {"Tracker", "PHASE_TRACKING"}:
+        from .tracker import PHASE_TRACKING, Tracker
+
+        return {"Tracker": Tracker, "PHASE_TRACKING": PHASE_TRACKING}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = ["Tracker", "TrackingPhase", "PHASE_TRACKING"]
