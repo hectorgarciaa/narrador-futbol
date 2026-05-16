@@ -1,0 +1,33 @@
+\section{Objetivos}
+
+El objetivo general de este trabajo es desarrollar un sistema capaz de analizar vídeo de fútbol y generar una narración automática apoyada en información visual y semántica extraída del propio partido.
+
+Los objetivos específicos son:
+
+\begin{itemize}
+    \item Entrenar y utilizar un modelo de detección basado en YOLO para identificar los elementos principales del juego, incluyendo jugadores, porteros, árbitros y balón.
+
+    \item Asignar automáticamente los jugadores a sus respectivos equipos mediante el análisis del color de la camiseta, separando visualmente la indumentaria del fondo del campo.
+
+    \item Calibrar el campo de fútbol y proyectar las posiciones detectadas en la imagen a coordenadas 2D relativas al terreno de juego mediante técnicas de homografía.
+
+    \item Inferir la posición futbolística de los jugadores en el campo, como lateral, mediocentro, extremo o delantero, utilizando un modelo basado en Set Transformer entrenado con datos etiquetados manualmente.
+
+    \item Implementar un sistema de tracking multiobjeto que permita mantener identidades consistentes a lo largo del vídeo, minimizando pérdidas de identidad e intercambios entre jugadores.
+
+    \item Inferir acciones futbolísticas a partir de la evolución espacial y temporal de los jugadores y del balón, detectando eventos como pases, controles, conducciones o tiros mediante un módulo específico de detección de acciones.
+
+    \item Generar una representación estructurada de la información del partido, incluyendo trayectorias, identidades, equipos, posiciones, eventos detectados y métricas asociadas.
+
+    \item Generar comentarios automáticos mediante un LLM ejecutado en local, utilizando como entrada la identificación de jugadores, las acciones detectadas y el contexto del partido.
+
+    \item Convertir los comentarios generados en audio mediante síntesis de voz, incorporando dos voces hispanohablantes, masculina y femenina, que alternen intervenciones y permitan una narración más dinámica.
+
+    \item Incorporar comentarios contextuales no ligados únicamente a acciones puntuales, incluyendo información de los equipos y datos relevantes de la competición.
+
+    \item Evaluar el rendimiento del sistema mediante métricas asociadas a la detección, el tracking, la cobertura de jugadores y balón, la clasificación posicional y la calidad funcional de los eventos generados.
+
+    \item Analizar la viabilidad de ejecutar el pipeline completo en un entorno local con una GPU RTX 3080, estudiando sus limitaciones de rendimiento y latencia.
+
+    \item Integrar el sistema en una interfaz que permita configurar equipos, colores, alineaciones y modo de comentario.
+\end{itemize}

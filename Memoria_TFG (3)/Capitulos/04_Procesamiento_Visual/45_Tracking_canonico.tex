@@ -1,0 +1,195 @@
+\section{Capa de tracking canónico}
+\label{sec:tracking-canonico}
+
+La salida de la capa de asociacion basada en ByteTrack (Seccion~\ref{sec:bytetrack-layer}) proporciona asociaciones robustas entre detecciones consecutivas de frames cercanos, pero esos IDs internos no garantizan por si solos estabilidad global durante todo el partido. Cuando hay oclusiones largas, salidas de plano o cambios de escala bruscos, un mismo jugador puede reaparecer con otro \textit{tracker id}.
+
+Por este motivo, el pipeline incorpora una segunda capa: la canonizacion. Su objetivo es transformar las asociaciones \textit{raw} en identidades finales estables, con limites por clase y reglas especificas para jugadores, porteros, arbitros y balon.
+
+De esta forma, podría ocurrir que, por ejemplo, un jugador esté asociado al \textit{tracker id} 14 durante una parte del vídeo, se pierda durante varios frames y reaparecer con \textit{tracker id} 37. Si la capa canónica determina que ambos tracks corresponden al mismo jugador, entonces se conservará el mismo \textit{id canónico} para los dos tramos.
+
+\subsection{Entrada de la capa y objetivo de canonizacion}
+
+La capa canonica consume el paquete devuelto por la capa de ByteTrack y opera sobre detecciones ya asociadas, junto con metadatos de clase, equipo, posición en el campo y confianza. A partir de esa entrada, decide para cada deteccion si:
+\begin{itemize}
+    \item mantiene continuidad con un ID canonico existente,
+    \item reengancha un ID canonico previo sobre un nuevo \textit{raw tracker id},
+    \item crea una identidad canonica nueva dentro de los limites permitidos,
+    \item o descarta la deteccion si no cumple los criterios de consistencia.
+\end{itemize}
+
+\subsection{Proceso de asignacion canonica por frame}
+
+En cada frame, la capa canonica aplica un flujo secuencial compacto. Primero intenta mantener continuidad directa entre \textit{raw tracker ids} ya conocidos y sus IDs canonicos previos, siempre que la compatibilidad de clase/equipo y los gates de continuidad sean validos segun la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
+
+Despues, con los tracks de ByteTrack que no han sido resueltos en esa primera fase, se abre una fase de reasignacion sobre IDs canonicos perdidos o libres, respetando de nuevo las reglas de continuidad en campo y en imagen definidas en la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
+Si un track de ByteTrack sigue sin asignacion valida, la capa evalua la creacion de un nuevo slot canonico dentro de los limites y reservas definidos en la \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} y explicados en la \hyperref[subsec:ids-canonicos-limites]{Subseccion~\ref*{subsec:ids-canonicos-limites}}.
+
+Sobre ese flujo base se aplican reglas especificas por clase, detalladas en sus apartados correspondientes: porteros en la \hyperref[subsec:tratamiento-porteros]{Subseccion~\ref*{subsec:tratamiento-porteros}}, arbitros en la \hyperref[subsec:tratamiento-arbitros]{Subseccion~\ref*{subsec:tratamiento-arbitros}}, balon en la \hyperref[subsec:seguimiento-balon-canonico]{Subseccion~\ref*{subsec:seguimiento-balon-canonico}}, y reabsorcion conservadora en la \hyperref[subsec:reabsorcion-identidades]{Subseccion~\ref*{subsec:reabsorcion-identidades}}.
+
+\subsection{IDs canónicos y límites por clase}
+\label{subsec:ids-canonicos-limites}
+
+A diferencia de ByteTrack, que puede crear tracks internos adicionales de forma flexible, la capa canónica impone una estructura final acotada.
+
+En la configuración actual, los slots canónicos quedan reservados de forma explicita: el balón se fija en el ID 0, los porteros ocupan los IDs 1 y 2, los jugadores de campo se reparten en dos bloques por equipo (3--12 y 13--22), y, por último, los arbitros usan los IDs 23, 24 y 25. Además, los slots de árbitro no son intercambiables: 23 se asocia al arbitro central, 24 al asistente de la banda superior y 25 al asistente de la banda inferior. La \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} resume esta asignación junto con los limites finales por clase.
+
+\begin{table}[htbp]
+    \centering
+    \scriptsize
+    \begin{tabular}{c|c|p{7.5cm}}
+        \textbf{Clase} & \textbf{Limite final} & \textbf{Descripcion} \\
+        \hline\hline
+        \texttt{player} & 20 & Jugadores de campo en slots canonicos de equipo (3--12 y 13--22). \\
+        \texttt{goalkeeper} & 2 & Porteros con IDs reservados (1 y 2). \\
+        \texttt{referee} & 3 & Arbitro central y asistentes con IDs reservados (23, 24, 25). \\
+        \texttt{ball} & 1 & Balon, almacenado siempre con ID 0. \\
+        \hline
+    \end{tabular}
+    \caption{Limites de identidades canonicas por clase y asignacion de slots.}
+    \label{tab:limites-canonicos}
+\end{table}
+
+
+\subsection{Continuidad canonica y reasignacion}
+\label{subsec:continuidad-canonica-reasignacion}
+
+Cuando hay posicion proyectada fiable en campo, la continuidad de \texttt{player}/\texttt{goalkeeper} se valida con un gate metrico dependiente de los frames perdidos. El gate parte de un valor base y crece de forma controlada hasta un maximo, evitando saltos fisicamente incompatibles y permitiendo recuperar identidades tras oclusiones cortas.
+
+Siendo \(f\) el numero de frames desde la ultima observacion valida del ID canonico. El gate se calcula con base \(g_0=2.1\) m, decaimiento \(\delta=0.3\) m/frame, tope temporal \(f_{\max}=10\) y cap absoluto \(G_{\max}=8.0\) m:
+
+\[
+f'=\min(f,f_{\max}),
+\qquad
+G(f)=\min\!\left(
+G_{\max},
+\sum_{i=0}^{f'-1}\max(g_0-\delta i,0)
+\right).
+\]
+
+Con los valores usados en el proyecto:
+
+\[
+G(1)=2.1,\;
+G(2)=3.9,\;
+G(3)=5.4,\;
+G(4)=6.6,\;
+G(5)=7.5,\;
+G(6)=8.0,
+\]
+
+y a partir de ahi queda saturado en \(8.0\) m. Una candidata en campo se considera factible solo si su distancia al estado canonico cumple:
+
+\[
+d_{\text{campo}} \leq G(f).
+\]
+
+\subsection{Reasignación cuando no hay homografía fiable}
+\label{subsec:reasignacion-sin-homografia}
+
+Cuando no hay homografía válida, la capa canónica utiliza la posición en imagen como respaldo. En ese caso, no puede medir distancias en metros, por lo que utiliza el centro de la bounding box y el histórico de movimiento del track.
+
+Si todavía no hay suficiente histórico, se permite únicamente una tolerancia mínima de 10 píxeles. Cuando el track ya tiene al menos 3 muestras de movimiento, se calcula el desplazamiento medio por frame, $\overline{d}$, y se estima cuánto podría haberse movido durante los frames perdidos:
+
+\[
+D_{esperado} =
+\overline{d} \cdot \min(f,12) \cdot 0.75
+\]
+
+donde $f$ es el número de frames perdidos. El valor 12 actúa como límite máximo de extrapolación: aunque un jugador lleve perdido más frames, el radio de búsqueda no sigue creciendo indefinidamente. El factor 0.75 hace que esta estimación sea conservadora, evitando abrir demasiado el radio de búsqueda. La \hyperref[tab:movimiento-imagen]{Tabla~\ref*{tab:movimiento-imagen}} resume los valores de los hiperparámetros.
+
+\begin{table}[htbp]
+    \centering
+    \scriptsize
+    \begin{tabular}{c|c|p{7.5cm}}
+        \textbf{Concepto} & \textbf{Valor} & \textbf{Función} \\
+        \hline\hline
+        Tolerancia mínima en imagen & 10 píxeles & Radio mínimo cuando todavía no hay histórico suficiente. \\
+        Límite de frames pérdidos & 12 & Limita el número de frames durante los que el radio de búsqueda puede crecer\\
+        Muestras para usar movimiento medio & 3 & Observaciones necesarias para estimar el desplazamiento medio. \\
+        Factor conservador de movimiento & 0.75 & Reduce la distancia extrapolada para evitar reasociaciones demasiado amplias. \\
+        \hline
+    \end{tabular}
+    \caption{Restricciones de movimiento usadas cuando no hay homografía fiable.}
+    \label{tab:movimiento-imagen}
+\end{table}
+
+\subsection{Tratamiento específico de porteros}
+\label{subsec:tratamiento-porteros}
+
+Los porteros presentan un problema particular: en muchos planos tácticos o de inicio de jugada no aparecen en cámara. Si el sistema esperase únicamente a detectarlos, podrían recibir IDs tardíos o inestables. Para evitarlo, se crean dos identidades canónicas reservadas en los puntos de penalti del campo. Estas identidades se corresponden con los IDs 1 y 2.
+
+Estas detecciones no proceden de YOLO, sino que son semillas sintéticas generadas a partir de la geometría del campo. Mientras no haya una detección real compatible, se almacenan con confianza 0 y sin equipo asignado. Cuando aparece una detección de clase \textit{goalkeeper} compatible, la capa canónica asigna ese track sintético a la detección compatible.
+
+El radio de absorción desde el punto de penalti es de 20 metros. Aunque parece un valor alto, no significa que cualquier jugador pueda absorber el ID del portero. Primero, solo se consideran detecciones compatibles con la clase \texttt{goalkeeper}. Segundo, la semilla está situada en el punto de penalti, pero el portero real puede aparecer sobre la línea de gol, dentro del área pequeña, desplazado lateralmente o con error de homografía. Por eso se utiliza un radio amplio, protegido por la restricción de clase. La \hyperref[tab:seeds-porteros]{Tabla~\ref*{tab:seeds-porteros}} resume esta configuración de seeds canónicas para porteros, incluyendo los IDs reservados, su inicialización en puntos de penalti y el radio máximo de reasignación permitido.
+
+\begin{table}[htbp]
+    \centering
+    \scriptsize
+    \begin{tabular}{c|c|p{7.5cm}}
+        \textbf{Concepto} & \textbf{Valor} & \textbf{Función} \\
+        \hline\hline
+        IDs reservados para porteros & 1 y 2 & Permiten mantener identidades estables aunque los porteros no aparezcan al inicio. \\
+        Posición inicial de las semillas & Puntos de penalti & Aproximación geométrica inicial para cada portero. \\
+        Radio de absorción & 20 m & Margen para enlazar una detección real de portero con su semilla. \\
+        \hline
+    \end{tabular}
+    \caption{Configuración de identidades sintéticas reservadas para porteros.}
+    \label{tab:seeds-porteros}
+\end{table}
+
+\subsection{Tratamiento específico de árbitros}
+\label{subsec:tratamiento-arbitros}
+
+También se reservan IDs específicos para los árbitros. En concreto, el ID 23 se asocia al árbitro central, el 24 al árbitro asistende de la parte superior de la imágen y el 25 a su homólogo de la parte inferior. Esto se hace para no tratarlos como 3 árbitros intercambiables y, así, evitar swaps entre ellos.
+
+Las detecciones de clase árbitro se asocian a uno de los tracks canónicos de árbitro de banda si su posición proyectada está a menos de 3 metros de la línea lateral.
+
+Para el ID 23 asociado al árbitro central, se añade una restricción horizontal calculada a partir de los jugadores y porteros visibles. En cada frame se recogen las coordenadas $(x, y)$ proyectadas al campo de todas las detecciones y se ordenan por su coordenada $x$. Si existen al menos 4 posiciones válidas, se define como rango permitido el intervalo entre la segunda posición más a la izquierda y la segunda posición más a la derecha. De esta forma, una detección muy extrema en el campo no puede absorber el ID del árbitro central. Si no hay suficientes jugadores proyectados, esta restricción horizontal no se aplica.
+
+\subsection{Reabsorción de identidades perdidas}
+\label{subsec:reabsorcion-identidades}
+
+Debido a las reglas de continuidad anteriores, puede ocurrir que un jugador desaparezca durante un tramo largo y vuelva con un \textit{raw tracker id} nuevo. Si todos los IDs canónicos ya están creados (se han alcanzado los límites por clase definidos en la\hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}}, y ningún track canónico compatible está lo suficientemente cerca del raw track de ByteTrack como para poder absorberlo, entonces ese track se quedará perdido en el limbo sin materializarse como track canónico real y perderemos esa identidad.  Para estos casos, la capa canónica incorpora una reabsorción forzada orientada a recuperar estos tracks perdidos de la forma más segura posible.
+
+El mecanismo se activa solo para \texttt{player}. Primero se identifican IDs canónicos de jugador que llevan perdidos al menos 20 frames. En paralelo, se buscan tracks \textit{raw} huérfanos que no hayan sido asignados en el frame actual y que se hayan mantenido al menos 10 frames consecutivos con clase \texttt{player} y el mismo equipo.
+
+Con esos candidatos, la capa construye emparejamientos posibles únicamente dentro del mismo equipo. Cuando hay varios candidatos compatibles, se prioriza la asociación con mayor consistencia espacial y temporal (distancia menor respecto al último estado canónico útil). De manera que el track huérfano más compitble se reenganche al ID canónico perdido.
+
+De este modo, la reabsorción actúa como una vía de recuperación tardía, pero con condiciones estrictas de clase, equipo y consistencia espacial,.
+
+\subsection{Seguimiento del balón}
+\label{subsec:seguimiento-balon-canonico}
+
+El balón se gestiona de forma distinta a los jugadores. Es un objeto más pequeño, con menor confianza de detección y movimientos más bruscos. Por ello, además de las detecciones devueltas por ByteTrack, se conservan candidatas crudas de YOLO con una confianza mínima muy baja, y la capa canónica selecciona una única candidata por frame.
+
+Si el balón ya había sido visto recientemente, se estima una posición esperada a partir de su movimiento inmediato anterior (desplazamiento entre las últimas observaciones válidas) y se proyecta esa tendencia sobre los frames perdidos. Con esa predicción se aplica un gate posicional dinámico: parte de un radio base de 90 píxeles y crece con los frames perdidos (35 píxeles por frame). En paralelo, también se comprueba la compatibilidad de tamaño para descartar cambios de escala no plausibles.
+
+Cuando una candidata tiene confianza alta (\(\geq 0.6\)), las restricciones se relajan de forma controlada: tanto el radio posicional como el ratio de tamaño permitido se escalan por 1.4. Todas estas restricciones y configuraciones se reflejan en la \hyperref[tab:balon-tracking]{Tabla~\ref*{tab:balon-tracking}}
+
+Si ninguna candidata resulta coherente con la predicción temporal y las validaciones de tamaño, el sistema prefiere dejar el frame sin balón antes que aceptar una detección errónea. El balón se almacena siempre con ID canónico 0.
+
+\begin{table}[htbp]
+    \centering
+    \scriptsize
+    \begin{tabular}{c|c|p{7.5cm}}
+        \textbf{Concepto} & \textbf{Valor} & \textbf{Función} \\
+        \hline\hline
+        Confianza mínima del balón & 0.0035 & Permite considerar candidatas débiles antes del filtrado temporal. \\
+        Radio base de búsqueda & 90 px & Zona inicial alrededor de la posición esperada. \\
+        Crecimiento por frame perdido & 35 px & Amplía la búsqueda si el balón desaparece temporalmente. \\
+        Cambio máximo de tamaño & 1.8 & Evita aceptar detecciones con cambios de escala poco plausibles. \\
+        Redetección libre & 30 frames & Tras una pérdida larga, permite reiniciar por confianza máxima. \\
+        Confianza alta & 0.6 & Relaja restricciones sin aceptar automáticamente la candidata. \\
+        \hline
+    \end{tabular}
+    \caption{Restricciones temporales utilizadas para seleccionar el balón.}
+    \label{tab:balon-tracking}
+\end{table}
+
+\subsection{Salida del tracking}
+
+La salida final del tracking se almacena como una estructura organizada por clase y por frame. Para cada elemento se guarda su bounding box, confianza, equipo asignado, color de camiseta, tamaño de la bounding box, ID interno de ByteTrack, ID canónico y posición proyectada al campo.
+
+Esta información resulta fundamental para las fases posteriores del proyecto, ya que permite construir trayectorias, analizar estabilidad temporal, generar métricas y transformar los datos al formato requerido por los módulos de análisis de eventos.
+
+En resumen, el tracking implementado combina detección, equipo, clase, homografía, restricciones geométricas, control de movimiento, límites por clase, IDs canónicos y reglas particulares para porteros, árbitros y balón. Esta combinación es necesaria para reducir pérdidas de identidad e intercambios entre jugadores en un escenario especialmente complejo como el vídeo broadcast de fútbol.

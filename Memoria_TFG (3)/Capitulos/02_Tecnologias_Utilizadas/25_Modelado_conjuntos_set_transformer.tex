@@ -1,0 +1,55 @@
+\section{Modelado de conjuntos con Set Transformer}
+
+En esta sección se introducen los modelos Set Transformer, una arquitectura diseñada para procesar conjuntos de elementos sin imponer un orden sobre ellos. Este tipo de modelo resulta útil cuando la predicción depende tanto de las características individuales de cada elemento como de las relaciones entre todos los elementos del conjunto.
+
+\subsection{Representación de datos como conjuntos}
+En muchos problemas de aprendizaje automático, los datos de entrada no tienen una estructura secuencial natural, sino que aparecen como un conjunto de elementos. En estos casos, el orden en el que se presentan los elementos al modelo no debería modificar la salida. Por ejemplo, si un modelo recibe un conjunto de vectores que describen distintos objetos de una escena, permutar el orden de esos vectores no debería cambiar la interpretación global de la escena. 
+
+Los modelos clásicos basados en redes densas no incorporan esta propiedad de forma directa, ya que suelen asumir que cada posición de la entrada tiene un significado fijo. Una alternativa consiste en procesar cada elemento de forma independiente y después aplicar una operación agregadora, como suma, media o máximo. Sin embargo, este tipo de aproximaciones puede ser limitado cuando la predicción depende de las relaciones entre los elementos del conjunto. Para capturar estas dependencias, las arquitecturas Set Transformer \citep{lee2019settransformer} proponen utilizar mecanismos de atención adaptados al procesamiento de conjuntos.
+
+\subsection{Atención multi-cabeza en conjuntos}
+Set Transformer se basa en el mecanismo de atención multi-cabeza introducido por los Transformers \citep{vaswani2017attention}, pero adaptado al procesamiento de conjuntos. En un Transformer aplicado a secuencias, como una frase, la atención por sí sola no conoce el orden de los elementos. Por ello, se suma una codificación posicional al vector que representa cada elemento de la entrada, permitiendo que el modelo incorpore información sobre su posición en la secuencia.
+
+En cambio, en Set Transformer no se introduce una codificación posicional dependiente del orden de entrada, ya que los elementos del conjunto no tienen una posición secuencial con significado propio. Por ello, si se permuta el orden de los elementos de entrada, el modelo mantiene una respuesta coherente con esa permutación.
+
+El modelo recibe un conjunto de vectores:
+
+\[
+X = \{x_1, x_2, \dots, x_n\}
+\]
+
+donde cada elemento $x_i$ representa una entidad mediante un vector de características. La atención permite que cada elemento del conjunto compare su representación con la del resto de elementos y actualice su propia codificación en función del contexto global. De esta forma, el modelo puede aprender relaciones entre elementos sin imponer un orden artificial sobre la entrada.
+
+El bloque básico de estas arquitecturas es el mecanismo de atención. Este parte de tres representaciones: consultas $Q$, claves $K$ y valores $V$. De forma intuitiva, las consultas indican qué información busca cada elemento, las claves describen qué información ofrece cada elemento para ser comparado, y los valores contienen la información que cada elemento aporta en la combinación final que construye la salida. En la atención escalada, la similitud entre consultas y claves se calcula mediante productos escalares y se divide por $\sqrt{d}$, donde $d$ es la dimensión de las claves:
+
+\[
+\operatorname{Attention}(Q,K,V) =
+\operatorname{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V
+\]
+
+El término $QK^T$ mide la compatibilidad entre cada consulta y cada clave. La división por $\sqrt{d}$ evita que estos productos escalares crezcan demasiado cuando la dimensión de las claves es grande, lo que podría hacer que la función \textit{softmax} produzca distribuciones excesivamente concentradas. Por eso se denomina atención escalada.
+
+La función \textit{softmax} convierte esas compatibilidades en pesos de atención. Cada salida se obtiene entonces como una combinación ponderada de los valores $V$: los elementos cuyas claves son más similares a una consulta reciben mayor peso en la combinación final. Por tanto, la similitud se calcula entre consultas y claves, mientras que los valores son la información que se agrega.
+
+En la atención multi-cabeza, este cálculo no se realiza una sola vez, sino varias veces en paralelo. Cada cabeza utiliza matrices aprendidas diferentes para generar sus propias consultas, claves y valores a partir de las representaciones de entrada. Esto permite que diferentes cabezas atiendan a distintos tipos de relaciones entre elementos. Por ejemplo, en un conjunto de jugadores, una cabeza podría aprender relaciones de proximidad espacial, mientras que otra podría capturar patrones asociados a la estructura colectiva del equipo.
+
+\subsection{Bloques principales de Set Transformer}
+
+Dentro de Set Transformer uno de los módulos principales es el \textit{Set Attention Block} (SAB), que aplica autoatención sobre todos los elementos del conjunto. De esta forma, cada elemento puede actualizar su representación teniendo en cuenta la información del resto de elementos. El resultado no cambia frente a permutaciones: si se cambia el orden de los elementos de entrada lo único que ocurre es que las salidas se reordenan de la misma manera.
+
+Una limitación del SAB es su coste cuadrático respecto al número de elementos, ya que cada elemento atiende directamente a todos los demás. Si el conjunto contiene $n$ elementos, esto da lugar a un coste del orden de $n \times n$.
+
+Para reducir este coste, Set Transformer introduce el \textit{Induced Set Attention Block} (ISAB). Este bloque utiliza $m$ vectores aprendibles, llamados puntos inducidos, que actúan como una representación intermedia del conjunto, con $m \ll n$. En lugar de comparar directamente todos los elementos entre sí, los puntos inducidos resumen la información global del conjunto y los elementos atienden a esa representación resumida. Así, el coste pasa de un esquema del orden de $n \times n$ a uno del orden de $n \times m$, permitiendo capturar relaciones globales con menor coste computacional.
+
+Cuando la tarea requiere obtener una representación global del conjunto, Set Transformer utiliza \textit{Pooling by Multihead Attention} (PMA). Este módulo emplea vectores semilla aprendibles que atienden sobre los elementos del conjunto para extraer una o varias representaciones globales. A diferencia de agregaciones simples como la media o el máximo, PMA aprende qué elementos son más relevantes para construir la salida final.
+
+En conjunto, la arquitectura puede entenderse como una combinación de bloques de codificación y agregación. Los bloques SAB o ISAB enriquecen la representación de cada elemento a partir de sus relaciones con el resto del conjunto, mientras que PMA produce una representación global adecuada para tareas de clasificación o predicción a nivel de conjunto.
+
+\subsection{Papel de Set Transformer dentro del pipeline}
+En este proyecto, Set Transformer se utiliza para la clasificación posicional de los jugadores. Esta tarea se plantea como un problema contextual, ya que el rol de un jugador no depende únicamente de sus coordenadas instantáneas, sino también de su relación espacial con el resto del equipo. Un lateral, un central o un mediocentro pueden ocupar zonas similares en determinados momentos del partido, por lo que es necesario considerar la estructura colectiva para realizar una predicción más coherente.
+
+Esta tarea encaja con el modelado de conjuntos, ya que los jugadores de un mismo equipo no forman una secuencia con un orden natural, sino un conjunto de elementos relacionados. Cada jugador se representa mediante un vector de características propias, como posición normalizada, velocidad estimada, visibilidad o distancia a determinadas zonas del campo. Además, mediante atención, el modelo puede comparar cada jugador con sus compañeros y capturar relaciones espaciales relevantes, como amplitud, profundidad o cercanía a otras posiciones.
+
+Además, la orientación del equipo introduce una dificultad adicional: conceptos como izquierda, derecha, ataque o defensa dependen de la dirección de juego. Por ello, antes de aplicar el modelo, las coordenadas pueden transformarse a una vista táctica canónica en la que todos los equipos queden representados atacando en la misma dirección. Finalmente, la predicción individual puede combinarse con una restricción global mediante asignación óptima, por ejemplo con el algoritmo húngaro \citep{kuhn1955hungarian}, para ajustar las posiciones predichas a una alineación esperada y evitar combinaciones incoherentes.
+
+La implementación concreta de este módulo, incluyendo la arquitectura exacta, las características utilizadas, la normalización táctica de coordenadas y la asignación final de roles, se describe posteriormente en la \hyperref[sec:clasificacion-posicional]{Sección~\ref*{sec:clasificacion-posicional}}.

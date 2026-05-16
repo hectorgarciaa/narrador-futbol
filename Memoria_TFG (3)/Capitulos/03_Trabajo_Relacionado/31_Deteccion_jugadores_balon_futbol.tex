@@ -1,0 +1,11 @@
+\section{Detección de jugadores y balón en fútbol}
+
+La detección de objetos es una de las primeras fases necesarias para cualquier sistema automático de análisis de fútbol, ya que permite localizar en cada frame los elementos relevantes del juego, como jugadores, porteros, árbitros y balón.
+
+Diversos trabajos han abordado este problema como una fase previa para tareas de análisis más complejas. \citet{KomorowskiFootAndBall2020} proponen FootAndBall, un detector conjunto de jugadores y balón orientado específicamente al dominio futbolístico. Este tipo de propuestas muestra que la detección del balón requiere una atención especial, al tratarse de un objeto pequeño, visualmente ambiguo y con frecuentes pérdidas de detección en cámaras broadcast.
+
+Frente a YOLO, una alternativa clásica son los detectores de dos etapas, como Faster R-CNN. Este método propuesto por \citet{RenFasterRCNN2015} introduce una red de propuesta de regiones, o \textit{Region Proposal Network}, para generar zonas candidatas antes de clasificarlas y refinar sus cajas. Esta estrategia suele ofrecer detecciones precisas, pero implica un coste computacional mayor y una arquitectura menos directa para un pipeline de vídeo que debe ejecutarse frame a frame.
+
+Otra alternativa reciente son los detectores basados en Transformers. DETR \citep{CarionDETR2020} introdujo una formulación de la detección como predicción directa de un conjunto de objetos, eliminando la necesidad de muchos componentes heurísticos habituales en detectores clásicos. Sobre esta línea, RF-DETR \citep{RobinsonRFDETR2026} plantea una variante orientada a detección en tiempo real, buscando un compromiso entre precisión y latencia. Este tipo de modelos resulta interesante como alternativa moderna a YOLO, ya que las arquitecturas basadas en Transformers pueden capturar relaciones globales entre objetos y adaptarse bien a dominios nuevos.
+
+En este proyecto se opta por YOLO, descrito con más detalle en la \hyperref[sec:yolo-tecnologias]{Sección~\ref*{sec:yolo-tecnologias}}, por su madurez práctica, disponibilidad de herramientas de \textit{fine-tuning}, integración sencilla con el resto del pipeline y buen equilibrio entre velocidad y precisión en vídeo.

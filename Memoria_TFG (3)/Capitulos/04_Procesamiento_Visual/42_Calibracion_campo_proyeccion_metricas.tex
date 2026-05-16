@@ -1,0 +1,157 @@
+\section{Calibración del campo y proyeccion a coordenadas métricas}
+\label{sec:calibracion-campo-proyeccion-metricas}
+
+En la \hyperref[sec:homografia-tecnologias]{Sección~\ref*{sec:homografia-tecnologias}} se introdujo el concepto de homografía y se describió PnLCalib como método para estimar la calibración geométrica del campo en vídeo broadcast. En esta sección se resume cómo se ha integrado dicha calibración dentro del sistema y, especialmente, qué estrategias de robustez han sido necesarias para poder usar la homografía como una señal fiable dentro del pipeline.
+
+\subsection{Modelo utilizado y salida geométrica}
+
+En este proyecto se utiliza PnLCalib en modo inferencia, con sus pesos pre-entrenados publicados por los autores en el repositorio oficial del proyecto \citep{PnLCalibRepo2024}, para estimar en cada frame la geometría del campo visible. A partir de las predicciones de puntos y líneas del terreno se obtiene una homografía $H_t$ que permite proyectar coordenadas en píxeles $(u,v)$ a coordenadas 2D sobre el plano del campo $(x,y)$, expresadas en unidades métricas.
+
+La \hyperref[fig:calibracion-proyeccion-campo]{Figura~\ref*{fig:calibracion-proyeccion-campo}} ilustra este proceso. En la imagen original se muestran los puntos de referencia detectados sobre el terreno de juego, mientras que la vista cenital resultante permite visualizar la proyección de la escena sobre el plano del campo.
+
+\begin{figure}[H]
+\centering
+
+\begin{minipage}{0.9\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{Imagenes/Propias/Puntos_referencia.png}
+    \small \textbf{(a)} Puntos de referencia detectados sobre la imagen broadcast.
+\end{minipage}
+
+\vspace{0.4cm}
+
+\begin{minipage}{0.9\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{Imagenes/Propias/Bird_eye.png}
+    \small \textbf{(b)} Proyección resultante en vista cenital del terreno de juego.
+\end{minipage}
+
+\caption[Calibración geométrica y proyección al plano del campo]{
+Ejemplo de calibración geométrica del campo mediante PnLCalib. En (a) se muestran las referencias detectadas sobre la imagen broadcast y, en (b), la proyección de la escena sobre una representación 2D del terreno de juego.
+}
+\label{fig:calibracion-proyeccion-campo}
+\end{figure}
+
+Para proyectar la posición de un jugador no se utiliza el centro de su \textit{bounding box}, sino un punto que aproxima el contacto con el césped. En concreto, se emplea el punto central inferior de la caja, ligeramente desplazado hacia arriba:
+\[
+x = \frac{x_1 + x_2}{2}
+\qquad
+y = y_2 - 0.04 \cdot (y_2 - y_1)
+\]
+donde $(x_1,y_1,x_2,y_2)$ son las coordenadas de la \textit{bounding box}. Este punto se transforma mediante la homografía para obtener una posición $(x,y)$ en el campo.
+
+\subsection{Problema de estabilidad: \textit{jitter} y sensibilidad a umbrales}
+
+Durante las primeras pruebas se observó que la homografía estimada frame a frame era una señal poco estable: pequeñas variaciones en los puntos/líneas detectados producían cambios apreciables en la proyección, generando \textit{jitter} (vibración) tanto en la reconstrucción del campo como en las trayectorias proyectadas de los jugadores.
+
+Este comportamiento ocurría principalmente con planos cerrados (esquinas o área), cuando la cámara realiza paneos o zooms rápidos, etc. 
+
+Además, el método depende de umbrales de confianza para decidir qué puntos y líneas se consideran observados. En la práctica, fijar estos umbrales de forma única para todos los vídeos resulta difícil: con umbrales altos se obtienen menos referencias y muchos frames quedan sin homografía. Con umbrales bajos se aceptan referencias ruidosas que degradan la calibración. Por tanto, la elección de umbrales tienen un componente arbitrario, y el ``mejor'' valor depende del vídeo (calidad, resolución, iluminación y tipo de plano).
+
+\subsection{Selección robusta de homografía: umbrales adaptativos y validación}
+
+Para mejorar la robustez, se implementó una búsqueda por intentos con umbrales adaptativos sobre puntos clave y líneas. En cada frame se parte de una configuración base y se generan varios intentos relajando progresivamente los umbrales (hasta mínimos definidos), con el objetivo de aumentar el soporte geométrico en escenas difíciles.
+
+El sistema evalúa todos los intentos y selecciona el mejor según un criterio lexicográfico: (i) aceptación de calidad, (ii) \textit{quality score} global y, en caso de empate, (iii) submétricas de ajuste geométrico, soporte y cobertura. Si ningún intento resulta aceptable, el frame se marca como no proyectable.
+
+Esta estrategia permite adaptarse a distintos tipos de plano dentro del mismo partido (por ejemplo, plano general frente a plano cercano), y reduce la necesidad de calibrar manualmente umbrales por vídeo.
+
+\subsubsection{Métricas de calidad y criterio de aceptación}
+
+La homografía estimada no se utiliza de forma incondicional: se valida su calidad antes de habilitar su uso en tracking. El criterio que define la calidad de una homografía viene dado por la combinación de tres señales en un \textit{score} compuesto:
+\begin{itemize}
+    \item \textbf{Ajuste geométrico (\textit{geometry fit}):} incluye error de reproyección y chequeos de consistencia geométrica.
+    \item \textbf{Soporte de referencias (\textit{support quality}):} cantidad y fiabilidad de puntos/líneas detectados.
+    \item \textbf{Cobertura (\textit{coverage quality}):} distribución espacial/semántica de referencias para evitar soluciones concentradas o débiles.
+\end{itemize}
+
+Además del \textit{score} global, se aplican umbrales mínimos por submétrica y checks numéricos. Solo si el intento supera estos criterios se marca como aceptable para uso en tracking.
+
+\subsubsection{Definición matemática de las métricas de calidad}
+
+Sea un intento de calibración en un frame dado. Definimos funciones de normalización:
+
+\[
+\mathrm{clip}(x)=\min(1,\max(0,x)),
+\qquad
+s_{\text{inv}}(e;\tau)=\frac{\tau}{\tau+e},
+\qquad
+s_{\text{range}}(v;v_{\min},v_{\text{obj}})=
+\mathrm{clip}\!\left(\frac{v-v_{\min}}{v_{\text{obj}}-v_{\min}}\right).
+\]
+
+Todas las submétricas se llevan a \([0,1]\), donde \(1\) es mejor.
+
+\paragraph{1) Geometry fit}
+\[
+G = 0.35\,s_{\text{rep}} + 0.15\,s_{\text{cond}} + 0.30\,s_{\text{kp-align}} + 0.20\,s_{\text{line-align}}
+\]
+con:
+\[
+s_{\text{rep}} = s_{\text{inv}}(e_{\text{rep}};\tau_{\text{rep}}),
+\]
+\[
+s_{\text{cond}}=
+\mathrm{clip}\!\left(
+1-\frac{\log_{10}(\kappa(H))}{\log_{10}(\kappa_{\max})}
+\right),
+\]
+\[
+s_{\text{kp-align}} = s_{\text{inv}}(e_{\text{kp-world}};\tau_{\text{kp-world}}),
+\qquad
+s_{\text{line-align}} = s_{\text{inv}}(e_{\text{line-world}};\tau_{\text{line-world}}).
+\]
+
+Aquí \(e_{\text{kp-world}}\) y \(e_{\text{line-world}}\) son errores medianos en metros tras proyectar puntos/líneas al campo.
+Si \(H\) es inválida o mal condicionada (\(\kappa(H)>\kappa_{\max}\)), el intento se rechaza geométricamente.
+
+\paragraph{2) Support quality}
+\[
+S = 0.25\,s_{\#kp} + 0.20\,s_{\#line} + 0.15\,s_{\text{kp-conf}}
++ 0.10\,s_{\text{line-conf}} + 0.15\,s_{\text{kp-div}} + 0.15\,s_{\text{line-div}}
+\]
+donde:
+\[
+s_{\#kp}=s_{\text{range}}(N_{kp};N_{kp}^{\min},N_{kp}^{obj}),\quad
+s_{\#line}=s_{\text{range}}(N_{line};N_{line}^{\min},N_{line}^{obj}).
+\]
+\(s_{\text{kp-conf}}\) y \(s_{\text{line-conf}}\) son medias de confianza;  
+\(s_{\text{kp-div}}\) y \(s_{\text{line-div}}\) miden diversidad espacial/geométrica de referencias.
+
+\paragraph{3) Coverage quality}
+\[
+C = 0.40\,s_{\text{img-hull}} + 0.20\,s_{x\text{-span}} + 0.20\,s_{y\text{-span}} + 0.20\,s_{\text{field-hull}}
+\]
+con:
+\[
+s_{\text{img-hull}}=\mathrm{clip}\!\left(\frac{r_{\text{img-hull}}}{r_{\text{img-hull}}^{obj}}\right),\quad
+s_{x\text{-span}}=\mathrm{clip}\!\left(\frac{r_{x\text{-span}}}{r_{x\text{-span}}^{obj}}\right),\quad
+s_{y\text{-span}}=\mathrm{clip}\!\left(\frac{r_{y\text{-span}}}{r_{y\text{-span}}^{obj}}\right),
+\]
+\[
+s_{\text{field-hull}}=\mathrm{clip}\!\left(\frac{r_{\text{field-hull}}}{r_{\text{field-hull}}^{obj}}\right).
+\]
+
+\paragraph{Score final y aceptación}
+Si hay homografía válida:
+\[
+Q = 0.45\,G + 0.30\,S + 0.25\,C.
+\]
+El intento se acepta solo si cumple simultáneamente:
+\[
+G \ge G_{\min},\quad S \ge S_{\min},\quad C \ge C_{\min},\quad Q \ge Q_{\min},
+\]
+además de mínimos duros de referencias (\(N_{kp}\), \(N_{line}\)) y chequeos de validez numérica.
+
+\subsection{Suavizado temporal}
+
+Incluso con homografías aceptables, puede existir variación frame a frame. Para reducir vibraciones se aplica un suavizado temporal opcional:
+\[
+H_t^{blend}=\alpha H_{t-1} + (1-\alpha)H_t^{raw}, \quad \alpha=0.20
+\]
+
+En la implementación, el resultado suavizado se conserva únicamente si también supera la validación de calidad y no reduce el \textit{quality score} frente a la solución no suavizada.
+
+\subsection{Fallo controlado: \textit{fallback} cuando no hay homografía}
+
+Por último, cuando no se consigue una homografía fiable, el pipeline no se detiene: se descarta la proyección métrica en ese frame y las fases posteriores continúan trabajando en coordenadas de imagen. Esta decisión evita que una calibración errónea contamine el resto del sistema.

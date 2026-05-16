@@ -1,0 +1,471 @@
+% Referencias corregidas para el TFG.
+% Cambios principales:
+% - Mayúsculas internas protegidas con {...}: YOLO, R-CNN, RF-DETR, ByteTrack, SORT, DeepSORT,
+%   SoccerNet, T-DEED, PathCRF, CIE, PCM, TVCalib, PnLCalib, XTTS, Qwen3-TTS, TTS, etc.
+% - Campos no estándar "webpage" y "lastaccess" cambiados a "url" y "note".
+% - Duplicados eliminados:
+%     bassek2025integrated        -> usa BassekIntegratedDataset2025
+%     gutierrez2024pnlcalib       -> usa GutierrezPnLCalib2024
+%     pathcrf                     -> usa KimPathCRF2026
+% - La entrada BesadaAnalisisSenal2025 no se puede verificar públicamente al ser material docente no publicado.
+
+@inproceedings{RedmonYOLO2016,
+  author    = {Redmon, Joseph and Divvala, Santosh and Girshick, Ross and Farhadi, Ali},
+  title     = {{You Only Look Once}: Unified, Real-Time Object Detection},
+  booktitle = {2016 {IEEE} Conference on Computer Vision and Pattern Recognition ({CVPR})},
+  year      = {2016},
+  pages     = {779--788},
+  doi       = {10.1109/CVPR.2016.91},
+  url       = {https://doi.org/10.1109/CVPR.2016.91}
+}
+
+@misc{UltralyticsYOLO2023,
+  author       = {Jocher, Glenn and Qiu, Jing and Chaurasia, Ayush},
+  title        = {{Ultralytics YOLO}},
+  year         = {2023},
+  howpublished = {\url{https://github.com/ultralytics/ultralytics}},
+  note         = {Version 8.0.0. Accedido en abril de 2026}
+}
+
+@misc{KomorowskiFootAndBall2020,
+  author = {Komorowski, Jacek and Kurzejamski, Grzegorz and Sarwas, Grzegorz},
+  title  = {{FootAndBall}: Integrated Player and Ball Detector},
+  year   = {2019},
+  url    = {https://arxiv.org/abs/1912.05445},
+  note   = {arXiv preprint arXiv:1912.05445. Accedido en abril de 2026}
+}
+
+@inproceedings{RenFasterRCNN2015,
+  author    = {Ren, Shaoqing and He, Kaiming and Girshick, Ross and Sun, Jian},
+  title     = {Faster {R-CNN}: Towards Real-Time Object Detection with Region Proposal Networks},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2015},
+  url       = {https://proceedings.neurips.cc/paper/5638-faster-r-cnn-towards-real-time-object-detection-with-region-proposal-networks}
+}
+
+@inproceedings{RobinsonRFDETR2026,
+  author    = {Robinson, Isaac and Robicheaux, Peter and Popov, Matvei and Ramanan, Deva and Peri, Neehar},
+  title     = {{RF-DETR}: Neural Architecture Search for Real-Time Detection Transformers},
+  booktitle = {The Fourteenth International Conference on Learning Representations ({ICLR})},
+  year      = {2026},
+  url       = {https://openreview.net/forum?id=qHm5GePxTh},
+  note      = {Preprint disponible en \url{https://arxiv.org/abs/2511.09554}}
+}
+
+@inproceedings{ZhangByteTrack2022,
+  author    = {Zhang, Yifu and Sun, Peize and Jiang, Yi and Yu, Dongdong and Weng, Fucheng and Yuan, Zehuan and Luo, Ping and Liu, Wenyu and Wang, Xinggang},
+  title     = {{ByteTrack}: Multi-Object Tracking by Associating Every Detection Box},
+  booktitle = {Computer Vision -- {ECCV} 2022},
+  year      = {2022},
+  pages     = {1--21},
+  doi       = {10.1007/978-3-031-20047-2_1},
+  url       = {https://arxiv.org/abs/2110.06864}
+}
+
+@inproceedings{WojkeDeepSORT2017,
+  author    = {Wojke, Nicolai and Bewley, Alex and Paulus, Dietrich},
+  title     = {Simple Online and Realtime Tracking with a Deep Association Metric},
+  booktitle = {2017 {IEEE} International Conference on Image Processing ({ICIP})},
+  year      = {2017},
+  pages     = {3645--3649},
+  doi       = {10.1109/ICIP.2017.8296962},
+  url       = {https://arxiv.org/abs/1703.07402}
+}
+
+@inproceedings{CaoOCSORT2023,
+  author    = {Cao, Jinkun and Pang, Jiangmiao and Weng, Xinshuo and Khirodkar, Rawal and Kitani, Kris},
+  title     = {Observation-Centric {SORT}: Rethinking {SORT} for Robust Multi-Object Tracking},
+  booktitle = {Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition ({CVPR})},
+  year      = {2023},
+  pages     = {9686--9696},
+  url       = {https://arxiv.org/abs/2203.14360}
+}
+
+@inproceedings{GiancolaSoccerNet2018,
+  author    = {Giancola, Silvio and Amine, Mohieddine and Dghaily, Tarek and Ghanem, Bernard},
+  title     = {{SoccerNet}: A Scalable Dataset for Action Spotting in Soccer Videos},
+  booktitle = {Proceedings of the {IEEE} Conference on Computer Vision and Pattern Recognition Workshops ({CVPRW})},
+  year      = {2018},
+  url       = {https://arxiv.org/abs/1804.04527}
+}
+
+@inproceedings{DeliegeSoccerNetV22021,
+  author    = {Deli{\`e}ge, Adrien and Cioppa, Anthony and Giancola, Silvio and Seikavandi, Meisam J. and Dueholm, Jacob V. and Nasrollahi, Kamal and Ghanem, Bernard and Moeslund, Thomas B. and Van Droogenbroeck, Marc},
+  title     = {{SoccerNet-v2}: A Dataset and Benchmarks for Holistic Understanding of Broadcast Soccer Videos},
+  booktitle = {Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition Workshops ({CVPRW})},
+  year      = {2021},
+  url       = {https://arxiv.org/abs/2011.13367}
+}
+
+@inproceedings{CioppaCALF2020,
+  author    = {Cioppa, Anthony and Deli{\`e}ge, Adrien and Giancola, Silvio and Ghanem, Bernard and Van Droogenbroeck, Marc and Gade, Rikke and Moeslund, Thomas B.},
+  title     = {A Context-Aware Loss Function for Action Spotting in Soccer Videos},
+  booktitle = {Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition ({CVPR})},
+  year      = {2020},
+  url       = {https://arxiv.org/abs/1912.01326}
+}
+
+@inproceedings{GiancolaNetVLAD2021,
+  author    = {Giancola, Silvio and Ghanem, Bernard},
+  title     = {Temporally-Aware Feature Pooling for Action Spotting in Soccer Broadcasts},
+  booktitle = {Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition Workshops ({CVPRW})},
+  year      = {2021},
+  url       = {https://arxiv.org/abs/2104.06779}
+}
+
+@inproceedings{XarlesTDEED2024,
+  author    = {Xarles, Artur and Escalera, Sergio and Moeslund, Thomas B. and Clap{\'e}s, Albert},
+  title     = {{T-DEED}: Temporal-Discriminability Enhancer Encoder-Decoder for Precise Event Spotting in Sports Videos},
+  booktitle = {Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition Workshops ({CVPRW})},
+  year      = {2024},
+  url       = {https://arxiv.org/abs/2404.05392}
+}
+
+@misc{KimPathCRF2026,
+  author = {Kim, Hyunsung and Lee, Kunhee and Seo, Sangwoo and Ko, Sang-Ki and Yoon, Jinsung and Park, Chanyoung},
+  title  = {{PathCRF}: Ball-Free Soccer Event Detection via Possession Path Inference from Player Trajectories},
+  year   = {2026},
+  url    = {https://arxiv.org/abs/2602.12080},
+  note   = {arXiv preprint arXiv:2602.12080. Accedido en abril de 2026}
+}
+
+@inproceedings{DonahueLRCN2015,
+  author    = {Donahue, Jeff and Hendricks, Lisa Anne and Guadarrama, Sergio and Rohrbach, Marcus and Venugopalan, Subhashini and Saenko, Kate and Darrell, Trevor},
+  title     = {Long-Term Recurrent Convolutional Networks for Visual Recognition and Description},
+  booktitle = {Proceedings of the {IEEE} Conference on Computer Vision and Pattern Recognition ({CVPR})},
+  year      = {2015},
+  pages     = {2625--2634},
+  doi       = {10.1109/CVPR.2015.7298878},
+  url       = {https://arxiv.org/abs/1411.4389}
+}
+
+@inproceedings{CarreiraI3D2017,
+  author    = {Carreira, Jo{\~a}o and Zisserman, Andrew},
+  title     = {Quo Vadis, Action Recognition? A New Model and the {Kinetics} Dataset},
+  booktitle = {Proceedings of the {IEEE} Conference on Computer Vision and Pattern Recognition ({CVPR})},
+  year      = {2017},
+  doi       = {10.1109/CVPR.2017.502},
+  url       = {https://arxiv.org/abs/1705.07750}
+}
+
+@manual{cie1976lab,
+  title        = {Colorimetry -- Part 4: {CIE} 1976 {L*a*b*} Colour Space},
+  organization = {International Commission on Illumination},
+  year         = {2019},
+  url          = {https://cie.co.at/publications/colorimetry-part-4-cie-1976-lab-colour-space-1}
+}
+
+@inproceedings{macqueen1967kmeans,
+  author    = {MacQueen, James B.},
+  title     = {Some Methods for Classification and Analysis of Multivariate Observations},
+  booktitle = {Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability},
+  volume    = {1},
+  pages     = {281--297},
+  publisher = {University of California Press},
+  year      = {1967},
+  url       = {https://projecteuclid.org/euclid.bsmsp/1200512992}
+}
+
+@article{lloyd1982least,
+  author  = {Lloyd, Stuart P.},
+  title   = {Least Squares Quantization in {PCM}},
+  journal = {{IEEE} Transactions on Information Theory},
+  volume  = {28},
+  number  = {2},
+  pages   = {129--137},
+  year    = {1982},
+  doi     = {10.1109/TIT.1982.1056489}
+}
+
+@inproceedings{koshkina2021contrastive,
+  author    = {Koshkina, Maria and Pidaparthy, Hemanth and Elder, James H.},
+  title     = {Contrastive Learning for Sports Video: Unsupervised Player Classification},
+  booktitle = {Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition Workshops ({CVPRW})},
+  pages     = {4528--4536},
+  year      = {2021},
+  url       = {https://arxiv.org/abs/2104.10068}
+}
+
+@article{naik2022deepplayer,
+  author  = {Naik, Banoth Thulasya and Hashmi, Mohammad Farukh and Geem, Zong Woo and Bokde, Neeraj Dhanraj},
+  title   = {{DeepPlayer-Track}: Player and Referee Tracking With Jersey Color Recognition in Soccer},
+  journal = {{IEEE} Access},
+  volume  = {10},
+  pages   = {32494--32509},
+  year    = {2022},
+  doi     = {10.1109/ACCESS.2022.3161441}
+}
+
+@article{naik2024eiou,
+  author  = {Naik, Banoth Thulasya and Hashmi, Mohammad Farukh and Gupta, Aditya},
+  title   = {{EIoU}-Distance Loss: An Automated Team-Wise Player Detection and Tracking with Jersey Colour Recognition in Soccer},
+  journal = {Connection Science},
+  volume  = {36},
+  number  = {1},
+  year    = {2024},
+  doi     = {10.1080/09540091.2023.2291991}
+}
+
+@book{hartley2004multiple,
+  author    = {Hartley, Richard and Zisserman, Andrew},
+  title     = {Multiple View Geometry in Computer Vision},
+  edition   = {2},
+  publisher = {Cambridge University Press},
+  year      = {2004},
+  url       = {https://www.robots.ox.ac.uk/~vgg/hzbook/}
+}
+
+@inproceedings{cioppa2021soccernetcalibration,
+  author    = {Cioppa, Anthony and Deli{\`e}ge, Adrien and Magera, Floriane and Giancola, Silvio and Barnich, Olivier and Ghanem, Bernard and Van Droogenbroeck, Marc},
+  title     = {Camera Calibration and Player Localization in {SoccerNet-v2} and Investigation of Their Representations for Action Spotting},
+  booktitle = {Proceedings of the {IEEE/CVF} Conference on Computer Vision and Pattern Recognition Workshops ({CVPRW})},
+  pages     = {4537--4546},
+  year      = {2021},
+  doi       = {10.1109/CVPRW53098.2021.00511},
+  url       = {https://openaccess.thecvf.com/content/CVPR2021W/CVSports/html/Cioppa_Camera_Calibration_and_Player_Localization_in_SoccerNet-v2_and_Investigation_of_CVPRW_2021_paper.html}
+}
+
+@inproceedings{theiner2023tvcalib,
+  author    = {Theiner, Jonas and Ewerth, Ralph},
+  title     = {{TVCalib}: Camera Calibration for Sports Field Registration in Soccer},
+  booktitle = {Proceedings of the {IEEE/CVF} Winter Conference on Applications of Computer Vision ({WACV})},
+  pages     = {1166--1175},
+  year      = {2023},
+  url       = {https://openaccess.thecvf.com/content/WACV2023/html/Theiner_TVCalib_Camera_Calibration_for_Sports_Field_Registration_in_Soccer_WACV_2023_paper.html}
+}
+
+@article{GutierrezPnLCalib2024,
+  author  = {Guti{\'e}rrez-P{\'e}rez, Marc and Agudo, Antonio},
+  title   = {{PnLCalib}: Sports Field Registration via Points and Lines Optimization},
+  journal = {arXiv preprint arXiv:2404.08401},
+  year    = {2024},
+  url     = {https://arxiv.org/abs/2404.08401}
+}
+
+@inproceedings{lee2019settransformer,
+  author    = {Lee, Juho and Lee, Yoonho and Kim, Jungtaek and Kosiorek, Adam R. and Choi, Seungjin and Teh, Yee Whye},
+  title     = {{Set Transformer}: A Framework for Attention-Based Permutation-Invariant Neural Networks},
+  booktitle = {Proceedings of the 36th International Conference on Machine Learning ({ICML})},
+  pages     = {3744--3753},
+  year      = {2019},
+  url       = {https://proceedings.mlr.press/v97/lee19d.html}
+}
+
+@inproceedings{vaswani2017attention,
+  author    = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N. and Kaiser, Lukasz and Polosukhin, Illia},
+  title     = {{Attention Is All You Need}},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2017},
+  url       = {https://arxiv.org/abs/1706.03762}
+}
+
+@article{kuhn1955hungarian,
+  author  = {Kuhn, Harold W.},
+  title   = {The Hungarian Method for the Assignment Problem},
+  journal = {Naval Research Logistics Quarterly},
+  volume  = {2},
+  number  = {1--2},
+  pages   = {83--97},
+  year    = {1955},
+  doi     = {10.1002/nav.3800020109}
+}
+
+@article{bernardin2008clear,
+  author  = {Bernardin, Keni and Stiefelhagen, Rainer},
+  title   = {Evaluating Multiple Object Tracking Performance: The {CLEAR MOT} Metrics},
+  journal = {{EURASIP} Journal on Image and Video Processing},
+  volume  = {2008},
+  pages   = {246309},
+  year    = {2008},
+  doi     = {10.1155/2008/246309}
+}
+
+@article{luiten2021hota,
+  author  = {Luiten, Jonathon and O{\v{s}}ep, Aljo{\v{s}}a and Dendorfer, Patrick and Torr, Philip H. S. and Geiger, Andreas and Leal-Taix{\'e}, Laura and Leibe, Bastian},
+  title   = {{HOTA}: A Higher Order Metric for Evaluating Multi-Object Tracking},
+  journal = {International Journal of Computer Vision},
+  volume  = {129},
+  pages   = {548--578},
+  year    = {2021},
+  doi     = {10.1007/s11263-020-01375-2}
+}
+
+@article{dendorfer2021motchallenge,
+  author  = {Dendorfer, Patrick and O{\v{s}}ep, Aljo{\v{s}}a and Milan, Anton and Schindler, Konrad and Cremers, Daniel and Reid, Ian and Roth, Stefan and Leal-Taix{\'e}, Laura},
+  title   = {{MOTChallenge}: A Benchmark for Single-Camera Multiple Target Tracking},
+  journal = {International Journal of Computer Vision},
+  volume  = {129},
+  pages   = {845--881},
+  year    = {2021},
+  doi     = {10.1007/s11263-020-01393-0}
+}
+
+@inproceedings{cui2023sportsmot,
+  author    = {Cui, Yutao and Zeng, Chenkai and Zhao, Xiaoyu and Yang, Yichun and Wu, Gangshan and Wang, Limin},
+  title     = {{SportsMOT}: A Large Multi-Object Tracking Dataset in Multiple Sports Scenes},
+  booktitle = {Proceedings of the {IEEE/CVF} International Conference on Computer Vision ({ICCV})},
+  pages     = {9921--9931},
+  year      = {2023},
+  doi       = {10.1109/ICCV51070.2023.00910},
+  url       = {https://arxiv.org/abs/2304.05170}
+}
+
+@article{gemma2024,
+  author  = {{Gemma Team}},
+  title   = {{Gemma}: Open Models Based on {Gemini} Research and Technology},
+  journal = {arXiv preprint arXiv:2403.08295},
+  year    = {2024},
+  url     = {https://arxiv.org/abs/2403.08295}
+}
+
+@misc{llamacpp,
+  author       = {Gerganov, Georgi and contributors},
+  title        = {{llama.cpp}},
+  year         = {2024},
+  howpublished = {\url{https://github.com/ggml-org/llama.cpp}},
+  note         = {Accedido en abril de 2026}
+}
+
+@misc{ollamaDocs,
+  author       = {{Ollama}},
+  title        = {{Ollama API Documentation}},
+  year         = {2026},
+  howpublished = {\url{https://docs.ollama.com/api}},
+  note         = {Accedido en abril de 2026}
+}
+
+@article{shen2018tacotron,
+  author  = {Shen, Jonathan and Pang, Ruoming and Weiss, Ron J. and Schuster, Mike and Jaitly, Navdeep and Yang, Zongheng and Chen, Zhifeng and Zhang, Yu and Wang, Yuxuan and Skerry-Ryan, R. J. and Saurous, Rif A. and Agiomyrgiannakis, Yannis and Wu, Yonghui},
+  title   = {Natural {TTS} Synthesis by Conditioning {WaveNet} on Mel Spectrogram Predictions},
+  journal = {arXiv preprint arXiv:1712.05884},
+  year    = {2018},
+  url     = {https://arxiv.org/abs/1712.05884}
+}
+
+@inproceedings{oord2016wavenet,
+  author    = {{van den Oord}, Aaron and Dieleman, Sander and Zen, Heiga and Simonyan, Karen and Vinyals, Oriol and Graves, Alex and Kalchbrenner, Nal and Senior, Andrew and Kavukcuoglu, Koray},
+  title     = {{WaveNet}: A Generative Model for Raw Audio},
+  booktitle = {9th {ISCA} Speech Synthesis Workshop ({SSW} 9)},
+  pages     = {125},
+  year      = {2016},
+  url       = {https://arxiv.org/abs/1609.03499}
+}
+
+@article{kong2020hifigan,
+  author  = {Kong, Jungil and Kim, Jaehyeon and Bae, Jaekyoung},
+  title   = {{HiFi-GAN}: Generative Adversarial Networks for Efficient and High Fidelity Speech Synthesis},
+  journal = {arXiv preprint arXiv:2010.05646},
+  year    = {2020},
+  url     = {https://arxiv.org/abs/2010.05646}
+}
+
+@article{casanova2024xtts,
+  author  = {Casanova, Edresson and Davis, Kelly and G{\"o}lge, Eren and G{\"o}knar, G{\"o}rkem and Gulea, Iulian and Hart, Logan and Aljafari, Aya and Meyer, Joshua and Morais, Reuben and Olayemi, Samuel and Weber, Julian},
+  title   = {{XTTS}: A Massively Multilingual Zero-Shot Text-to-Speech Model},
+  journal = {arXiv preprint arXiv:2406.04904},
+  year    = {2024},
+  url     = {https://arxiv.org/abs/2406.04904}
+}
+
+@article{hu2026qwen3tts,
+  author  = {Hu, Hangrui and Zhu, Xinfa and He, Ting and Guo, Dake and Zhang, Bin and Wang, Xiong and Guo, Zhifang and Jiang, Ziyue and Hao, Hongkun and Guo, Zishan and Zhang, Xinyu and Zhang, Pei and Yang, Baosong and Xu, Jin and Zhou, Jingren and Lin, Junyang},
+  title   = {{Qwen3-TTS} Technical Report},
+  journal = {arXiv preprint arXiv:2601.15621},
+  year    = {2026},
+  url     = {https://arxiv.org/abs/2601.15621}
+}
+
+@article{BassekIntegratedDataset2025,
+  author  = {Bassek, Manuel and Rein, Robert and Weber, Hendrik and Memmert, Daniel},
+  title   = {An Integrated Dataset of Spatiotemporal and Event Data in Elite Soccer},
+  journal = {Scientific Data},
+  volume  = {12},
+  number  = {195},
+  year    = {2025},
+  doi     = {10.1038/s41597-025-04505-y},
+  url     = {https://www.nature.com/articles/s41597-025-04505-y}
+}
+
+@inproceedings{lafferty2001crf,
+  author    = {Lafferty, John and McCallum, Andrew and Pereira, Fernando C. N.},
+  title     = {Conditional Random Fields: Probabilistic Models for Segmenting and Labeling Sequence Data},
+  booktitle = {Proceedings of the Eighteenth International Conference on Machine Learning ({ICML})},
+  pages     = {282--289},
+  year      = {2001},
+  url       = {https://dl.acm.org/doi/10.5555/645530.655813}
+}
+
+@article{viterbi1967,
+  author  = {Viterbi, Andrew J.},
+  title   = {Error Bounds for Convolutional Codes and an Asymptotically Optimum Decoding Algorithm},
+  journal = {{IEEE} Transactions on Information Theory},
+  volume  = {13},
+  number  = {2},
+  pages   = {260--269},
+  year    = {1967},
+  doi     = {10.1109/TIT.1967.1054010}
+}
+
+@misc{BesadaAnalisisSenal2025,
+  author = {Besada Portas, Eva},
+  title  = {Apuntes de la asignatura An{\'a}lisis de Se{\~n}al},
+  year   = {2025},
+  note   = {Material docente no publicado, Grado en Ingenier{\'i}a de Datos e Inteligencia Artificial, Universidad Complutense de Madrid}
+}
+
+@misc{PnLCalibRepo2024,
+  author       = {Guti{\'e}rrez-P{\'e}rez, Marc and Agudo, Antonio},
+  title        = {{PnLCalib}: Sports Field Registration via Points and Lines Optimization},
+  howpublished = {\url{https://github.com/mguti97/PnLCalib}},
+  note         = {Repositorio oficial. Accedido el 15 de mayo de 2026},
+  year         = {2024}
+}
+
+@misc{SoByteTrack2025,
+  author       = {So, Leonard},
+  title        = {An Introduction to {BYTETrack}: Multi-Object Tracking by Associating Every Detection Box},
+  year         = {2025},
+  month        = aug,
+  day          = {3},
+  howpublished = {\url{https://datature.com/blog/introduction-to-bytetrack-multi-object-tracking-by-associating-every-detection-box}},
+  note         = {Datature Blog. Accedido el 15 de mayo de 2026}
+}
+
+@article{Kalman1960,
+  author  = {Kalman, Rudolf E.},
+  title   = {A New Approach to Linear Filtering and Prediction Problems},
+  journal = {Journal of Basic Engineering},
+  volume  = {82},
+  number  = {1},
+  pages   = {35--45},
+  year    = {1960},
+  doi     = {10.1115/1.3662552}
+}
+
+@article{PereiraDeepSORT2022,
+  author  = {Pereira, Ricardo and Carvalho, Guilherme and Garrote, Lu{\'i}s and Nunes, Urbano J.},
+  title   = {{SORT} and {Deep-SORT} Based Multi-Object Tracking for Mobile Robotics: Evaluation with New Data Association Metrics},
+  journal = {Applied Sciences},
+  volume  = {12},
+  number  = {3},
+  pages   = {1319},
+  year    = {2022},
+  doi     = {10.3390/app12031319},
+  url     = {https://www.mdpi.com/2076-3417/12/3/1319}
+}
+
+@misc{OpenAIGPTImages2026,
+  author       = {{OpenAI}},
+  title        = {{Image Generation}},
+  year         = {2026},
+  howpublished = {\url{https://developers.openai.com/api/docs/guides/image-generation}},
+  note         = {Documentaci{\'o}n oficial. Accedido el 15 de mayo de 2026}
+}
+
+@misc{DibujoSecundariaTransformaciones,
+  author       = {{Dibujo para Secundaria}},
+  title        = {TEMA 3 Proporcionalidad y Semejanza. Transformaciones},
+  year         = {2020},
+  howpublished = {\url{https://dibujoparasecundaria.wordpress.com/dibujo-tecnico-ii/tema-3-proporcionalidad-y-semejanza-transformaciones/}},
+  note         = {Material de Dibujo T{\'e}cnico II. Fecha inferida a partir de las capturas incluidas en la p{\'a}gina. Accedido el 16 de mayo de 2026}
+}
