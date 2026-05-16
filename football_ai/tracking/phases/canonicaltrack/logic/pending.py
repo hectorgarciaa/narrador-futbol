@@ -75,7 +75,6 @@ class CanonicalPendingAssignmentMixin:
         current_frame=None,
         team_name=None,
     ):
-        max_lost_frames = self._max_lost_frames_for_class(class_name)
         normalized_team = self._normalize_team_name(team_name)
         return sum(
             1
@@ -89,20 +88,6 @@ class CanonicalPendingAssignmentMixin:
                     canonical_id,
                     normalized_team,
                     create_mapping=True,
-                )
-            )
-            and (
-                current_frame is None
-                or (
-                    max_lost_frames is None
-                    or (
-                        max(
-                            0,
-                            int(current_frame)
-                            - int(state.get("last_frame", current_frame)),
-                        )
-                        <= max_lost_frames
-                    )
                 )
             )
         )
