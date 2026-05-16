@@ -116,14 +116,6 @@ class CanonicalCommonMixin:
         m2 = float(prev_m2) + (delta * delta2)
         return count, mean, m2
 
-    def _motion_limit_per_frame(self, stats_count, stats_mean, stats_m2):
-        variance = float(stats_m2) / max(1, int(stats_count) - 1)
-        std_per_frame = max(
-            float(np.sqrt(max(variance, 0.0))),
-            self.motion_std_floor,
-        )
-        return float(stats_mean) + (self.motion_std_factor * std_per_frame)
-
     def _use_field_position_for_class(self, class_name, field_position=None):
         if not self.use_field_positions:
             return False

@@ -43,7 +43,6 @@ class CanonicalPendingAssignmentMixin:
                     pending.get("field_position"),
                     current_frame,
                     detection_class_candidates=pending.get("detection_class_candidates"),
-                    apply_statistical_gate=True,
                 )
                 if output_class_name is None:
                     continue
@@ -122,7 +121,6 @@ class CanonicalPendingAssignmentMixin:
                 field_position,
                 current_frame,
                 detection_class_candidates=detection_class_candidates,
-                apply_statistical_gate=True,
             )
             if output_class_name is None:
                 continue

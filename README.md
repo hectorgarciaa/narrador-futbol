@@ -1036,10 +1036,6 @@ tracking:
   expected_roles_by_team:
     Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
-  motion_std_gate_enabled: true
-  motion_std_factor: 4.0
-  motion_std_min_samples: 5
-  motion_std_floor: 0.5
   referee_sideline_band_distance_m: 3.0
   # Los slots de árbitro quedan fijados por zona:
   # 23 -> árbitro central (fuera de la franja lateral y dentro del carril central de jugadores)
@@ -1110,17 +1106,11 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `special_seed_canonical_ids`
 - `special_seed_defender_roles`
 - `expected_roles_by_team`
-- `motion_std_gate_enabled`
-- `motion_std_factor`
-- `motion_std_min_samples`
-- `motion_std_floor`
 
 Si sigues viendo cambios de ID en clips largos, ajusta en este orden:
 1. Activa `strict_person_class_separation`.
 2. Ajusta los gates en campo (`field_distance_gate_*`) para `player/goalkeeper`.
-3. Baja `motion_std_factor` (por ejemplo: `6 -> 5 -> 4`).
 4. Baja `reassign_min_distance` (píxeles, para clases sin campo) o endurece `field_position_match_distance_*` si el problema está en `player/goalkeeper`.
-5. Baja `motion_std_min_samples` para que el gate estadístico actúe antes.
 
 ---
 

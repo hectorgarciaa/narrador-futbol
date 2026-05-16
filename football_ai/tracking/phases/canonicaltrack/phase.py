@@ -68,10 +68,6 @@ class CanonicalTrackPhase(
         self.reassign_motion_growth_cap_frames = canonical_conf[
             "reassign_motion_growth_cap_frames"
         ]
-        self.motion_std_gate_enabled = canonical_conf["motion_std_gate_enabled"]
-        self.motion_std_factor = canonical_conf["motion_std_factor"]
-        self.motion_std_min_samples = canonical_conf["motion_std_min_samples"]
-        self.motion_std_floor = canonical_conf["motion_std_floor"]
 
         self.reserve_penalty_spot_seed_players = canonical_conf[
             "reserve_penalty_spot_seed_players"
@@ -182,12 +178,6 @@ class CanonicalTrackPhase(
 
     def reset(self):
         self.state = CanonicalTrackState()
-        self.class_motion_stats = {
-            "player": {"count": 0, "mean": 0.0, "m2": 0.0},
-            "goalkeeper": {"count": 0, "mean": 0.0, "m2": 0.0},
-            "referee": {"count": 0, "mean": 0.0, "m2": 0.0},
-            "ball": {"count": 0, "mean": 0.0, "m2": 0.0},
-        }
         self._current_referee_central_x_bounds = None
         self._initialize_reserved_penalty_spot_players(self.state.canonical_state)
 

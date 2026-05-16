@@ -67,16 +67,6 @@ class CanonicalAssignmentCommitMixin:
         prev_samples = 0 if reset_motion_stats else int(previous_state.get("movement_samples", 0))
         prev_mean = 0.0 if reset_motion_stats else float(previous_state.get("mean_step_distance", 0.0))
         prev_last_frame = int(previous_state.get("last_frame", n_frame))
-        frame_gap = max(1, n_frame - prev_last_frame)
-        prev_step_pf_count = (
-            0 if reset_motion_stats else int(previous_state.get("step_per_frame_count", 0))
-        )
-        prev_step_pf_mean = (
-            0.0 if reset_motion_stats else float(previous_state.get("step_per_frame_mean", 0.0))
-        )
-        prev_step_pf_m2 = (
-            0.0 if reset_motion_stats else float(previous_state.get("step_per_frame_m2", 0.0))
-        )
         step_distance = self._step_distance(
             previous_state.get("bbox"),
             bbox,
@@ -95,45 +85,6 @@ class CanonicalAssignmentCommitMixin:
         else:
             movement_samples = prev_samples
             mean_step_distance = prev_mean
-
-        if step_distance is not None:
-            step_per_frame = step_distance / frame_gap
-            (
-                step_per_frame_count,
-                step_per_frame_mean,
-                step_per_frame_m2,
-            ) = self._update_running_stats(
-                prev_step_pf_count,
-                prev_step_pf_mean,
-                prev_step_pf_m2,
-                step_per_frame,
-            )
-            class_stats = self.class_motion_stats.setdefault(
-                output_class_name,
-                {"count": 0, "mean": 0.0, "m2": 0.0},
-            )
-            (
-                class_stats["count"],
-                class_stats["mean"],
-                class_stats["m2"],
-            ) = (
-                self._update_running_stats(
-                    class_stats["count"],
-                    class_stats["mean"],
-                    class_stats["m2"],
-                    step_per_frame,
-                )
-                if motion_distance_space == "image"
-                else (
-                    class_stats["count"],
-                    class_stats["mean"],
-                    class_stats["m2"],
-                )
-            )
-        else:
-            step_per_frame_count = prev_step_pf_count
-            step_per_frame_mean = prev_step_pf_mean
-            step_per_frame_m2 = prev_step_pf_m2
         special_penalty_seed = bool(previous_state.get("special_penalty_seed", False))
         resolved_team = (
             detected_team
@@ -169,9 +120,6 @@ class CanonicalAssignmentCommitMixin:
             "field_position": resolved_field_position,
             "movement_samples": movement_samples,
             "mean_step_distance": mean_step_distance,
-            "step_per_frame_count": step_per_frame_count,
-            "step_per_frame_mean": step_per_frame_mean,
-            "step_per_frame_m2": step_per_frame_m2,
             "reserved_seed": False,
             "special_penalty_seed": special_penalty_seed,
             "class_candidates": list(detection_class_candidates or []),

@@ -296,10 +296,6 @@ canonical:
   reassign_min_distance: 10.0
   reassign_min_samples: 3
   reassign_motion_growth_cap_frames: 12
-  motion_std_gate_enabled: true
-  motion_std_factor: 4.0
-  motion_std_min_samples: 5
-  motion_std_floor: 0.5
   referee_sideline_band_distance_m: 3.0
   strict_person_class_separation: true
   forced_absorption_player_min_lost_frames: 20

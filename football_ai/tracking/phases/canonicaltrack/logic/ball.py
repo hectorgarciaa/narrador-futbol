@@ -221,20 +221,6 @@ class CanonicalBallMixin:
                 prev_step_pf_m2,
                 step_per_frame,
             )
-            class_stats = self.class_motion_stats.setdefault(
-                "ball",
-                {"count": 0, "mean": 0.0, "m2": 0.0},
-            )
-            (
-                class_stats["count"],
-                class_stats["mean"],
-                class_stats["m2"],
-            ) = self._update_running_stats(
-                class_stats["count"],
-                class_stats["mean"],
-                class_stats["m2"],
-                step_per_frame,
-            )
         else:
             movement_samples = prev_samples
             mean_step_distance = prev_mean

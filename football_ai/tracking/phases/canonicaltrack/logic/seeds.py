@@ -30,9 +30,6 @@ class CanonicalSeedMixin:
             "field_position": tuple(float(v) for v in field_position),
             "movement_samples": 0,
             "mean_step_distance": 0.0,
-            "step_per_frame_count": 0,
-            "step_per_frame_mean": 0.0,
-            "step_per_frame_m2": 0.0,
             "reserved_seed": True,
             "special_penalty_seed": True,
             "reserved_seed_match_distance_m": float(

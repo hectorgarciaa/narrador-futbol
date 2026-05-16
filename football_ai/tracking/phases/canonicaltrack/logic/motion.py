@@ -64,7 +64,6 @@ class CanonicalMotionMixin:
         current_frame,
         class_name=None,
         new_field_position=None,
-        apply_statistical_gate=True,
     ):
         effective_class = class_name or previous_state.get("class_name")
         previous_bbox = previous_state.get("bbox")
@@ -120,50 +119,6 @@ class CanonicalMotionMixin:
                 expected_jump * self.reassign_motion_factor,
             )
 
-        if (
-            apply_statistical_gate
-            and self.motion_std_gate_enabled
-            and not uses_field_position
-        ):
-            limits_per_frame = []
-
-            track_stats_count = int(previous_state.get("step_per_frame_count", 0))
-            if str(previous_state.get("motion_distance_space") or "") != "image":
-                track_stats_count = 0
-            if track_stats_count >= self.motion_std_min_samples:
-                track_stats_mean = float(
-                    previous_state.get("step_per_frame_mean", 0.0)
-                )
-                track_stats_m2 = float(previous_state.get("step_per_frame_m2", 0.0))
-                limits_per_frame.append(
-                    self._motion_limit_per_frame(
-                        track_stats_count,
-                        track_stats_mean,
-                        track_stats_m2,
-                    )
-                )
-
-            if effective_class not in self.field_position_classes:
-                class_stats = self.class_motion_stats.get(effective_class, {})
-                class_stats_count = int(class_stats.get("count", 0))
-                if class_stats_count >= self.motion_std_min_samples:
-                    limits_per_frame.append(
-                        self._motion_limit_per_frame(
-                            class_stats_count,
-                            float(class_stats.get("mean", 0.0)),
-                            float(class_stats.get("m2", 0.0)),
-                        )
-                    )
-
-            if limits_per_frame:
-                max_per_frame = min(limits_per_frame)
-                stats_jump_limit = max_per_frame * motion_growth_frames
-                stats_jump_limit = max(
-                    stats_jump_limit,
-                    self.motion_std_floor * motion_growth_frames,
-                )
-                max_allowed_jump = min(max_allowed_jump, stats_jump_limit)
-
         return step_distance <= max_allowed_jump
 
     def _resolve_candidate_class_for_detection(
@@ -176,8 +131,6 @@ class CanonicalMotionMixin:
         detection_field_position,
         current_frame,
         detection_class_candidates=None,
-        *,
-        apply_statistical_gate,
     ):
         candidate_class = candidate_state.get("class_name")
         if candidate_class is None:
@@ -201,7 +154,6 @@ class CanonicalMotionMixin:
                 current_frame,
                 class_name=candidate_class,
                 new_field_position=detection_field_position,
-                apply_statistical_gate=apply_statistical_gate,
             ):
                 return None
             return candidate_class
@@ -217,7 +169,6 @@ class CanonicalMotionMixin:
                 current_frame,
                 class_name=detection_class,
                 new_field_position=detection_field_position,
-                apply_statistical_gate=apply_statistical_gate,
             ):
                 return None
             return detection_class
@@ -256,7 +207,6 @@ class CanonicalMotionMixin:
                 current_frame,
                 class_name=candidate_class,
                 new_field_position=detection_field_position,
-                apply_statistical_gate=apply_statistical_gate,
             ):
                 return None
 
@@ -284,7 +234,6 @@ class CanonicalMotionMixin:
             detection_field_position,
             current_frame,
             detection_class_candidates=detection_class_candidates,
-            apply_statistical_gate=False,
         )
         if resolved_class is not None:
             return resolved_class, None
@@ -335,7 +284,6 @@ class CanonicalMotionMixin:
                 else candidate_class
             ),
             new_field_position=detection_field_position,
-            apply_statistical_gate=False,
         ):
             return None, "continuity_motion_incompatible"
         return None, "continuity_gate_failed"
