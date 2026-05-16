@@ -67,7 +67,9 @@ def main():
         [[VideoPanel((height, width))]],
     )
 
-    detection_phase = DetectionPhase(str(model_path), config.detection)
+    detector_conf = dict(config.detection or {})
+    detector_conf["model_path"] = str(model_path)
+    detection_phase = DetectionPhase(detector_conf)
 
     frames = {}
     for frame_index, frame_time_ms, frame_bgr in iter_video_frames(video_path, args.max_frames):

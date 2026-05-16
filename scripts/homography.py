@@ -8,7 +8,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from football_ai.core import convert_to_serializable, default_render_color_bgr
 from football_ai.tracking.phases.detection import DetectionPhase
 from football_ai.tracking.phases.filtering import FilteringPhase
-from football_ai.tracking.phases.reference_points import PnLCalibFieldProjector, ProjectionPhase
+from football_ai.tracking.phases.reference_points import ProjectionPhase
 from football_ai.visualization.simple_drawer import FieldPanel, VideoOutput, VideoPanel
 
 from scripts.utils import (
@@ -173,15 +173,13 @@ def main():
         [[VideoPanel((height, width)), FieldPanel((height, width))]],
     )
 
-    detection_phase = DetectionPhase(str(model_path), config.detection)
+    detector_conf = dict(config.detection or {})
+    detector_conf["model_path"] = str(model_path)
+    detection_phase = DetectionPhase(detector_conf)
 
-    projector = None
-    if config.projector.get("enabled", False):
-        projector = PnLCalibFieldProjector(
-            project_root=config.project_root,
-            **dict(config.projector.get("constructor", {})),
-        )
-    projection_phase = ProjectionPhase(projector)
+    projector_conf = dict(config.projector or {})
+    projector_conf["project_root"] = config.project_root
+    projection_phase = ProjectionPhase(projector_conf)
     filtering_phase = FilteringPhase()
 
     frames = {}
