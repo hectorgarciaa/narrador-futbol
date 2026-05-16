@@ -190,15 +190,16 @@ def _apply_team_color_overrides(base_team_colors, raw_overrides, logger):
 def _normalize_team_detector_runtime_conf(team_detector_conf, team_mode=None):
     runtime_conf = dict(team_detector_conf or {})
     runtime_conf.pop("with_ref", None)
+    runtime_conf.setdefault("team_color_model_conf", {})
 
     normalized_team_mode = None
     if team_mode is not None:
         normalized_team_mode = str(team_mode).strip().lower()
 
     if normalized_team_mode == "auto-bootstrap":
-        runtime_conf.pop("team_colors", None)
-    elif not runtime_conf.get("team_colors"):
-        runtime_conf.pop("team_colors", None)
+        runtime_conf["team_color_model_conf"].pop("team_colors", None)
+    elif not runtime_conf["team_color_model_conf"].get("team_colors"):
+        runtime_conf["team_color_model_conf"].pop("team_colors", None)
 
     return runtime_conf
 
@@ -338,7 +339,6 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
             else None
         )
         video_path, video_source = resolve_video_path(config, effective_video_shortcut)
-
         output_root_arg = getattr(args, "output_root", None)
         if output_root_arg:
             output_root = Path(output_root_arg).expanduser()
@@ -616,8 +616,6 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
             )
 
         profile_phases_enabled = bool(getattr(args, "profile_phases", False))
-        if not profile_phases_enabled:
-            profile_phases_enabled = bool(canonical_conf.get("profile_phases", False))
         logger.info("Phase profiling per frame: %s", profile_phases_enabled)
 
         logger.info("Extracting tracks from video...")

@@ -6,17 +6,11 @@ try:
 except Exception:
     cp = None
 
-try:
-    from cuml.cluster import KMeans as CuKMeans
-except Exception:
-    CuKMeans = None
-
 
 class BatchedKMeansGPU:
     def __init__(
         self,
         n_clusters=2,
-        init="k-means++",
         n_init=1,
         use_gpu=True,
         max_iter=12,
@@ -24,38 +18,19 @@ class BatchedKMeansGPU:
         random_state=0,
     ):
         self.n_clusters = int(n_clusters)
-        self.init = str(init or "k-means++")
         self.n_init = max(1, int(n_init))
         self.use_gpu = bool(use_gpu and cp is not None)
         self.max_iter = max(1, int(max_iter))
         self.tol = max(0.0, float(tol))
         self.random_state = int(random_state)
         self._cp = cp if self.use_gpu else None
-        self._km_gpu = None
         self._km_cpu = KMeans(
             n_clusters=self.n_clusters,
-            init=self.init,
             n_init=self.n_init,
             random_state=self.random_state,
             max_iter=self.max_iter,
             tol=self.tol,
         )
-
-        if self.use_gpu and CuKMeans is not None:
-            try:
-                self._km_gpu = CuKMeans(
-                    n_clusters=self.n_clusters,
-                    init=self.init,
-                    n_init=self.n_init,
-                    random_state=self.random_state,
-                    max_iter=self.max_iter,
-                    tol=self.tol,
-                )
-            except Exception:
-                self._km_gpu = None
-                self.use_gpu = False
-        else:
-            self.use_gpu = False
 
         self.cluster_centers_ = None
         self.labels_ = None
@@ -234,9 +209,6 @@ class BatchedKMeansGPU:
     def _choose_initial_indices(self, points, init_idx, row_idx):
         seed = self.random_state + (init_idx * 1009) + row_idx
         rng = np.random.default_rng(seed)
-
-        if self.init == "random":
-            return rng.choice(len(points), size=self.n_clusters, replace=len(points) < self.n_clusters)
 
         first_idx = int(rng.integers(len(points)))
         chosen = [first_idx]

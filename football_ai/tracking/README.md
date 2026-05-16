@@ -29,7 +29,6 @@ tracker = Tracker(
             "track_thresh": 0.15,
             "track_buffer": 90,
             "match_thresh": 0.945,
-            "frame_rate": 25,
         },
         "tracker_conf": {"execution_mode": "runtime"},
         "canonical_conf": {
@@ -91,7 +90,7 @@ Por cada frame del vídeo:
    - Los IDs canónicos de personas se limitan al rango `1..N_personas` (el balón no consume ese rango y siempre usa `id=0`).
   - Los `goalkeeper` siguen reservando los IDs `1-2`, pero los `player` se reparten en dos bloques fijos por equipo: `3-12` para el primer equipo de campo y `13-22` para el segundo. La capa canónica nunca crea más de 10 jugadores por equipo ni permite que un `player` cruce de bloque en reassign, relink o forced absorption.
   - Si el `TeamDetector` emite etiquetas explícitas `Equipo 1`/`Equipo 2`, esos nombres se alinean directamente con los bloques `3-12` y `13-22`; con nombres reales de club, el canónico fija la correspondencia al primer mapeo estable que vea y la conserva durante el resto del vídeo.
-  - Los IDs canónicos `tracking.referee_canonical_ids` (por defecto `23,24,25`) quedan reservados a árbitros.
+  - Los IDs canónicos `23,24,25` quedan reservados a árbitros.
   - Esos slots de árbitro ya no son intercambiables: el primero (`23`) se reserva al árbitro central, el segundo (`24`) al linier de la banda superior (`sideline_top`) y el tercero (`25`) al linier de la banda inferior (`sideline_bottom`).
   - La reabsorción de árbitros usa una lógica específica por zona de campo: `sideline_top`, `sideline_bottom` y `central`, calculadas desde `field_position_m`. Si un árbitro reaparece en la misma zona, reabsorbe ese ID reservado aunque haya habido un pequeño gap temporal.
   - En la capa canónica, un ID `referee` solo acepta detecciones de entrada cuya clase resuelta siga siendo `referee`; ya no puede reabsorber detecciones `player`.
@@ -113,7 +112,7 @@ Por cada frame del vídeo:
    - En `debug`, conserva la traza de `CANONICALTRACK` y añade `position_infering.frame_summary` más estadísticas acumuladas.
 13. **Merge final del tracker**: `Tracker` fusiona `POSESSION` y `POSITION_INFERING` sobre el mismo `tracks_frame` canónico antes de reconstruir el `tracks` final y antes de ejecutar hooks per-frame opcionales como PathCRF live. El render final del pipeline sale siempre en 4 paneles; en `runtime`, el panel C queda negro porque no se emiten descartes enriquecidos.
 
-Todas las fases heredan de `football_ai.core.Phase` y exponen `process()`, que mide automáticamente el tiempo de ejecución e inyecta `elapsed_ms` en el packet. Las fases iniciales viven en sus módulos dueños (`football_ai.detection.DetectionPhase`, `football_ai.reference_points.ProjectionPhase`, `football_ai.filtering.FilteringPhase`, `football_ai.identification.IdentificationPhase`) y `tracking` solo orquesta. Si `profile_phases=True`, el tracker imprime por frame solo las 8 fases funcionales del pipeline (`Detection`, `Projection`, `Filtering`, `Identification`, `ByteTrack`, `CanonicalTrack`, `Posession`, `PositionInfering`) y su total. Las tareas auxiliares fuera de fase, como construir debug visual o ejecutar `frame_hook`, siguen ocurriendo pero ya no entran en ese profiling.
+Todas las fases heredan de `football_ai.core.Phase` y exponen `process()`, que mide automáticamente el tiempo de ejecución e inyecta `elapsed_ms` en el packet. Las fases iniciales viven en sus módulos dueños (`football_ai.detection.DetectionPhase`, `football_ai.reference_points.ProjectionPhase`, `football_ai.filtering.FilteringPhase`, `football_ai.identification.IdentificationPhase`) y `tracking` solo orquesta. Si `profile_phases=True` por CLI, el tracker imprime por frame solo las 8 fases funcionales del pipeline (`Detection`, `Projection`, `Filtering`, `Identification`, `ByteTrack`, `CanonicalTrack`, `Posession`, `PositionInfering`) y su total. Las tareas auxiliares fuera de fase, como construir debug visual o ejecutar `frame_hook`, siguen ocurriendo pero ya no entran en ese profiling.
 
 ### Formato de salida
 
@@ -272,8 +271,6 @@ Parámetros en `config.yaml`:
 - `field_position_match_distance_gate_m` (base del gate espacial en metros)
 - `field_position_match_distance_cap_m` (tope absoluto del gate espacial acumulado)
 - `field_position_match_distance_max_lost_frames` (tope de crecimiento temporal del gate)
-- `field_position_match_distance_growth_mode` (`power` o `linear_decay`)
-- `field_position_match_distance_lost_exponent` (si < 1, crecimiento sublineal)
 - `field_position_match_distance_decay_per_frame` (en `linear_decay`, cuánto decrece cada paso por frame perdido)
 - `adaptive_thresholds_enabled` (si `true`, PnLCalib reintenta el frame con thresholds más bajos antes de decidir la homografía final)
 - `adaptive_max_attempts` (máximo de intentos por frame, contando el threshold base)
@@ -301,7 +298,6 @@ Parámetros en `config.yaml`:
 - `motion_std_factor`
 - `motion_std_min_samples`
 - `motion_std_floor`
-- `referee_canonical_ids` (IDs reservados exclusivamente para árbitros; por defecto `[23, 24, 25]`)
 - `referee_sideline_band_distance_m` (franja en metros desde cada banda para clasificar linieres vs árbitro central)
 - `ball.expected_position_gate_px`
 - `ball.expected_position_gate_growth_per_frame`
@@ -323,7 +319,6 @@ Parámetros en `config.yaml`:
 - `role_swap_min_recent_samples` (mínimo de muestras visibles antes de permitir corte por swap)
 - `role_swap_position_jump_m` (salto espacial mínimo para sospechar swap sin señal estructural de relink)
 - `reassign_motion_growth_cap_frames` (tope de frames perdidos que se usan para extrapolar el salto permitido solo en clases sin homografía)
-- `forced_absorption_enabled` (activa la reabsorción forzada conservadora para `player`)
 - `forced_absorption_player_min_lost_frames` (frames mínimos perdidos del canónico `player` antes de ceder el ID; por defecto `20`)
 - `forced_absorption_player_min_consistent_frames` (frames consecutivos mínimos del `raw_tracker_id` huérfano con misma clase/equipo; por defecto `10`)
 - `output/tracker/<video>_role_artifacts/<video>_frame_role_predictions.csv` (predicción cruda frame a frame antes del congelado estable)
@@ -331,7 +326,6 @@ Parámetros en `config.yaml`:
 - `output/tracker/<video>_role_artifacts/<video>_greedy_role_diagnostics.csv` (traza paso a paso de las métricas usadas por el greedy al congelar slots estables)
 - `output/tracker/<video>_role_artifacts/<video>_role_assignment_vs_detected_pre<frame>.png` (comparativa por jugador entre distribución detectada hasta el frame de corte y posición final)
 - `output/tracker/<video>_role_artifacts/<video>_<equipo>_ratio_priority_step_by_step.png` (solo en `ratio_priority`: simulación paso a paso de la asignación snapshot por equipo)
-- `max_reassign_lost_frames` / `max_reassign_lost_frames_by_class` (opcionales; `null` o `<=0` desactiva el corte temporal y permite reapariciones tardías)
 
 Para reducir ID switches en clips largos, conviene combinar este gate con límites de reasignación más estrictos:
 - `reassign_min_distance` (imagen, píxeles; útil en clases sin campo)
@@ -350,7 +344,7 @@ Además, se implementa un mecanismo de **consenso temporal de equipo**:
 | `track_buffer` | Frames que un track sobrevive sin ser visto. Subir = mejor manejo de oclusiones |
 | `match_thresh` | IoU mínimo para considerar una asociación válida. Subir = menos mezcla de jugadores |
 | `minimum_consecutive_frames` | Frames para confirmar un track. Subir = elimina tracks de ruido |
-| `frame_rate` | Afecta a `max_time_lost = frame_rate / 30 * track_buffer` |
+| `lost_track_buffer` | Frames que un track perdido se conserva antes de pasar a `Removed` |
 
 ### Estados de un track
 

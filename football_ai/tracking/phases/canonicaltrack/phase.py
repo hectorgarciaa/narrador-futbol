@@ -19,6 +19,8 @@ from .logic.seeds import CanonicalSeedMixin
 from .state import CanonicalTrackState
 from .utils import serialize_for_trace
 
+REFEREE_SLOT_IDS = (23, 24, 25)
+
 
 class CanonicalTrackPhase(
     CanonicalPendingAssignmentMixin,
@@ -94,22 +96,7 @@ class CanonicalTrackPhase(
         if not self.special_seed_canonical_ids:
             self.special_seed_canonical_ids = (1, 2)
 
-        configured_referee_ids = canonical_conf.get("referee_canonical_ids", [23, 24, 25])
-        self.referee_canonical_ids = tuple(
-            sorted(
-                {
-                    int(canonical_id)
-                    for canonical_id in configured_referee_ids
-                    if self._normalize_optional_positive_int(canonical_id) is not None
-                }
-            )
-        )
-        if not self.referee_canonical_ids:
-            self.referee_canonical_ids = (23, 24, 25)
-
-        reserved_person_ids = set(self.special_seed_canonical_ids) | set(
-            self.referee_canonical_ids
-        )
+        reserved_person_ids = set(self.special_seed_canonical_ids) | set(REFEREE_SLOT_IDS)
         player_canonical_ids = tuple(
             canonical_id
             for canonical_id in range(1, self.max_total_tracks + 1)
@@ -155,19 +142,6 @@ class CanonicalTrackPhase(
                 gate_cap if np.isfinite(gate_cap) and gate_cap > 0.0 else None
             )
 
-        self.field_distance_growth_mode = str(
-            canonical_conf["field_distance_growth_mode"].strip().lower()
-        )
-        if self.field_distance_growth_mode not in {"power", "linear_decay"}:
-            self.field_distance_growth_mode = "power"
-
-        self.field_distance_lost_exponent = canonical_conf["field_distance_lost_exponent"]
-        if (
-            not np.isfinite(self.field_distance_lost_exponent)
-            or self.field_distance_lost_exponent <= 0.0
-        ):
-            self.field_distance_lost_exponent = 1.0
-
         self.field_distance_decay_per_frame = canonical_conf["field_distance_decay_per_frame"]
         if (
             not np.isfinite(self.field_distance_decay_per_frame)
@@ -176,18 +150,7 @@ class CanonicalTrackPhase(
             self.field_distance_decay_per_frame = 0.0
 
         self.strict_person_class_separation = canonical_conf["strict_person_class_separation"]
-        self.max_reassign_lost_frames = canonical_conf["max_reassign_lost_frames"]
 
-        raw_max_reassign_lost_frames_by_class = canonical_conf[
-            "max_reassign_lost_frames_by_class"
-        ]
-        self.max_reassign_lost_frames_by_class = {}
-        for class_name, class_limit in raw_max_reassign_lost_frames_by_class.items():
-            self.max_reassign_lost_frames_by_class[str(class_name)] = class_limit
-
-        self.forced_absorption_enabled = bool(
-            canonical_conf.get("forced_absorption_enabled", True)
-        )
         self.forced_absorption_player_min_lost_frames = max(
             1,
             int(canonical_conf.get("forced_absorption_player_min_lost_frames", 20)),

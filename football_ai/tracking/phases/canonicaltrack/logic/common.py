@@ -145,12 +145,6 @@ class CanonicalCommonMixin:
             return "field"
         return "image"
 
-    def _max_lost_frames_for_class(self, class_name):
-        if class_name in self.max_reassign_lost_frames_by_class:
-            class_limit = self.max_reassign_lost_frames_by_class.get(class_name)
-            return class_limit
-        return self.max_reassign_lost_frames
-
     def _field_width_m(self):
         geometry = self.field_projector.geometry if self.field_projector is not None else None
         if geometry is not None and np.isfinite(geometry.field_width_m) and geometry.field_width_m > 0.0:

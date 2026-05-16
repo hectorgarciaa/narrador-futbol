@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+REFEREE_SLOT_IDS = (23, 24, 25)
+
 
 class CanonicalRefereeMixin:
     def _referee_state_zone(self, state):
@@ -10,7 +12,7 @@ class CanonicalRefereeMixin:
 
     def _referee_reserved_zone_by_canonical_id(self, canonical_id):
         zone_order = ("central", "sideline_top", "sideline_bottom")
-        for zone_name, reserved_id in zip(zone_order, self.referee_canonical_ids):
+        for zone_name, reserved_id in zip(zone_order, REFEREE_SLOT_IDS):
             if int(reserved_id) == int(canonical_id):
                 return zone_name
         return None
@@ -18,7 +20,7 @@ class CanonicalRefereeMixin:
     def _required_referee_canonical_id_for_zone(self, referee_zone):
         normalized_zone = str(referee_zone or "").strip().lower()
         zone_order = ("central", "sideline_top", "sideline_bottom")
-        for zone_name, reserved_id in zip(zone_order, self.referee_canonical_ids):
+        for zone_name, reserved_id in zip(zone_order, REFEREE_SLOT_IDS):
             if zone_name == normalized_zone:
                 return int(reserved_id)
         return None
@@ -137,7 +139,7 @@ class CanonicalRefereeMixin:
         field_position=None,
         team_name=None,
     ):
-        reserved_referee_ids = set(self.referee_canonical_ids)
+        reserved_referee_ids = set(REFEREE_SLOT_IDS)
         reserved_goalkeeper_ids = set(self.special_seed_canonical_ids)
         if class_name == "referee":
             detection_zone = self._referee_zone_from_field_position(field_position)

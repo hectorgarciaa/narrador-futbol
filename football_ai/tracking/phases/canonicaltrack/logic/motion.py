@@ -43,19 +43,15 @@ class CanonicalMotionMixin:
                 gate_lost_frames,
                 self.field_distance_gate_max_lost_frames,
             )
-        if self.field_distance_growth_mode == "linear_decay":
-            step_base = self.field_distance_gate_m
-            decay = self.field_distance_decay_per_frame
-            gate = 0.0
-            for step_idx in range(gate_lost_frames):
-                step = step_base - (decay * step_idx)
-                if step <= 0.0:
-                    break
-                gate += step
-            gate = max(step_base, gate)
-        else:
-            growth = float(gate_lost_frames) ** self.field_distance_lost_exponent
-            gate = self.field_distance_gate_m * growth
+        step_base = self.field_distance_gate_m
+        decay = self.field_distance_decay_per_frame
+        gate = 0.0
+        for step_idx in range(gate_lost_frames):
+            step = step_base - (decay * step_idx)
+            if step <= 0.0:
+                break
+            gate += step
+        gate = max(step_base, gate)
 
         if self.field_distance_gate_cap_m is not None:
             gate = min(gate, self.field_distance_gate_cap_m)
@@ -105,11 +101,6 @@ class CanonicalMotionMixin:
         if not uses_field_position and str(previous_state.get("motion_distance_space") or "") != "image":
             samples = 0
             mean_step_distance = 0.0
-
-        if not reserved_seed:
-            max_lost_frames = self._max_lost_frames_for_class(effective_class)
-            if max_lost_frames is not None and lost_frames > max_lost_frames:
-                return False
 
         if uses_field_position:
             max_allowed_jump = self._field_distance_gate_for_lost_frames(lost_frames)

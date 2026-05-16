@@ -27,7 +27,6 @@ class ByteTrack(
         low_conf_threshold: float = 0.01,
         lost_track_buffer: int = 30,
         minimum_matching_threshold: float = 0.8,
-        frame_rate: int = 30,
         minimum_consecutive_frames: int = 1,
         second_match_threshold: float = 0.7,
         unconfirmed_match_threshold: float = 0.8,
@@ -35,8 +34,6 @@ class ByteTrack(
         field_distance_gate_m: float = 8.0,
         field_distance_gate_max_lost_frames: Optional[int] = None,
         field_distance_gate_cap_m: Optional[float] = None,
-        field_distance_growth_mode: str = "power",
-        field_distance_lost_exponent: float = 1.0,
         field_distance_decay_per_frame: float = 0.0,
         lost_time_penalty_weight: float = 0.0,
         lost_time_penalty_max_frames: int = 10,
@@ -76,17 +73,6 @@ class ByteTrack(
             self.field_distance_gate_cap_m = (
                 gate_cap if np.isfinite(gate_cap) and gate_cap > 0.0 else None
             )
-        self.field_distance_growth_mode = str(
-            field_distance_growth_mode or "power"
-        ).strip().lower()
-        if self.field_distance_growth_mode not in {"power", "linear_decay"}:
-            self.field_distance_growth_mode = "power"
-        self.field_distance_lost_exponent = float(field_distance_lost_exponent)
-        if (
-            not np.isfinite(self.field_distance_lost_exponent)
-            or self.field_distance_lost_exponent <= 0.0
-        ):
-            self.field_distance_lost_exponent = 1.0
         self.field_distance_decay_per_frame = float(field_distance_decay_per_frame)
         if (
             not np.isfinite(self.field_distance_decay_per_frame)
@@ -126,7 +112,7 @@ class ByteTrack(
             min(1.0, max(0.0, new_track_candidate_overlap_iou))
         )
         self.frame_id = 0
-        self.max_time_lost = int(frame_rate / 30.0 * lost_track_buffer)
+        self.max_time_lost = max(1, int(lost_track_buffer))
         self.minimum_consecutive_frames = minimum_consecutive_frames
         self.large_match_cost = 1e6
         self.kalman_filter = KalmanFilter()

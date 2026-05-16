@@ -553,8 +553,7 @@ Si quieres perfilar cuellos de botella por frame (sin alterar resultados), activ
 ```bash
 python scripts/track.py video_prueba_ajustado --profile-phases
 ```
-Esto imprime tiempos por fase y el total de cada frame.
-Alternativamente, puedes fijarlo en `config.yaml` con `canonical.profile_phases: true`.
+  Esto imprime tiempos por fase y el total de cada frame.
 Para benchmarks o ejecuciones aisladas, `scripts/track.py` también acepta overrides útiles:
 ```bash
 python scripts/track.py video_prueba \
@@ -982,7 +981,6 @@ team_detector:
     allow_referee_bootstrap_sampling_from_outfield: false  # permite enviar muestras outfield al bucket referee antes de cerrar su bootstrap
     referee_upper_bound_cap: 20.0  # cap maximo del upper_bound robusto del cluster referee
   shirt_detector_conf:
-    init: "k-means++"
     n_init: 3
     batch_max_iter: 12
     batch_tol: 0.001
@@ -1005,7 +1003,6 @@ tracking:
   track_thresh: 0.15          # Confianza mínima para activar un track
   track_buffer: 90            # Frames que sobrevive un track sin ser visto
   match_thresh: 0.945         # IoU mínimo para asociar detección a track
-  frame_rate: 25
   minimum_consecutive_frames: 5
   max_total_tracks: 25
   max_tracks_per_class:
@@ -1025,8 +1022,6 @@ tracking:
   field_position_match_distance_gate_m: 1.5
   field_position_match_distance_cap_m: 6.0
   field_position_match_distance_max_lost_frames: 10
-  field_position_match_distance_growth_mode: linear_decay
-  field_position_match_distance_lost_exponent: 0.5
   field_position_match_distance_decay_per_frame: 0.5
   reassign_motion_growth_cap_frames: 12
   strict_person_class_separation: true
@@ -1041,12 +1036,10 @@ tracking:
   expected_roles_by_team:
     Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
-  max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
   motion_std_gate_enabled: true
   motion_std_factor: 4.0
   motion_std_min_samples: 5
   motion_std_floor: 0.5
-  referee_canonical_ids: [23, 24, 25]
   referee_sideline_band_distance_m: 3.0
   # Los slots de árbitro quedan fijados por zona:
   # 23 -> árbitro central (fuera de la franja lateral y dentro del carril central de jugadores)
@@ -1110,8 +1103,6 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `field_position_match_distance_gate_m`
 - `field_position_match_distance_cap_m`
 - `field_position_match_distance_max_lost_frames`
-- `field_position_match_distance_growth_mode`
-- `field_position_match_distance_lost_exponent`
 - `field_position_match_distance_decay_per_frame`
 - `strict_person_class_separation`
 - `special_seed_role_team_assignment_enabled`
@@ -1119,8 +1110,6 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `special_seed_canonical_ids`
 - `special_seed_defender_roles`
 - `expected_roles_by_team`
-- `max_reassign_lost_frames`
-- `max_reassign_lost_frames_by_class`
 - `motion_std_gate_enabled`
 - `motion_std_factor`
 - `motion_std_min_samples`
@@ -1132,7 +1121,6 @@ Si sigues viendo cambios de ID en clips largos, ajusta en este orden:
 3. Baja `motion_std_factor` (por ejemplo: `6 -> 5 -> 4`).
 4. Baja `reassign_min_distance` (píxeles, para clases sin campo) o endurece `field_position_match_distance_*` si el problema está en `player/goalkeeper`.
 5. Baja `motion_std_min_samples` para que el gate estadístico actúe antes.
-6. Solo si quieres cortar reapariciones tardías, fija `max_reassign_lost_frames` (>0).
 
 ---
 

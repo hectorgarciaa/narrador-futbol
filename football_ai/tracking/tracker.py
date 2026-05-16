@@ -50,6 +50,7 @@ class Tracker:
         project_root = tracking_runtime_conf["project_root"]
         detector_runtime_conf = dict(detector_conf or {})
         detector_runtime_conf["model_path"] = model_path
+        bytetracker_runtime_conf = dict(bytetracker_conf or {})
 
         projector_runtime_conf = dict(projector_conf or {})
         projector_runtime_conf["project_root"] = project_root
@@ -102,7 +103,7 @@ class Tracker:
         self.execution_mode = _normalize_execution_mode(
             tracker_conf.get("execution_mode", "runtime")
         )
-        self.bytetrack_phase = ByteTrackPhase(bytetracker_conf)
+        self.bytetrack_phase = ByteTrackPhase(bytetracker_runtime_conf)
         self.canonical_phase = CanonicalTrackPhase(canonical_runtime_conf)
 
     def reset(self) -> None:

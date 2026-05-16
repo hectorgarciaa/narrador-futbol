@@ -17,23 +17,15 @@ class ByteTrackAssociationCosts:
         lost_frames = max(1, self.frame_id - int(getattr(track, "frame_id", self.frame_id)))
         if self.field_distance_gate_max_lost_frames is not None:
             lost_frames = min(lost_frames, self.field_distance_gate_max_lost_frames)
-        if self.field_distance_growth_mode == "linear_decay":
-            gate = 0.0
-            for step_idx in range(lost_frames):
-                step = self.field_distance_gate_m - (
-                    self.field_distance_decay_per_frame * step_idx
-                )
-                if step <= 0.0:
-                    break
-                gate += step
-            return min(
-                max(self.field_distance_gate_m, gate),
-                self.field_distance_gate_cap_m or np.inf,
+        gate = 0.0
+        for step_idx in range(lost_frames):
+            step = self.field_distance_gate_m - (
+                self.field_distance_decay_per_frame * step_idx
             )
-
-        gate = self.field_distance_gate_m * (
-            float(lost_frames) ** self.field_distance_lost_exponent
-        )
+            if step <= 0.0:
+                break
+            gate += step
+        gate = max(self.field_distance_gate_m, gate)
         if self.field_distance_gate_cap_m is not None:
             gate = min(gate, self.field_distance_gate_cap_m)
         return gate

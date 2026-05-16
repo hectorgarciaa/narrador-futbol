@@ -8,8 +8,6 @@ class CanonicalForcedAbsorptionMixin:
         self,
         pending_detection,
     ):
-        if not self.forced_absorption_enabled:
-            return False
         detection_class = pending_detection.get("preferred_class_name")
         if detection_class != "player":
             return False
