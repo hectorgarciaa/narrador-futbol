@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from supervision.tracker.byte_tracker.single_object_track import STrack, TrackState
 
@@ -9,13 +7,6 @@ from .utils import field_position_to_array, shirt_color_to_array
 
 
 class ByteTrackDetectionMetadata:
-    def _resolve_detection_class(
-        self,
-        class_name_relabel: Optional[str],
-        class_name_yolo: Optional[str],
-    ) -> Optional[str]:
-        return class_name_relabel if class_name_relabel is not None else class_name_yolo
-
     def _update_track_class_consensus(self, track: STrack, det: STrack) -> None:
         votes = getattr(track, "class_votes", None)
         if not isinstance(votes, dict):
@@ -100,26 +91,14 @@ class ByteTrackDetectionMetadata:
             self.internal_id_counter,
             self.external_id_counter,
         )
-        det.equipo = team_labels[source_index] if team_labels is not None and source_index < len(team_labels) else None
-        det.class_name_team = class_labels[source_index] if class_labels is not None and source_index < len(class_labels) else None
-        det.class_name_yolo = yolo_class_labels[source_index] if yolo_class_labels is not None and source_index < len(yolo_class_labels) else None
-        det.class_name = self._resolve_detection_class(det.class_name_team, det.class_name_yolo)
-        det.field_position = (
-            field_position_to_array(field_positions[source_index])
-            if field_positions is not None and source_index < len(field_positions)
-            else None
-        )
-        det.shirt_color = (
-            shirt_color_to_array(shirt_colors[source_index])
-            if shirt_colors is not None and source_index < len(shirt_colors)
-            else None
-        )
-        det.bbox_size = (
-            float(bbox_sizes[source_index])
-            if bbox_sizes is not None and source_index < len(bbox_sizes)
-            else None
-        )
-        det.raw_det_idx = int(raw_det_indices[source_index]) if source_index < len(raw_det_indices) else int(source_index)
+        det.equipo = team_labels[source_index]
+        det.class_name_team = class_labels[source_index]
+        det.class_name_yolo = yolo_class_labels[source_index]
+        det.class_name = det.class_name_team
+        det.field_position = field_position_to_array(field_positions[source_index])
+        det.shirt_color = shirt_color_to_array(shirt_colors[source_index])
+        det.bbox_size = float(bbox_sizes[source_index])
+        det.raw_det_idx = int(raw_det_indices[source_index])
         return det
 
     def _build_detection_batch(

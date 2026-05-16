@@ -50,9 +50,10 @@ class ByteTrackPipelineSteps:
                 "cost_mode": cost_mode,
                 "base_cost": np.full(shape, np.inf, dtype=np.float32),
                 "feasible_mask": np.zeros(shape, dtype=bool),
-                "pair_metrics": self._empty_pair_metrics(
-                    shape,
-                    np.zeros(shape, dtype=np.float32),
+                "pair_metrics": (
+                    self._empty_pair_metrics(shape, np.zeros(shape, dtype=np.float32))
+                    if self.collect_internal_matching_debug
+                    else None
                 ),
             }
             if self.collect_internal_matching_debug:
@@ -222,8 +223,11 @@ class ByteTrackPipelineSteps:
             refound_tracks,
         )
         candidate_indices = [
-            index for index, det in enumerate(detections) if det.score >= self.det_thresh
+            index
+            for index, det in enumerate(detections)
+            if det.score >= self.track_activation_threshold
         ]
+        candidate_index_set = set(candidate_indices)
         filtered_candidate_indices, filter_reasons_by_index = (
             self._filter_new_track_candidate_indices(
                 detections=detections,
@@ -235,7 +239,7 @@ class ByteTrackPipelineSteps:
         )
 
         for index, det in enumerate(detections):
-            if index in candidate_indices:
+            if index in candidate_index_set:
                 continue
             self._set_detection_debug_reason(
                 getattr(det, "raw_det_idx", None),
@@ -284,13 +288,20 @@ class ByteTrackPipelineSteps:
                 track.state = TrackState.Removed
                 removed_tracks.append(track)
 
-        self.tracked_tracks = [t for t in self.tracked_tracks if t.state == TrackState.Tracked]
-        self.tracked_tracks = joint_tracks(self.tracked_tracks, activated_tracks)
-        self.tracked_tracks = joint_tracks(self.tracked_tracks, refound_tracks)
-        self.lost_tracks = sub_tracks(self.lost_tracks, self.tracked_tracks)
-        self.lost_tracks.extend(lost_tracks)
-        self.lost_tracks = sub_tracks(self.lost_tracks, self.removed_tracks)
-        self.removed_tracks = removed_tracks
+        all_removed_tracks = joint_tracks(self.removed_tracks, removed_tracks)
+
+        tracked_tracks = [track for track in self.tracked_tracks if track.state == TrackState.Tracked]
+        tracked_tracks = joint_tracks(tracked_tracks, activated_tracks)
+        tracked_tracks = joint_tracks(tracked_tracks, refound_tracks)
+        tracked_tracks = sub_tracks(tracked_tracks, all_removed_tracks)
+
+        lost_tracks_next = sub_tracks(self.lost_tracks, tracked_tracks)
+        lost_tracks_next = joint_tracks(lost_tracks_next, lost_tracks)
+        lost_tracks_next = sub_tracks(lost_tracks_next, all_removed_tracks)
+
+        self.tracked_tracks = tracked_tracks
+        self.lost_tracks = lost_tracks_next
+        self.removed_tracks = all_removed_tracks
         self.tracked_tracks, self.lost_tracks = remove_duplicate_tracks(
             self.tracked_tracks,
             self.lost_tracks,

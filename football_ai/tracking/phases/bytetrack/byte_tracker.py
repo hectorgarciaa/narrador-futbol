@@ -126,7 +126,6 @@ class ByteTrack(
             min(1.0, max(0.0, new_track_candidate_overlap_iou))
         )
         self.frame_id = 0
-        self.det_thresh = self.track_activation_threshold
         self.max_time_lost = int(frame_rate / 30.0 * lost_track_buffer)
         self.minimum_consecutive_frames = minimum_consecutive_frames
         self.large_match_cost = 1e6
@@ -144,34 +143,25 @@ class ByteTrack(
         self.last_matching_debug = {}
 
     def update_with_detections(self, detections: Detections) -> Detections:
-        tensors = np.hstack(
-            (
-                detections.xyxy,
-                detections.confidence[:, np.newaxis],
-            )
-        )
+        data = detections.data
 
-        team_labels = detections.data.get("team")
-        class_labels = detections.data.get("class_td")
-        yolo_class_labels = detections.data.get("class_yolo")
-        field_positions = detections.data.get("field_position")
-        shirt_colors = detections.data.get("shirt_color")
-        bbox_sizes = detections.data.get("bbox_size")
-        raw_det_indices = (
-            detections.data.get("raw_det_idx") if detections.data is not None else None
-        )
-        raw_det_indices = (
-            np.asarray(raw_det_indices, dtype=np.int32).reshape(-1)
-            if raw_det_indices is not None
-            else np.arange(len(detections), dtype=np.int32)
-        )
+        bboxes = detections.xyxy
+        scores = detections.confidence
+        team_labels = data["team"]
+        class_td_labels = data["class_td"]
+        class_yolo_labels = data["class_yolo"]
+        field_positions = data["field_position"]
+        shirt_colors = data["shirt_color"]
+        bbox_sizes = data["bbox_size"]
+        raw_det_indices = np.asarray(data["raw_det_idx"], dtype=np.int32).reshape(-1)
 
         tracks = self.update_with_tensors(
-            tensors=tensors,
+            bboxes=bboxes,
+            scores=scores,
             team_labels=team_labels,
-            class_labels=class_labels,
+            class_labels=class_td_labels,
             field_positions=field_positions,
-            yolo_class_labels=yolo_class_labels,
+            yolo_class_labels=class_yolo_labels,
             shirt_colors=shirt_colors,
             bbox_sizes=bbox_sizes,
             raw_det_indices=raw_det_indices,
@@ -209,7 +199,8 @@ class ByteTrack(
 
     def update_with_tensors(
         self,
-        tensors: np.ndarray,
+        bboxes: np.ndarray,
+        scores: np.ndarray,
         team_labels,
         class_labels=None,
         field_positions=None,
@@ -219,19 +210,12 @@ class ByteTrack(
         raw_det_indices=None,
     ) -> list[STrack]:
         self.frame_id += 1
-        if self.collect_internal_matching_debug:
-            self.last_detection_debug_by_raw_idx = {}
-            self.last_matching_debug = {}
-        else:
-            self.last_detection_debug_by_raw_idx = {}
-            self.last_matching_debug = {}
+        self.last_detection_debug_by_raw_idx = {}
+        self.last_matching_debug = {}
         activated_tracks = []
         refound_tracks = []
         lost_tracks = []
         removed_tracks = []
-
-        scores = tensors[:, 4]
-        bboxes = tensors[:, :4]
 
         high_conf_mask = scores >= self.track_activation_threshold
         low_conf_mask = np.logical_and(
@@ -243,7 +227,7 @@ class ByteTrack(
         raw_det_indices = (
             np.asarray(raw_det_indices, dtype=np.int32).reshape(-1)
             if raw_det_indices is not None
-            else np.arange(len(tensors), dtype=np.int32)
+            else np.arange(len(bboxes), dtype=np.int32)
         )
 
         high_conf_detections = self._build_detection_batch(

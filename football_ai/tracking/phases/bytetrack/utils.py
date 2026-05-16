@@ -59,10 +59,6 @@ def shirt_color_to_array(shirt_color) -> Optional[np.ndarray]:
     return array[:3]
 
 
-def person_like_class(class_name: Optional[str]) -> bool:
-    return class_name in {"player", "goalkeeper", "referee"}
-
-
 def bbox_size_from_tlbr(tlbr) -> tuple[Optional[float], Optional[float]]:
     if tlbr is None:
         return None, None
@@ -132,7 +128,6 @@ __all__ = [
     "bbox_size_from_tlbr",
     "field_position_to_array",
     "joint_tracks",
-    "person_like_class",
     "remove_duplicate_tracks",
     "shirt_color_to_array",
     "sub_tracks",

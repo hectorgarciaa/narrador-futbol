@@ -20,8 +20,8 @@ class ByteTrackNewTrackFilter:
         unconfirmed_overlap_iou = max(1e-6, float(self.new_track_unconfirmed_overlap_iou))
         candidate_overlap_iou = max(1e-6, float(self.new_track_candidate_overlap_iou))
 
-        valid_indices = []
         reason_by_index = {}
+        valid_after_reference_gates = []
         for idx in candidate_indices:
             candidate_box = track_tlbr(detections[idx])
             overlaps_active = any(
@@ -30,28 +30,23 @@ class ByteTrackNewTrackFilter:
             )
             if overlaps_active:
                 reason_by_index[idx] = "suppressed_by_active_overlap"
-            else:
-                valid_indices.append(idx)
-
-        valid_after_unconfirmed = []
-        for idx in valid_indices:
-            candidate_box = track_tlbr(detections[idx])
+                continue
             overlaps_unconfirmed = any(
                 tlbr_iou(candidate_box, track_tlbr(unconfirmed_track)) > unconfirmed_overlap_iou
                 for unconfirmed_track in (reference_unconfirmed_pool or [])
             )
             if overlaps_unconfirmed:
                 reason_by_index[idx] = "suppressed_by_unconfirmed_overlap"
-            else:
-                valid_after_unconfirmed.append(idx)
+                continue
+            valid_after_reference_gates.append(idx)
 
-        valid_after_unconfirmed.sort(
+        valid_after_reference_gates.sort(
             key=lambda i: float(getattr(detections[i], "score", 0.0)),
             reverse=True,
         )
         selected_indices = []
         selected_boxes = []
-        for idx in valid_after_unconfirmed:
+        for idx in valid_after_reference_gates:
             candidate_box = track_tlbr(detections[idx])
             overlaps_selected = any(
                 tlbr_iou(candidate_box, selected_box) > candidate_overlap_iou

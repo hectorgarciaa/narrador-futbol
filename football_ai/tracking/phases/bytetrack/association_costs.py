@@ -98,29 +98,6 @@ class ByteTrackAssociationCosts:
 
         return True
 
-    def _field_gate_metrics(self, track: STrack, det: STrack) -> tuple[bool, float, float]:
-        track_class = getattr(track, "class_name", None)
-        if not self._uses_field_positions_for_class(track_class):
-            return True, np.nan, np.nan
-
-        track_position = field_position_to_array(getattr(track, "field_position", None))
-        det_position = field_position_to_array(getattr(det, "field_position", None))
-        if track_position is None or det_position is None:
-            return True, np.nan, float(self._track_distance_gate(track))
-
-        field_distance = float(np.linalg.norm(track_position - det_position))
-        field_gate = float(self._track_distance_gate(track))
-        return field_distance <= field_gate, field_distance, field_gate
-
-    def _bbox_distance_metrics(self, track: STrack, det: STrack) -> tuple[bool, float, float]:
-        track_center = bbox_center_from_tlbr(getattr(track, "tlbr", None))
-        det_center = bbox_center_from_tlbr(getattr(det, "tlbr", None))
-        bbox_gate = float(self._track_image_distance_gate(track))
-        if not np.all(np.isfinite(track_center)) or not np.all(np.isfinite(det_center)):
-            return False, np.nan, bbox_gate
-        bbox_distance = float(np.linalg.norm(track_center - det_center))
-        return bbox_distance <= bbox_gate, bbox_distance, bbox_gate
-
     def _empty_pair_metrics(self, shape, lost_time_penalty) -> dict[str, np.ndarray]:
         return {
             "iou": np.full(shape, np.nan, dtype=np.float32),
@@ -159,7 +136,11 @@ class ByteTrackAssociationCosts:
                 "cost_mode": cost_mode,
                 "base_cost": np.full(shape, np.inf, dtype=np.float32),
                 "feasible_mask": np.zeros(shape, dtype=bool),
-                "pair_metrics": self._empty_pair_metrics(shape, lost_time_penalty),
+                "pair_metrics": (
+                    self._empty_pair_metrics(shape, lost_time_penalty)
+                    if self.collect_internal_matching_debug
+                    else None
+                ),
             }
 
         iou_cost = matching.iou_distance(tracks, detections).astype(np.float32)
@@ -295,6 +276,6 @@ class ByteTrackAssociationCosts:
                     "lost_time_penalty": lost_time_penalty,
                 }
                 if collect_debug
-                else self._empty_pair_metrics(shape, lost_time_penalty)
+                else None
             ),
         }

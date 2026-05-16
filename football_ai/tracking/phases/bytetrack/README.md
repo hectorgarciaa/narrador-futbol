@@ -43,10 +43,39 @@ Ese ajuste (`tight_bbox_gate`) empató en cobertura canónica con `higher_activa
 El módulo distingue dos caminos:
 
 - **runtime normal**: calcula solo `base_cost`, `feasible_mask` y el coste activo de la subfase.
-  No serializa `detection_debug` ni `matching_debug`, y evita construir métricas de `bbox_center`
-  en fases IoU o métricas de campo para clases donde no aplican.
+  No serializa `detection_debug` ni `matching_debug`, evita construir `pair_metrics`
+  forenses completos y solo calcula métricas de `bbox_center` cuando la subfase activa
+  realmente las necesita.
 - **audit/debug**: activa la traza homogénea completa por detección y por subfase para análisis
   forense del matching.
 
 Además, el solver de asignación se resuelve de forma interna: usa `lap` cuando está disponible
 y cae a `scipy.optimize.linear_sum_assignment` como fallback. No se expone como hiperparámetro.
+
+## Contrato de entrada
+
+`ByteTrackPhase` asume el contrato publicado por `IDENTIFICATION.clean` y no añade una capa
+extra de validación defensiva en runtime. La fase trabaja dando por hechas, alineadas por frame,
+estas señales:
+
+- `det_id`
+- `bbox_xyxy`
+- `confidence`
+- `class_name`
+- `class_td`
+- `team`
+- `distances`
+- `shirt_color`
+- `bbox_size`
+- `field_positions_m`
+- `ground_points_image_original`
+
+Si el contrato upstream se rompe, el fallo aparecerá de forma natural en el punto donde se use la
+señal inconsistente; el módulo prioriza el camino normal del pipeline sobre validaciones extras.
+
+## Estado del tracker
+
+La consolidación final del frame conserva ahora el histórico acumulado de `removed_tracks` y
+elimina de `lost_tracks` los tracks que acaban de pasar a `Removed` en ese mismo frame. Esto
+evita perder histórico y corrige un caso donde un track eliminado podía seguir figurando en
+`lost_tracks` hasta el frame siguiente.

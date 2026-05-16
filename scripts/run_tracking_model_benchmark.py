@@ -93,7 +93,8 @@ def run_single_experiment(
         str(run_dir),
         "--experiment-label",
         build_run_label(video_shortcut, model_path),
-        "--force-four-panel-debug",
+        "--execution-mode",
+        "debug",
         "--skip-render-video",
         "--skip-metrics-dataset",
     ]

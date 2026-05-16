@@ -51,19 +51,11 @@ class ByteTrackPhase(Phase):
             collect_internal_debug=collect_debug,
         )
 
-    def track_packet(self, identification_packet, *, execution_mode="runtime"):
-        return self.execute(
-            identification_packet,
-            execution_mode=execution_mode,
-        )
-
     @staticmethod
     def _build_detections(clean):
-        boxes = np.asarray(clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4)
-        confidences = np.asarray(clean["confidence"], dtype=np.float32).reshape(-1)
         detections = sv.Detections(
-            xyxy=boxes,
-            confidence=confidences,
+            xyxy=np.asarray(clean["bbox_xyxy"], dtype=np.float32).reshape(-1, 4),
+            confidence=np.asarray(clean["confidence"], dtype=np.float32).reshape(-1),
         )
         detections.data = {
             "team": np.asarray(clean["team"], dtype=object),
@@ -80,12 +72,13 @@ class ByteTrackPhase(Phase):
 
     def _build_packet(self, identification_packet, tracked, *, collect_internal_debug=False):
         clean_in = identification_packet["clean"]
+        num_detections = int(clean_in["num_detections"])
         det_id_to_index = {
             int(det_id): index for index, det_id in enumerate(clean_in["det_id"])
         }
-        tracker_ids = [None] * int(clean_in["num_detections"])
-        class_trackers = [None] * int(clean_in["num_detections"])
-        tracked_mask = [False] * int(clean_in["num_detections"])
+        tracker_ids = [None] * num_detections
+        class_trackers = [None] * num_detections
+        tracked_mask = [False] * num_detections
         tracked_detections = []
 
         for bbox, _mask, confidence, _class_id, tracker_id, metadata in list(tracked):
@@ -97,7 +90,11 @@ class ByteTrackPhase(Phase):
             if index is None:
                 continue
             tracker_ids[index] = int(tracker_id)
-            class_trackers[index] = metadata.get("class_tracker") or metadata.get("class_name")
+            class_trackers[index] = (
+                metadata.get("class_tracker")
+                or metadata.get("class_td")
+                or metadata.get("class_yolo")
+            )
             tracked_mask[index] = True
             tracked_detections.append(
                 {
@@ -117,6 +114,7 @@ class ByteTrackPhase(Phase):
                 }
             )
 
+        tracked_count = int(sum(tracked_mask))
         clean_out = {
             "det_id": list(clean_in["det_id"]),
             "bbox_xyxy": [list(bbox) for bbox in clean_in["bbox_xyxy"]],
@@ -130,15 +128,15 @@ class ByteTrackPhase(Phase):
         }
         trace = {
             "summary": {
-                "total_input_detections": int(clean_in["num_detections"]),
-                "total_tracked_detections": int(sum(tracked_mask)),
-                "total_untracked_detections": int(len(tracked_mask) - sum(tracked_mask)),
+                "total_input_detections": num_detections,
+                "total_tracked_detections": tracked_count,
+                "total_untracked_detections": int(num_detections - tracked_count),
             },
             "tracking_alignment": {
                 "tracker_id": tracker_ids,
                 "class_tracker": class_trackers,
                 "tracked_mask": tracked_mask,
-                "tracked_count": int(sum(tracked_mask)),
+                "tracked_count": tracked_count,
             },
         }
         if collect_internal_debug:
@@ -149,7 +147,6 @@ class ByteTrackPhase(Phase):
                 "shirt_color": _serialize_value(clean_in["shirt_color"]),
                 "bbox_size": _serialize_value(clean_in["bbox_size"]),
             }
-        if collect_internal_debug:
             debug_by_raw_idx = dict(
                 getattr(self.tracker, "last_detection_debug_by_raw_idx", {}) or {}
             )
