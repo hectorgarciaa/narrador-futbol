@@ -9,8 +9,16 @@ from .projector import (
 
 
 class ProjectionPhase(Phase):
-    def __init__(self, projector: PnLCalibFieldProjector | None):
-        self.projector = projector
+    def __init__(self, projector_conf=None):
+        runtime_conf = dict(projector_conf or {})
+        constructor_conf = dict(runtime_conf.get("constructor", {}) or {})
+        if bool(runtime_conf.get("enabled", False)):
+            self.projector = PnLCalibFieldProjector(
+                project_root=runtime_conf["project_root"],
+                **constructor_conf,
+            )
+        else:
+            self.projector = None
 
     @property
     def geometry(self):

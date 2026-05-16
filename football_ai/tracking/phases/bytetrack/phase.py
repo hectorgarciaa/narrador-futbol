@@ -23,8 +23,8 @@ def _serialize_value(value):
 
 
 class ByteTrackPhase(Phase):
-    def __init__(self, **bytetracker_conf):
-        self.tracker = ByteTrack(**bytetracker_conf)
+    def __init__(self, bytetracker_conf=None):
+        self.tracker = ByteTrack(**dict(bytetracker_conf or {}))
 
     def reset(self):
         self.tracker.reset()

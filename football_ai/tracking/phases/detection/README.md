@@ -79,8 +79,11 @@ Adaptador de fase que instancia `Detector` y delega en `predict_frame`.
 from football_ai.tracking.phases.detection import DetectionPhase
 
 phase = DetectionPhase(
-    model_path="models/yolo/v11/yolov11m.pt",
-    detector_conf={"conf": 0.1, "verbose": False},
+    {
+        "model_path": "models/yolo/v11/yolov11m.pt",
+        "conf": 0.1,
+        "verbose": False,
+    }
 )
 packet = phase.execute(frame_bgr, frame_index=0, frame_time_ms=0.0)
 ```

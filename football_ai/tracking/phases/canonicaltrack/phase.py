@@ -33,20 +33,17 @@ class CanonicalTrackPhase(
     CanonicalAssignmentIngestMixin,
     Phase,
 ):
-    def __init__(
-        self,
-        max_tracks_per_class,
-        tracker_conf,
-        projector_conf,
-        ball_conf,
-    ):
-        self.max_tracks_per_class = dict(max_tracks_per_class or {})
+    def __init__(self, canonical_conf=None):
+        canonical_conf = dict(canonical_conf or {})
+        self.max_tracks_per_class = dict(canonical_conf.get("max_tracks_per_class") or {})
         self.max_total_tracks = sum(
             int(limit)
             for class_name, limit in self.max_tracks_per_class.items()
             if str(class_name) != "ball"
         )
         self.player_class_limit = int(self.max_tracks_per_class.get("player", 0) or 0)
+
+        ball_conf = dict((canonical_conf or {}).get("ball", {}))
 
         self.ball_min_conf = ball_conf["ball_min_conf"]
         self.ball_expected_position_gate_px = ball_conf["ball_expected_position_gate_px"]
@@ -63,25 +60,28 @@ class CanonicalTrackPhase(
         self.ball_max_reassign_lost_frames = ball_conf["ball_max_reassign_lost_frames"]
         self.ball_high_conf_override = ball_conf["ball_high_conf_override"]
 
-        self.reassign_motion_factor = tracker_conf["reassign_motion_factor"]
-        self.reassign_min_distance = tracker_conf["reassign_min_distance"]
-        self.reassign_min_samples = tracker_conf["reassign_min_samples"]
-        self.reassign_motion_growth_cap_frames = tracker_conf[
+        self.reassign_motion_factor = canonical_conf["reassign_motion_factor"]
+        self.reassign_min_distance = canonical_conf["reassign_min_distance"]
+        self.reassign_min_samples = canonical_conf["reassign_min_samples"]
+        self.reassign_motion_growth_cap_frames = canonical_conf[
             "reassign_motion_growth_cap_frames"
         ]
-        self.motion_std_gate_enabled = tracker_conf["motion_std_gate_enabled"]
-        self.motion_std_factor = tracker_conf["motion_std_factor"]
-        self.motion_std_min_samples = tracker_conf["motion_std_min_samples"]
-        self.motion_std_floor = tracker_conf["motion_std_floor"]
+        self.motion_std_gate_enabled = canonical_conf["motion_std_gate_enabled"]
+        self.motion_std_factor = canonical_conf["motion_std_factor"]
+        self.motion_std_min_samples = canonical_conf["motion_std_min_samples"]
+        self.motion_std_floor = canonical_conf["motion_std_floor"]
 
-        self.reserve_penalty_spot_seed_players = tracker_conf[
+        self.reserve_penalty_spot_seed_players = canonical_conf[
             "reserve_penalty_spot_seed_players"
         ]
-        self.reserve_penalty_spot_seed_match_distance_m = tracker_conf[
+        self.reserve_penalty_spot_seed_match_distance_m = canonical_conf[
             "reserve_penalty_spot_seed_match_distance_m"
         ]
 
-        configured_special_seed_ids = tracker_conf.get("special_seed_canonical_ids", [1, 2])
+        configured_special_seed_ids = canonical_conf.get(
+            "special_seed_canonical_ids",
+            [1, 2],
+        )
         self.special_seed_canonical_ids = tuple(
             sorted(
                 {
@@ -94,7 +94,7 @@ class CanonicalTrackPhase(
         if not self.special_seed_canonical_ids:
             self.special_seed_canonical_ids = (1, 2)
 
-        configured_referee_ids = tracker_conf.get("referee_canonical_ids", [23, 24, 25])
+        configured_referee_ids = canonical_conf.get("referee_canonical_ids", [23, 24, 25])
         self.referee_canonical_ids = tuple(
             sorted(
                 {
@@ -133,20 +133,20 @@ class CanonicalTrackPhase(
         self.player_team_capacity = half_player_ids
 
         self.referee_sideline_band_distance_m = float(
-            tracker_conf.get("referee_sideline_band_distance_m", 3.0)
+            canonical_conf.get("referee_sideline_band_distance_m", 3.0)
         )
         self.referee_field_width_m = float(
-            projector_conf.get("constructor", {}).get("field_width_m", 68.0)
+            canonical_conf.get("referee_field_width_m", 68.0)
         )
 
-        self.use_field_positions = projector_conf["enabled"]
-        self.field_position_classes = projector_conf["classes"]
-        self.field_distance_gate_m = projector_conf["match_distance_gate_m"]
-        self.field_distance_gate_max_lost_frames = projector_conf[
-            "match_distance_max_lost_frames"
+        self.use_field_positions = bool(canonical_conf.get("use_field_positions", False))
+        self.field_position_classes = canonical_conf["field_position_classes"]
+        self.field_distance_gate_m = canonical_conf["field_distance_gate_m"]
+        self.field_distance_gate_max_lost_frames = canonical_conf[
+            "field_distance_gate_max_lost_frames"
         ]
 
-        raw_field_distance_gate_cap_m = projector_conf["match_distance_cap_m"]
+        raw_field_distance_gate_cap_m = canonical_conf["field_distance_gate_cap_m"]
         if raw_field_distance_gate_cap_m is None:
             self.field_distance_gate_cap_m = None
         else:
@@ -156,29 +156,29 @@ class CanonicalTrackPhase(
             )
 
         self.field_distance_growth_mode = str(
-            projector_conf["match_distance_growth_mode"].strip().lower()
+            canonical_conf["field_distance_growth_mode"].strip().lower()
         )
         if self.field_distance_growth_mode not in {"power", "linear_decay"}:
             self.field_distance_growth_mode = "power"
 
-        self.field_distance_lost_exponent = projector_conf["match_distance_lost_exponent"]
+        self.field_distance_lost_exponent = canonical_conf["field_distance_lost_exponent"]
         if (
             not np.isfinite(self.field_distance_lost_exponent)
             or self.field_distance_lost_exponent <= 0.0
         ):
             self.field_distance_lost_exponent = 1.0
 
-        self.field_distance_decay_per_frame = projector_conf["match_distance_decay_per_frame"]
+        self.field_distance_decay_per_frame = canonical_conf["field_distance_decay_per_frame"]
         if (
             not np.isfinite(self.field_distance_decay_per_frame)
             or self.field_distance_decay_per_frame < 0.0
         ):
             self.field_distance_decay_per_frame = 0.0
 
-        self.strict_person_class_separation = tracker_conf["strict_person_class_separation"]
-        self.max_reassign_lost_frames = tracker_conf["max_reassign_lost_frames"]
+        self.strict_person_class_separation = canonical_conf["strict_person_class_separation"]
+        self.max_reassign_lost_frames = canonical_conf["max_reassign_lost_frames"]
 
-        raw_max_reassign_lost_frames_by_class = tracker_conf[
+        raw_max_reassign_lost_frames_by_class = canonical_conf[
             "max_reassign_lost_frames_by_class"
         ]
         self.max_reassign_lost_frames_by_class = {}
@@ -186,31 +186,31 @@ class CanonicalTrackPhase(
             self.max_reassign_lost_frames_by_class[str(class_name)] = class_limit
 
         self.forced_absorption_enabled = bool(
-            tracker_conf.get("forced_absorption_enabled", True)
+            canonical_conf.get("forced_absorption_enabled", True)
         )
         self.forced_absorption_player_min_lost_frames = max(
             1,
-            int(tracker_conf.get("forced_absorption_player_min_lost_frames", 20)),
+            int(canonical_conf.get("forced_absorption_player_min_lost_frames", 20)),
         )
         self.forced_absorption_player_min_consistent_frames = max(
             1,
-            int(tracker_conf.get("forced_absorption_player_min_consistent_frames", 10)),
+            int(canonical_conf.get("forced_absorption_player_min_consistent_frames", 10)),
         )
 
         self.field_projector = None
-        if projector_conf.get("enabled"):
-            constructor_conf = dict(projector_conf.get("constructor", {}))
+        field_geometry_conf = dict(canonical_conf.get("field_geometry", {}) or {})
+        if self.use_field_positions and field_geometry_conf:
             geometry = SimpleNamespace(
-                field_length_m=float(constructor_conf.get("field_length_m", 106.0)),
-                field_width_m=float(constructor_conf.get("field_width_m", 68.0)),
+                field_length_m=float(field_geometry_conf.get("field_length_m", 106.0)),
+                field_width_m=float(field_geometry_conf.get("field_width_m", 68.0)),
                 center_y_m=float(
-                    constructor_conf.get(
+                    field_geometry_conf.get(
                         "center_y_m",
-                        constructor_conf.get("field_width_m", 68.0) / 2.0,
+                        field_geometry_conf.get("field_width_m", 68.0) / 2.0,
                     )
                 ),
                 penalty_mark_distance_m=float(
-                    constructor_conf.get("penalty_mark_distance_m", 11.0)
+                    field_geometry_conf.get("penalty_mark_distance_m", 11.0)
                 ),
             )
             self.field_projector = SimpleNamespace(geometry=geometry)

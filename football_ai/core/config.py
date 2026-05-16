@@ -171,17 +171,37 @@ class Config:
     @property
     def projector(self) -> Dict[str, Any]:
         """Projector configuration."""
-        return self.tracking.get('projector', {})
+        return self._config.get('projector', {})
     
     @property
     def bytetracker(self) -> Dict[str, Any]:
         """ByteTracker configuration."""
-        return self.tracking.get('bytetracker', {})
+        return self._config.get('bytetracker', {})
     
     @property
-    def ball(self) -> Dict[str, Any]:
-        """Ball tracking configuration."""
-        return self.tracking.get('ball', {})
+    def posession(self) -> Dict[str, Any]:
+        """Possession configuration."""
+        return self._config.get('posession', {})
+
+    @property
+    def actions(self) -> Dict[str, Any]:
+        """Actions configuration."""
+        return self._config.get('actions', {})
+
+    @property
+    def commentary(self) -> Dict[str, Any]:
+        """Commentary configuration."""
+        return self._config.get('commentary', {})
+
+    @property
+    def canonical(self) -> Dict[str, Any]:
+        """Canonical tracking configuration."""
+        return self._config.get('canonical', {})
+
+    @property
+    def positions(self) -> Dict[str, Any]:
+        """Position inference and stabilization configuration."""
+        return self._config.get('positions', {})
     
     @property
     def teams(self) -> Dict[str, Any]:

@@ -24,6 +24,6 @@ def normalize_expected_roles_mapping(expected_roles_by_team):
 
 
 def resolve_expected_roles_by_team_from_config(config):
-    tracking_cfg = getattr(config, "tracking", {}) or {}
-    configured = tracking_cfg.get("expected_roles_by_team")
+    positions_cfg = getattr(config, "positions", {}) or {}
+    configured = positions_cfg.get("expected_roles_by_team")
     return normalize_expected_roles_mapping(configured or DEFAULT_EXPECTED_ROLES_BY_TEAM)

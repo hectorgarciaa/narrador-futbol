@@ -30,8 +30,12 @@ conf_thresh = config.get('detection', 'conf_threshold')   # → 0.01
 epochs      = config.get('finetuning', 'epochs')          # → 50
 
 # Propiedades agrupadas
-tracking_cfg = config.tracking       # → dict completo de tracking
-teams_cfg    = config.teams          # → dict de equipos con colores
+tracking_cfg   = config.tracking     # → orquestacion general (execution_mode, lineup_spec, runtime)
+projector_cfg  = config.projector    # → calibracion / homografia
+bytetracker_cfg = config.bytetracker # → asociacion ByteTrack
+canonical_cfg  = config.canonical    # → canonizacion y logica de balon
+positions_cfg  = config.positions    # → roles / estabilizacion posicional
+teams_cfg      = config.teams        # → dict de equipos con colores
 
 # Helpers de alto nivel
 team_colors  = config.get_team_colors()          # → usa `color_lab_opencv` (o `color_rgb` legacy)

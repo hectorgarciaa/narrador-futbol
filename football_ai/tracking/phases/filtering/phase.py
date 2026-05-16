@@ -6,16 +6,27 @@ from .post_projection import filter_reference_points
 
 
 class FilteringPhase(Phase):
+    def __init__(self, filtering_conf=None):
+        self.filtering_conf = dict(filtering_conf or {})
+
     def execute(
         self,
         reference_packet,
         *,
         active_track_boxes_xyxy=None,
-        sideline_margin_m=0.75,
-        rescue_iou_threshold=0.0,
+        sideline_margin_m=None,
+        rescue_iou_threshold=None,
         geometry=None,
         execution_mode="runtime",
     ):
+        if sideline_margin_m is None:
+            sideline_margin_m = float(
+                self.filtering_conf.get("sideline_margin_m", 0.75)
+            )
+        if rescue_iou_threshold is None:
+            rescue_iou_threshold = float(
+                self.filtering_conf.get("rescue_iou_threshold", 0.0)
+            )
         return filter_reference_points(
             reference_packet,
             active_track_boxes_xyxy=active_track_boxes_xyxy,

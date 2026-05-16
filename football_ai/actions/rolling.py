@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping
@@ -51,6 +51,7 @@ class RollingActionsConfig:
     max_workers: int = 1
     drop_policy: str = "latest"
     snapshot_window_frames: int | None = 750
+    postprocess: dict[str, Any] = field(default_factory=dict)
 
 
 def _slot_to_canonical(slot_name: Any) -> str | None:
@@ -427,7 +428,11 @@ class RollingActionsPhase(Phase):
 
             # Consolidar acciones del bloque emitido con postprocesado temporal
             emit_frame_count = int(self.config.emit_frames)
-            consolidated = postprocess_emit_block(emit_block_edges, emit_frame_count)
+            consolidated = postprocess_emit_block(
+                emit_block_edges,
+                emit_frame_count,
+                config=self.config.postprocess,
+            )
 
             for ev in consolidated:
                 src = str(ev.get("canonical_src") or "")

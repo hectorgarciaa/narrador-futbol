@@ -1,15 +1,15 @@
-# Configuración del sistema de narración de fútbol con IA
+# Configuracion del sistema de narracion de futbol con IA
 
-# Rutas de archivos y directorios (relativas a la raíz del proyecto)
+# Rutas de archivos y directorios (relativas a la raiz del proyecto)
 paths:
   # Modelos YOLO
   models:
     yolo_base: "models/yolo/v11/yolo11m.pt"
-    
+
     yolo_v8_m: "models/yolo/v8/yolov8m.pt"
     yolo_v8_l: "models/yolo/v8/yolov8l.pt"
     yolo_v8_x: "models/yolo/v8/yolov8x.pt"
-    
+
     yolo_v11_m: "models/yolo/v11/yolo11m.pt"
     yolo_v11_l: "models/yolo/v11/yolo11l.pt"
     yolo_v11_x: "models/yolo/v11/yolo11x.pt"
@@ -17,7 +17,7 @@ paths:
     modelo_base: "models/finetuning/yolov11m/weights/best.pt"
     finetuned_player: "models/finetuning/con_arbitro/dfl-bundesliga/weights/best.pt"
     finetuned_ball: "models/finetuning-balon/v11/yolo11m/weights/best.pt"
-  
+
   # Datos
   data:
     video_prueba: "data/partidoPrueba/partido.mp4"
@@ -59,7 +59,7 @@ paths:
     dataset_soccersynth_2clases: "data/detection/SoccerSynth_YOLO_2clases/data.yaml"
 
     download_detection_output: "data/detection"
-  
+
   # Modelos descargados
   models_download:
     base_dir: "models/yolo"
@@ -77,22 +77,22 @@ paths:
     prueba_deteccion_yolo: "output/pruebaDeteccionYolo"
     prueba_finetuning: "output/pruebaFinetuning"
 
-# Configuración de detección
+# Configuracion de deteccion
 detection:
-  conf: 0.01              # Umbral de confianza para detecciones generales
-  verbose: true          # Si true, muestra logs detallados durante la detección
+  conf: 0.01
+  verbose: true
 
-# Configuración de clustering de colores
+# Configuracion de clustering de colores
 team_detector:
   team_color_model_conf:
-    team_colors: null             # Real Madrid: [255, 127, 127]   --   Wolfsburgo: [224, 77, 196]
-    min_samples: {"player": 60, "referee": 15}                 # Muestras mínimas para considerar calcular cluster
-    min_size_cluster: 15             # Tamaño mínimo de cluster para considerarlo válido (evita clusters muy pequeños por outliers)
-    min_conf: {"player": 0.8, "referee": 0.7}  # Confianza mínima de detección para usar la muestra en el cálculo de color
-    max_samples_per_class: 500       # Máximo de muestras a almacenar por clase para el cálculo de color (ventana móvil)
+    team_colors: null
+    min_samples: {"player": 60, "referee": 15}
+    min_size_cluster: 15
+    min_conf: {"player": 0.8, "referee": 0.7}
+    max_samples_per_class: 500
     referee_bootstrap_margin: 10
     referee_upper_bound_cap: 20.0
-    allow_referee_bootstrap_sampling_from_outfield: false  # legacy: permite enviar samples outfield al bucket referee antes de cerrar bootstrap del arbitro
+    allow_referee_bootstrap_sampling_from_outfield: false
   shirt_detector_conf:
     pixels_resize: 1536
     batched_kmeans_gpu_conf:
@@ -102,10 +102,9 @@ team_detector:
       use_gpu: true
       random_state: 0
 
-
-# Configuración de tracking (ByteTrack)
+# Configuracion general de tracking/orquestacion
 tracking:
-  execution_mode: runtime  # runtime = clean sin trazas ricas; debug = auditoría completa
+  execution_mode: runtime
   lineup_spec:
     teams:
       - formation: "4-3-3"
@@ -167,285 +166,212 @@ tracking:
         tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
         ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
     video_source: "video_prueba_medio"
-  print_runtime_devices: true  # Si true, imprime el dispositivo efectivo real de PnLCalib y frame hook (cuda/cpu)
+  print_runtime_devices: true
 
-  projector:
-    enabled: true     # Activar proyección de los jugadores al campo 2D con PnLCalib para el matching
-    classes: ["player", "goalkeeper"]
-    reassign_min_field_distance_m: 1.2
-    match_distance_gate_m: 2.1
-    match_distance_cap_m: 8.0
-    match_distance_max_lost_frames: 10
-    match_distance_growth_mode: linear_decay
-    match_distance_lost_exponent: 0.5
-    match_distance_decay_per_frame: 0.3
+projector:
+  enabled: true
+  constructor:
+    max_width: 1280
+    bottom_offset_ratio: 0.04
+    keypoint_threshold: 0.30
+    line_threshold: 0.60
+    pnl_refine: false
+    temporal_blend: 0.20
+    adaptive_thresholds_enabled: true
+    adaptive_max_attempts: 4
+    adaptive_keypoint_threshold_step: 0.02
+    adaptive_line_threshold_step: 0.05
+    adaptive_keypoint_threshold_min: 0.28
+    adaptive_line_threshold_min: 0.55
+    device: null
+    projection_quality_analyzer_conf:
+      min_visible_keypoints: 7
+      min_visible_lines: 1
+      validation_score_threshold: 0.56
+      validation_geometry_fit_min: 0.38
+      validation_support_quality_min: 0.31
+      validation_coverage_quality_min: 0.18
+      validation_reprojection_error_threshold_px: 8.0
+      validation_homography_condition_number_threshold: 100000000.0
+      validation_keypoint_world_error_threshold_m: 3.0
+      validation_line_world_error_threshold_m: 4.0
+      validation_target_visible_keypoints: 9
+      validation_target_visible_lines: 4
+      validation_target_image_point_hull_area_ratio: 0.18
+      validation_target_image_x_span_ratio: 0.55
+      validation_target_image_y_span_ratio: 0.40
+      validation_target_field_coverage_ratio: 0.20
 
-    constructor:
-      max_width: 1280
-      bottom_offset_ratio: 0.04
-      keypoint_threshold: 0.30
-      line_threshold: 0.60
-      pnl_refine: false
-      temporal_blend: 0.20
-      adaptive_thresholds_enabled: true
-      adaptive_max_attempts: 4
-      adaptive_keypoint_threshold_step: 0.02
-      adaptive_line_threshold_step: 0.05
-      adaptive_keypoint_threshold_min: 0.28
-      adaptive_line_threshold_min: 0.55
-      device: null
-      projection_quality_analyzer_conf:
-        min_visible_keypoints: 7
-        min_visible_lines: 1
-        validation_score_threshold: 0.56
-        validation_geometry_fit_min: 0.38
-        validation_support_quality_min: 0.31
-        validation_coverage_quality_min: 0.18
-        validation_reprojection_error_threshold_px: 8.0
-        validation_homography_condition_number_threshold: 100000000.0
-        validation_keypoint_world_error_threshold_m: 3.0
-        validation_line_world_error_threshold_m: 4.0
-        validation_target_visible_keypoints: 9
-        validation_target_visible_lines: 4
-        validation_target_image_point_hull_area_ratio: 0.18
-        validation_target_image_x_span_ratio: 0.55
-        validation_target_image_y_span_ratio: 0.40
-        validation_target_field_coverage_ratio: 0.20
+bytetracker:
+  track_activation_threshold: 0.10
+  low_conf_threshold: 0.01
+  lost_track_buffer: 90
+  minimum_matching_threshold: 0.945
+  frame_rate: 25
+  minimum_consecutive_frames: 5
+  new_track_active_overlap_iou: 0.2
+  new_track_unconfirmed_overlap_iou: 0.1
+  new_track_candidate_overlap_iou: 0.0
+  second_match_threshold: 0.9
+  unconfirmed_match_threshold: 0.9
+  field_position_classes: ["player", "goalkeeper"]
+  field_distance_gate_m: 8.0
+  field_distance_gate_max_lost_frames: 10
+  field_distance_gate_cap_m: 8.0
+  field_distance_growth_mode: linear_decay
+  field_distance_lost_exponent: 0.5
+  field_distance_decay_per_frame: 0.3
+  lost_time_penalty_weight: 0.12
+  lost_time_penalty_max_frames: 10
+  bbox_center_distance_gate_px: 90.0
+  bbox_center_distance_gate_max_lost_frames: 4
+  bbox_center_distance_gate_cap_px: 360.0
+  class_vote_weight_relabel: 1.0
+  class_vote_weight_yolo: 1.0
+  class_consensus_switch_margin: 2.0
+  bbox_height_ratio_threshold: 0.50
+  bbox_width_ratio_threshold: 1
+  team_vote_weight: 1.0
+  team_consensus_switch_margin: 2.0
 
-  bytetracker:
-    track_activation_threshold: 0.10
-    low_conf_threshold: 0.01
-    lost_track_buffer: 90
-    minimum_matching_threshold: 0.945
-    frame_rate: 25
-    minimum_consecutive_frames: 5
-    new_track_active_overlap_iou: 0.2
-    new_track_unconfirmed_overlap_iou: 0.1
-    new_track_candidate_overlap_iou: 0.0
-    second_match_threshold: 0.9
-    unconfirmed_match_threshold: 0.9
-    field_position_classes: ["player", "goalkeeper"]
-    
-    field_distance_gate_m: 8.0
-    field_distance_gate_max_lost_frames: 10
-    field_distance_gate_cap_m: 8.0
-    field_distance_growth_mode: linear_decay
-    field_distance_lost_exponent: 0.5
-    field_distance_decay_per_frame: 0.3
-    lost_time_penalty_weight: 0.12  # Peso de la penalización por tiempo perdido en el coste de matching
-    lost_time_penalty_max_frames: 10  # Máximo número de frames perdidos para aplicar penalización en el coste de matching
-    bbox_center_distance_gate_px: 90.0  # Baseline ganador tras auditoría larga en ucl_30s para rescates con IoU=0
-    bbox_center_distance_gate_max_lost_frames: 4  # El gate bbox deja de crecer a partir de 4 frames perdidos
-    bbox_center_distance_gate_cap_px: 360.0  # Límite superior del gate bbox para evitar rescates tardíos absurdos
-    class_vote_weight_relabel: 1.0  # Peso del voto de clase reetiquetada (TeamDetector) en el consenso por track
-    class_vote_weight_yolo: 1.0  # Peso del voto de clase original YOLO en el consenso por track
-    class_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para permitir cambio de clase del track interno
-    bbox_height_ratio_threshold: 0.50  # Gate duro si la altura cambia más de un 50%
-    bbox_width_ratio_threshold: 1  # Gate duro si el ancho cambia más de un 100%
-    team_vote_weight: 1.0  # Peso del voto de equipo observado en cada frame para consenso temporal por track
-    team_consensus_switch_margin: 2.0  # Ventaja mínima acumulada para cambiar el equipo canónico de un track
-    max_tracks_per_class:   # Límite de tracks por clase en la salida final del tracker
-      goalkeeper: 2
-      player: 20
-      ball: 1
-      referee: 3
-  
-  # Parámetros específicos de la lógica del balón (filtro temporal + tamaño + gates).
-  # Esta sección controla la heurística de `_select_ball_candidate` y el `ball_state`.
-  ball:
-    ball_min_conf: 0.0035   # Umbral mínimo de confianza para detección de balón
-    ball_expected_position_gate_px: 90.0  # Radio base (px) desde posición esperada para aceptar candidato
-    ball_expected_position_gate_growth_per_frame: 35.0  # Crecimiento del radio por frame perdido
-    ball_expected_position_confidence_relax: 1.4  # Relaja gates si la confianza es alta
-    ball_size_ratio_per_frame: 1.8  # Ratio máximo de cambio de tamaño por frame
-    ball_size_min_samples: 5  # Muestras mínimas para estadística de tamaño
-    ball_size_std_factor: 3.0  # k sigmas para límites de tamaño
-    ball_size_std_floor: 1.0  # Suelo de sigma (evita gates demasiado estrechos)
-    ball_max_reassign_lost_frames: 30  # Frames máximos para considerar que el ball_state sigue activo
-    ball_high_conf_override: 0.6  # Confianza alta que relaja gates/ratio
+posession:
+  enabled: true
+  strict_control_distance_px: 60.0
 
-  # Heurística online de posesión (equipo y jugador portador).
-  possession:
-    enabled: true
-    strict_control_distance_px: 60.0
-  actions:
-    enabled: true
-    mode: rolling   # rolling | disabled
+actions:
+  enabled: true
+  mode: rolling
+  fps: 25.0
+  cadence_frames: 40
+  min_frames_warmup: 50
+  min_event_duration: 10
+  emit_delay_frames: 50
+  emit_frames: 40
+  sample_freq: 5
+  window_seconds: 10.0
+  repo_path: external/pathcrf
+  trial: 120
+  model_file: state_dict_best_acc.pt
+  device: auto
+  use_crf: true
+  decode: indep
+  snapshot_window_frames: 750
+  async_enabled: true
+  max_workers: 1
+  drop_policy: latest
+  smooth_edges: false
+  export_debug: false
+  postprocess:
+    min_support_frames: 5
+    min_consecutive_frames: 3
+    min_support_ratio: 0.15
+    allow_multiple_events_per_emit: false
+    deduplicate_events: true
+    hysteresis_margin: 0.10
 
-    # ── Live production: snapshot fijo bounded, delay 2s max ──
-    fps: 25.0
-    cadence_frames: 40
-    min_frames_warmup: 50
-    min_event_duration: 10
-    emit_delay_frames: 50
-    emit_frames: 40
-    sample_freq: 5
-    window_seconds: 10.0
+commentary:
+  enabled: true
+  generate_text: true
+  generate_audio: true
+  llm_model: "gemma4-q4ks-text"
+  llm_base_url: null
+  llm_temperature: 0.7
+  tts_backend: "xtts"
+  speaker_wavs: []
+  female_speaker_wavs: []
+  alternate_voices: false
+  max_workers: 2
+  drop_policy: "latest"
+  max_queue_size: 8
+  skip_event_types: ["out", "unknown"]
+  deduplicate_consecutive: true
 
-    # PathCRF model (cacheado en memoria)
-    repo_path: external/pathcrf
-    trial: 120
-    model_file: state_dict_best_acc.pt
-    device: auto
-    use_crf: true
-    decode: indep
-
-    # rolling — async + snapshot fijo
-    snapshot_window_frames: 750
-    async_enabled: true
-    max_workers: 1
-    drop_policy: latest
-    smooth_edges: false
-    export_debug: false
-
-    # snapshot fijo bounded (sin incremental tracking)
-
-    # postprocess: edges emitidos → eventos consolidados
-    postprocess:
-      min_support_frames: 5
-      min_consecutive_frames: 3
-      min_support_ratio: 0.15
-      allow_multiple_events_per_emit: false
-      deduplicate_events: true
-      hysteresis_margin: 0.10
-
-  # Fase de comentarios online/asincrona (LLM + TTS)
-  commentary:
-    enabled: true
-    generate_text: true
-    generate_audio: true
-
-    llm_model: "gemma4-q4ks-text"
-    llm_base_url: null
-    llm_temperature: 0.7
-
-    tts_backend: "xtts"
-    speaker_wavs: []
-    female_speaker_wavs: []
-    alternate_voices: false
-
-    max_workers: 2
-    drop_policy: "latest"
-    max_queue_size: 8
-
-    skip_event_types: ["out", "unknown"]
-    deduplicate_consecutive: true
-
-  reassign_motion_factor: 0.75  # Factor de penalización de distancia para reasignación
-  reassign_min_distance: 10.0  # Distancia mínima en metros para considerar una reasignación de ID
-  reassign_min_samples: 3  # Muestras mínimas para considerar una reasign
-  reassign_motion_growth_cap_frames: 12  # Máximo número de frames perdidos que se usa para extrapolar movimiento en la reasignación canónica
-  motion_std_gate_enabled: true  # Gate estadístico anti-saltos de ID (distancia por frame)
-  motion_std_factor: 4.0  # Factor de desviación típica para calcular el límite del gate estadístico
-  motion_std_min_samples: 5  # Muestras mínimas para calcular estadísticas de movimiento
-  motion_std_floor: 0.5  # Límite mínimo del gate estadístico
-  referee_recovery_max_lost_frames: 3  # Máximo número de frames perdidos para intentar una recuperación específica de árbitros
-  referee_recovery_max_distance: 45.0  # Distancia máxima en metros para
+canonical:
+  max_tracks_per_class:
+    goalkeeper: 2
+    player: 20
+    ball: 1
+    referee: 3
+  field_position_classes: ["player", "goalkeeper"]
+  field_distance_gate_m: 2.1
+  field_distance_gate_max_lost_frames: 10
+  field_distance_gate_cap_m: 8.0
+  field_distance_growth_mode: linear_decay
+  field_distance_lost_exponent: 0.5
+  field_distance_decay_per_frame: 0.3
+  reassign_motion_factor: 0.75
+  reassign_min_distance: 10.0
+  reassign_min_samples: 3
+  reassign_motion_growth_cap_frames: 12
+  motion_std_gate_enabled: true
+  motion_std_factor: 4.0
+  motion_std_min_samples: 5
+  motion_std_floor: 0.5
   referee_canonical_ids: [23, 24, 25]
   referee_sideline_band_distance_m: 3.0
-  strict_person_class_separation: true  # Si true, nunca mezcla player/goalkeeper en la reasignación canónica
-  # Legacy: ByteTrack ya no limita internamente la creación por clase (se ignora este flag).
-  # El límite por clase se aplica en la capa canónica/salida final.
-  require_field_position_for_reassign: true  # Legacy: para player/goalkeeper prioriza field_position cuando existe, pero si la homografía falta o se rechaza el canónico hace fallback a píxeles para no bloquear la continuidad.
-  max_reassign_lost_frames: null  # Tope opcional de frames perdidos para reasignar un ID. null/0/desactivado => un track puede reaparecer tras muchos frames.
-  max_reassign_lost_frames_by_class: {}  # Sin corte por clase (legacy). Evita capar reenganches tardíos.
-  forced_absorption_enabled: true  # Habilita una reabsorción forzada conservadora para huérfanos largos de ByteTrack.
-  forced_absorption_player_min_lost_frames: 20  # X: frames mínimos que debe llevar perdido un canónico `player` para poder ceder su ID.
-  forced_absorption_player_min_consistent_frames: 10  # Y: frames consecutivos mínimos que debe durar un raw track huérfano, con misma clase y equipo.
-  profile_phases: false  # Si true, imprime tiempos por fase en cada frame (profiling)
-  reserve_penalty_spot_seed_players: true  # Si true, reserva dos IDs canónicos sintéticos como `player` en los puntos de penalti.
-  reserve_penalty_spot_seed_match_distance_m: 20.0  # Distancia máxima en metros desde el punto de penalti para absorber una detección real sobre cada track semilla reservado.    
-  
-  
+  strict_person_class_separation: true
+  max_reassign_lost_frames: null
+  max_reassign_lost_frames_by_class: {}
+  forced_absorption_enabled: true
+  forced_absorption_player_min_lost_frames: 20
+  forced_absorption_player_min_consistent_frames: 10
+  profile_phases: false
+  reserve_penalty_spot_seed_players: true
+  reserve_penalty_spot_seed_match_distance_m: 20.0
+  ball:
+    ball_min_conf: 0.0035
+    ball_expected_position_gate_px: 90.0
+    ball_expected_position_gate_growth_per_frame: 35.0
+    ball_expected_position_confidence_relax: 1.4
+    ball_size_ratio_per_frame: 1.8
+    ball_size_min_samples: 5
+    ball_size_std_factor: 3.0
+    ball_size_std_floor: 1.0
+    ball_max_reassign_lost_frames: 30
+    ball_high_conf_override: 0.6
 
+positions:
   special_seed_role_team_assignment_enabled: true
   special_seed_role_model_path: "models/positions/20260427_002133/best_model.pt"
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
-  # Once esperado por equipo para la inferencia posicional durante el tracking.
-  # Si se define, el Set Transformer ajusta la asignación estable a estas plazas
-  # usando Hungarian, igual que en experiments/set_transformer.ipynb.
   expected_roles_by_team:
     Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
-  # Congela un role estable por ID usando sus primeras observaciones visibles.
-  # Si una clase domina pronto, se fija antes; si no, se congela al llegar a
-  # esta ventana máxima de observaciones del track.
-  # Estrategia para asignar las plazas de expected_roles_by_team cuando varios
-  # jugadores están listos para congelarse a la vez:
-  # - hungarian: optimiza el conjunto completo por probabilidad media
-  # - greedy: asigna plaza a plaza por prioridad local
-  # - ratio_priority: hace una foto global al llegar a role_stabilization_window_frames,
-  #   transfiere roles no válidos y plazas válidas ya ocupadas a la siguiente
-  #   plaza válida libre del ranking y asigna iterativamente por ratio acumulado
-  #   y exige un ratio mínimo también en la plaza final elegida. Si aún quedan
-  #   plazas libres, resuelve los descartes restantes con una asignación óptima.
-  role_stabilization_expected_roles_assignment: "ratio_priority"
-  role_stabilization_expected_roles_min_ratio: 0.60
-  role_stabilization_expected_roles_min_final_ratio: 0.20
-  role_stabilization_expected_roles_min_count: 300
-  role_stabilization_window_frames: 600
-  role_stabilization_min_observations: 600
-  role_stabilization_vote_ratio: 0.7
-  role_context_interpolation_max_gap_frames: 15  # Frames máximos para reutilizar la última posición visible de un canónico ausente como contexto del Set Transformer. No actualiza segmentos ni compite por slot.
-  role_recent_position_window: 10  # Ventana corta en metros usada para la mediana espacial reciente del segmento al detectar swaps.
-  role_recent_role_window: 20  # Ventana corta de roles crudos recientes usada para medir el rol dominante local del segmento.
-  role_swap_min_recent_samples: 8  # Muestras visibles mínimas en la ventana corta antes de permitir detección de swap.
-  role_swap_position_jump_m: 14.0  # Salto mínimo en metros respecto a la trayectoria reciente para sospechar swap sin señal estructural de canonización.
-  role_swap_position_jump_relinked_m: 8.0  # Salto mínimo en metros si el canónico llega relinkado/reabsorbido desde otro raw tracker.
-  role_swap_role_change_min_ratio: 0.60  # Dominancia mínima del rol reciente para aceptar que un cambio de rol actual contradice al segmento.
-  role_swap_role_change_min_confidence: 0.35  # Confianza mínima del rol actual para usarlo como evidencia semántica de swap.
+  role_swap_min_recent_samples: 8
+  role_swap_position_jump_m: 14.0
 
-# Configuración de equipos
+# Configuracion de equipos
 teams:
   Real Madrid:
-    color_lab_opencv: [255, 127, 127]  # Color de referencia en lab_opencv
+    color_lab_opencv: [255, 127, 127]
     name: "Real Madrid"
   Wolfsburgo:
-    color_lab_opencv: [224, 77, 196]  # Color de referencia en lab_opencv
+    color_lab_opencv: [224, 77, 196]
     name: "Wolfsburgo"
 
-# Configuración de visualización
+# Configuracion de visualizacion
 visualization:
-  # Colores para dibujar bounding boxes (BGR para OpenCV)
   colors:
-    player: [0, 255, 0]      # Verde
-    goalkeeper: [0, 255, 255] # Amarillo
-    referee: [255, 0, 0]      # Azul
-    ball: [0, 0, 255]         # Rojo
-  # Colores de relleno por equipo para el panel de campo (BGR).
-  # Si falta un equipo, el drawer usa fallback determinista.
+    player: [0, 255, 0]
+    goalkeeper: [0, 255, 255]
+    referee: [255, 0, 0]
+    ball: [0, 0, 255]
   team_colors:
     Real Madrid: [240, 240, 240]
     Wolfsburgo: [0, 80, 220]
-  
-  # Configuración de visualización de KMeans
   show_kmeans: false
-  # Mostrar salida en tiempo real durante procesamiento
   show_output: true
-  # El vídeo final se renderiza siempre en 4 paneles.
-  # El panel C solo muestra descartes cuando tracking.execution_mode=debug;
-  # en runtime queda negro para evitar depender de trazas internas.
-  # Si true, en el panel D mantiene visibles todos los IDs ya observados
-  # (no solo hasta el cupo esperado por clase).
   continuity_keep_all_seen_ids: true
-  # Panel C (YOLO descartadas): muestra el motivo de descarte en la etiqueta.
   discarded_panel_show_reasons: true
-  # Panel C (YOLO descartadas): colores BGR por tipo de descarte.
-  # - not_tracked: detecciones YOLO que no fueron devueltas por ByteTrack.
-  # - tracked_no_canonical: detecciones devueltas por ByteTrack pero descartadas en el mapeo canónico.
   discarded_panel_color_not_tracked: [0, 165, 255]
   discarded_panel_color_tracked_no_canonical: [255, 0, 255]
-  # Grosor de las líneas de bounding boxes
   line_thickness: 2
-  # Tamaño de fuente para etiquetas
   font_scale: 0.5
-  # Escala de fuente usada en etiquetas compactas del modo 2x2.
   compact_font_scale: 0.5
-  # Radio de los círculos en el panel 2D del campo.
   pitch_marker_radius: 10
 
-# Configuración de fine-tuning (Pipeline secuencial)
+# Configuracion de fine-tuning (Pipeline secuencial)
 finetuning:
   phases:
     - name: "sinteticos"
@@ -455,7 +381,7 @@ finetuning:
       batch: 8
       imgsz: 1280
       output_name: "sin_arbitro/sinteticos"
-      
+
     - name: "dfl-bundesliga"
       enabled: true
       dataset: "data/detection/DFL-Bundesliga-2clases/data.yaml"
@@ -464,12 +390,8 @@ finetuning:
       imgsz: 640
       output_name: "sin_arbitro/dfl-bundesliga"
 
-
 # Logging
 logging:
-  # Nivel de log: DEBUG, INFO, WARNING, ERROR, CRITICAL
   level: "INFO"
-  # Formato de log
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  # Archivo de log (relativo a la raíz del proyecto)
   log_file: "narrador-futbol.log"

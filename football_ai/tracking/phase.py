@@ -23,27 +23,8 @@ class TrackingPhase(Phase):
     toda la lógica real a `Tracker.process_frame`.
     """
 
-    def __init__(
-        self,
-        model_path,
-        detector_conf,
-        team_detector_conf,
-        bytetracker_conf,
-        ball_conf,
-        tracker_conf,
-        projector_conf,
-        project_root,
-    ):
-        self.tracker = Tracker(
-            model_path=model_path,
-            detector_conf=detector_conf,
-            team_detector_conf=team_detector_conf,
-            bytetracker_conf=bytetracker_conf,
-            ball_conf=ball_conf,
-            tracker_conf=tracker_conf,
-            projector_conf=projector_conf,
-            project_root=project_root,
-        )
+    def __init__(self, tracking_runtime_conf):
+        self.tracker = Tracker(tracking_runtime_conf)
 
     def reset(self) -> None:
         """Delega el reset al Tracker interno."""

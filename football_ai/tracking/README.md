@@ -20,34 +20,34 @@ Orquestar el pipeline de tracking desacoplado (`DETECTOR -> REFERENCE_POINTS -> 
 
 ```python
 from football_ai.tracking import Tracker
-import numpy as np
-
 tracker = Tracker(
-    model_path="models/finetuning/yolov11m.pt",
-    conf=0.1,
-    tracker_conf={
-        "track_thresh": 0.15,
-        "track_buffer": 90,
-        "match_thresh": 0.945,
-        "frame_rate": 25,
-        "minimum_consecutive_frames": 5
-    },
-    team_colors={
-        "Real Madrid": np.array([255, 127, 127]),
-        "Wolfsburgo": np.array([224, 77, 196])
-    },
-    ball_min_conf=0.0035,
-    field_tracking_conf={
-        "enabled": True,
-        "method": "pnlcalib",
-        "classes": ["player", "goalkeeper"],
-        "field_length_m": 106.0,
-        "field_width_m": 68.0,
+    {
+        "model_path": "models/finetuning/yolov11m.pt",
+        "detector_conf": {"conf": 0.1},
+        "team_detector_conf": {},
+        "bytetracker_conf": {
+            "track_thresh": 0.15,
+            "track_buffer": 90,
+            "match_thresh": 0.945,
+            "frame_rate": 25,
+        },
+        "tracker_conf": {"execution_mode": "runtime"},
+        "canonical_conf": {
+            "max_tracks_per_class": {
+                "player": 20,
+                "goalkeeper": 2,
+                "referee": 3,
+                "ball": 1,
+            },
+        },
+        "positions_conf": {"special_seed_canonical_ids": [1, 2]},
+        "projector_conf": {"enabled": False, "constructor": {}},
+        "project_root": ".",
     }
 )
 ```
 
-Si no pasas `field_tracking_conf`, el tracker puede funcionar solo con `bbox` en imagen. En `scripts/track.py`, por defecto se lee esta configuración desde `config.yaml` y se activa la proyección 2D del campo.
+Si `projector_conf["enabled"]` vale `False`, el tracker puede funcionar solo con `bbox` en imagen. En `scripts/track.py`, por defecto se lee esta configuración desde `config.yaml` y se activa la proyección 2D del campo.
 `PnLCalib` no se guarda dentro de este repositorio como código versionado: el propio tracker lo clona en `external/pnlcalib/` y descarga sus pesos en `models/pnlcalib/` durante la primera ejecución. Por tanto, otra persona que ya tenga este repo solo necesita `git pull`; no tiene que clonar `PnLCalib` manualmente.
 
 ### Pipeline interno de `get_tracks(video, show_kmeans, frame_hook=None, profile_phases=False)`
@@ -320,21 +320,8 @@ Parámetros en `config.yaml`:
 - `special_seed_canonical_ids` (IDs canónicos tratados con esa lógica especial; por defecto `[1, 2]`)
 - `special_seed_defender_roles` (roles que cuentan como defensas al buscar el más cercano)
 - `expected_roles_by_team` (once esperado por equipo para restringir la inferencia posicional online con Hungarian)
-- `role_stabilization_expected_roles_assignment` (estrategia para resolver `expected_roles_by_team` al congelar roles estables: `hungarian`, `greedy` o `ratio_priority`; por defecto `hungarian`)
-- `role_stabilization_expected_roles_min_ratio` (solo en `ratio_priority`: ratio acumulado mínimo hasta la primera plaza libre en la foto global; por defecto `0.40`)
-- `role_stabilization_expected_roles_min_final_ratio` (solo en `ratio_priority`: ratio mínimo de la plaza final elegida; por defecto hereda `role_stabilization_expected_roles_min_ratio`)
-- `role_stabilization_expected_roles_min_count` (solo en `ratio_priority`: mínimo de observaciones del jugador para entrar en la asignación táctica de la foto global; por defecto `300`)
-- `role_stabilization_window_frames` (número máximo de observaciones visibles por ID antes de congelar su role estable; en `ratio_priority` también actúa como frame de corte global de la foto; por defecto `600`)
-- `role_stabilization_min_observations` (mínimo de observaciones antes de permitir congelado; si coincide con la ventana, la congelación ocurre al agotar esa ventana, por defecto `600`)
-- `role_stabilization_vote_ratio` (porcentaje mínimo de dominio de una clase para congelar el role antes de agotar la ventana)
-- `role_context_interpolation_max_gap_frames` (frames máximos en los que un canónico ausente puede reaparecer solo como contexto interpolado para el Set Transformer)
-- `role_recent_position_window` (ventana corta de posiciones recientes del segmento, en metros, usada para la mediana espacial de swap)
-- `role_recent_role_window` (ventana corta de roles crudos recientes del segmento)
 - `role_swap_min_recent_samples` (mínimo de muestras visibles antes de permitir corte por swap)
 - `role_swap_position_jump_m` (salto espacial mínimo para sospechar swap sin señal estructural de relink)
-- `role_swap_position_jump_relinked_m` (salto espacial mínimo si la capa canónica ya marcó `canonical_relinked`)
-- `role_swap_role_change_min_ratio` (dominancia mínima del rol reciente para usarlo como evidencia de swap)
-- `role_swap_role_change_min_confidence` (confianza mínima del rol actual para activar la señal semántica de swap)
 - `reassign_motion_growth_cap_frames` (tope de frames perdidos que se usan para extrapolar el salto permitido solo en clases sin homografía)
 - `forced_absorption_enabled` (activa la reabsorción forzada conservadora para `player`)
 - `forced_absorption_player_min_lost_frames` (frames mínimos perdidos del canónico `player` antes de ceder el ID; por defecto `20`)
@@ -344,7 +331,6 @@ Parámetros en `config.yaml`:
 - `output/tracker/<video>_role_artifacts/<video>_greedy_role_diagnostics.csv` (traza paso a paso de las métricas usadas por el greedy al congelar slots estables)
 - `output/tracker/<video>_role_artifacts/<video>_role_assignment_vs_detected_pre<frame>.png` (comparativa por jugador entre distribución detectada hasta el frame de corte y posición final)
 - `output/tracker/<video>_role_artifacts/<video>_<equipo>_ratio_priority_step_by_step.png` (solo en `ratio_priority`: simulación paso a paso de la asignación snapshot por equipo)
-- `require_field_position_for_reassign` (legacy: si `true`, `player/goalkeeper` priorizan el espacio de campo cuando existe, pero si la homografía falta o se rechaza el canónico cae a píxeles)
 - `max_reassign_lost_frames` / `max_reassign_lost_frames_by_class` (opcionales; `null` o `<=0` desactiva el corte temporal y permite reapariciones tardías)
 
 Para reducir ID switches en clips largos, conviene combinar este gate con límites de reasignación más estrictos:

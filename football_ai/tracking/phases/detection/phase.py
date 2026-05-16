@@ -6,8 +6,10 @@ from .detector import Detector
 
 
 class DetectionPhase(Phase):
-    def __init__(self, model_path, detector_conf):
-        self.detector = Detector(model_path, **dict(detector_conf or {}))
+    def __init__(self, detector_conf=None):
+        runtime_conf = dict(detector_conf or {})
+        model_path = runtime_conf.pop("model_path")
+        self.detector = Detector(model_path, **runtime_conf)
 
     def execute(
         self,

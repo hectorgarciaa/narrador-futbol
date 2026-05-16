@@ -49,10 +49,10 @@ class OnlineSpecialSeedRoleAssigner:
         self.config = config
         self.video_path = Path(video_path)
         self.logger = logger
-        tracking_cfg = getattr(config, "tracking", {}) or {}
-        self.enabled = bool(tracking_cfg.get("special_seed_role_team_assignment_enabled", True))
-        self.special_ids = tuple(int(track_id) for track_id in tracking_cfg.get("special_seed_canonical_ids", list(DEFAULT_SPECIAL_SEED_CANONICAL_IDS)))
-        self.defender_roles = {normalize_slot_token(role) for role in tracking_cfg.get("special_seed_defender_roles", list(DEFAULT_SPECIAL_SEED_DEFENDER_ROLES))}
+        positions_cfg = getattr(config, "positions", {}) or {}
+        self.enabled = bool(positions_cfg.get("special_seed_role_team_assignment_enabled", True))
+        self.special_ids = tuple(int(track_id) for track_id in positions_cfg.get("special_seed_canonical_ids", list(DEFAULT_SPECIAL_SEED_CANONICAL_IDS)))
+        self.defender_roles = {normalize_slot_token(role) for role in positions_cfg.get("special_seed_defender_roles", list(DEFAULT_SPECIAL_SEED_DEFENDER_ROLES))}
         self.expected_roles_by_team = (
             normalize_expected_roles_mapping(expected_roles_by_team_override)
             if expected_roles_by_team_override is not None
@@ -61,14 +61,14 @@ class OnlineSpecialSeedRoleAssigner:
         self.lineup_matcher = lineup_matcher if isinstance(lineup_matcher, LineupSlotMatcher) else None
         self.segment_expected_slots_by_team = self._build_segment_expected_slots_by_team()
         self.pitch_layout_by_team = self._build_pitch_layout_by_team()
-        self.segment_switch_distance_m = float(tracking_cfg.get("role_segment_switch_distance_m", tracking_cfg.get("role_swap_position_jump_m", 14.0)))
-        self.segment_min_observations = max(2, int(tracking_cfg.get("role_segment_min_observations", tracking_cfg.get("role_swap_min_recent_samples", 6))))
-        self.recent_window = max(3, int(tracking_cfg.get("role_segment_recent_window", 10)))
+        self.segment_switch_distance_m = float(positions_cfg.get("role_segment_switch_distance_m", positions_cfg.get("role_swap_position_jump_m", 14.0)))
+        self.segment_min_observations = max(2, int(positions_cfg.get("role_segment_min_observations", positions_cfg.get("role_swap_min_recent_samples", 6))))
+        self.recent_window = max(3, int(positions_cfg.get("role_segment_recent_window", 10)))
         self._reset_runtime_state()
         self.role_session = None
         if not self.enabled:
             return
-        model_path = Path(config.project_root) / tracking_cfg.get("special_seed_role_model_path", DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH)
+        model_path = Path(config.project_root) / positions_cfg.get("special_seed_role_model_path", DEFAULT_SPECIAL_SEED_ROLE_MODEL_PATH)
         if not model_path.exists():
             self.logger.warning("Se desactiva online special-seed role assignment: no existe el checkpoint %s", model_path)
             self.enabled = False

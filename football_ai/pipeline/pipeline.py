@@ -369,9 +369,12 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
         team_detector_conf = dict(config.team_detector)
         projector_conf = config.projector
         bytetracker_conf = config.bytetracker
-        ball_conf = config.ball
-
         tracker_conf = dict(config.tracking or {})
+        canonical_conf = dict(config.canonical or {})
+        positions_conf = dict(config.positions or {})
+        posession_conf = dict(config.posession or {})
+        actions_conf = dict(config.actions or {})
+        commentary_conf = dict(config.commentary or {})
         cli_execution_mode = getattr(args, "execution_mode", None)
         resolved_execution_mode = (
             execution_mode_override
@@ -451,6 +454,8 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
         logger.info(f"Greedy role CSV output: {role_greedy_csv_path}")
         logger.info(f"Tracking metrics dataset CSV: {metrics_dataset_path}")
         logger.info(f"Tracking configuration: {tracker_conf}")
+        logger.info(f"Canonical tracking configuration: {canonical_conf}")
+        logger.info(f"Position inference configuration: {positions_conf}")
         logger.info(f"Tracking execution mode: {execution_mode}")
         logger.info(f"Field tracking configuration: {projector_conf}")
         logger.info(f"Team detector configuration: {team_detector_conf}")
@@ -462,16 +467,19 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
         from scripts.utils import iter_video_frames
 
         tracking_phase = TrackingPhase(
-            model_path,
-            detector_conf,
-            team_detector_conf,
-            bytetracker_conf,
-            ball_conf,
-            tracker_conf,
-            projector_conf,
-            config.project_root,
+            {
+                "model_path": model_path,
+                "detector_conf": detector_conf,
+                "team_detector_conf": team_detector_conf,
+                "bytetracker_conf": bytetracker_conf,
+                "tracker_conf": tracker_conf,
+                "canonical_conf": canonical_conf,
+                "positions_conf": positions_conf,
+                "projector_conf": projector_conf,
+                "project_root": config.project_root,
+            }
         )
-        posession_phase = PosessionPhase(tracker_conf.get("possession"))
+        posession_phase = PosessionPhase(posession_conf)
         
         position_phase = None
         actions_phase = None
@@ -483,7 +491,6 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
                 expected_roles_by_team_override=lineup_expected_roles_by_team,
                 lineup_matcher=lineup_matcher,
             )
-        actions_conf = dict(tracker_conf.get("actions") or {})
         actions_mode = str(actions_conf.get("mode", "legacy")).strip().lower()
         logger.info("Actions mode: %s", actions_mode)
         rolling_output_dir = _build_rolling_output_dir(config, video_path)
@@ -509,6 +516,7 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
                     min_event_duration=int(actions_conf.get("min_event_duration", 10)),
                     smooth_edges=bool(actions_conf.get("smooth_edges", False)),
                     export_debug=bool(actions_conf.get("export_debug", False)),
+                    postprocess=dict(actions_conf.get("postprocess") or {}),
                     output_dir=str(rolling_output_dir),
                     async_enabled=bool(actions_conf.get("async_enabled", True)),
                     max_workers=max(1, int(actions_conf.get("max_workers", 1))),
@@ -522,7 +530,6 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
             )
 
         commentary_phase = None
-        commentary_conf = dict(tracker_conf.get("commentary") or {})
         commentary_enabled = bool(commentary_conf.get("enabled", False))
         commentary_enabled = (
             commentary_enabled
@@ -610,7 +617,7 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
 
         profile_phases_enabled = bool(getattr(args, "profile_phases", False))
         if not profile_phases_enabled:
-            profile_phases_enabled = bool(tracker_conf.get("profile_phases", False))
+            profile_phases_enabled = bool(canonical_conf.get("profile_phases", False))
         logger.info("Phase profiling per frame: %s", profile_phases_enabled)
 
         logger.info("Extracting tracks from video...")
@@ -821,7 +828,7 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
 
         # Render dedicado PathCRF (single panel) con edges emitidos y eventos postprocesados
         try:
-            actions_conf2 = tracker_conf.get("actions", {}) if isinstance(tracker_conf, dict) else {}
+            actions_conf2 = actions_conf if isinstance(actions_conf, dict) else {}
             fps_for_actions = float(actions_conf2.get("fps", 25.0))
             output_path_obj = Path(output)
             pathcrf_video_output = output_path_obj.with_name(f"{output_path_obj.stem}_pathcrf.mp4")

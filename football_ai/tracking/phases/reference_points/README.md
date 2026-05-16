@@ -66,7 +66,7 @@ Ambos flags se mantienen separados por diseño.
 
 Hay dos casos de fallback:
 
-1. `ProjectionPhase(projector=None)`: modo sin PnLCalib (pipeline sigue emitiendo packet compatible).
+1. `ProjectionPhase({"enabled": False})`: modo sin PnLCalib (pipeline sigue emitiendo packet compatible).
 2. Error recuperable durante proyección de un frame: se devuelve packet sin homografía para no cortar el vídeo.
 
 El helper `build_reference_points_packet_without_homography(...)`:

@@ -6,16 +6,16 @@ from .team_detector import TeamDetector
 
 
 class IdentificationPhase(Phase):
-    def __init__(
-        self,
-        team_detector_conf,
-        referee_field_width_m,
-        referee_sideline_band_distance_m,
-    ):
-        self.team_detector = TeamDetector(**dict(team_detector_conf or {}))
-        self.referee_field_width_m = float(referee_field_width_m)
+    def __init__(self, identification_conf=None):
+        runtime_conf = dict(identification_conf or {})
+        self.team_detector = TeamDetector(
+            **dict(runtime_conf.get("team_detector_conf") or {})
+        )
+        self.referee_field_width_m = float(
+            runtime_conf.get("referee_field_width_m", 68.0)
+        )
         self.referee_sideline_band_distance_m = float(
-            referee_sideline_band_distance_m
+            runtime_conf.get("referee_sideline_band_distance_m", 3.0)
         )
 
     def execute(

@@ -335,7 +335,7 @@ def augment_tracks_with_predictions(
 
 
 def expected_roles_by_team_from_config(project_root: Path) -> dict[str, list[str]] | None:
-    raw_mapping = Config.from_yaml(project_root / "config.yaml").get("tracking", "expected_roles_by_team", default=None)
+    raw_mapping = Config.from_yaml(project_root / "config.yaml").get("positions", "expected_roles_by_team", default=None)
     if not isinstance(raw_mapping, dict):
         return None
     normalized = {}

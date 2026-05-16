@@ -116,6 +116,7 @@ narrador-futbol/
 ```
 
 Nota de arquitectura: el runtime productivo vive en `football_ai/` y `experiments/` actúa como capa de experimentación sobre ese runtime (sin dependencias inversas desde `football_ai` hacia `experiments`).
+La configuración operativa del pipeline visual está separada por fases en bloques top-level como `projector`, `bytetracker`, `canonical`, `positions`, `actions`, `commentary` y `posession`; el orquestador compone en runtime la configuración concreta que necesita cada fase.
 
 Los notebooks de `experiments/visualization/` que inspeccionan el relabel de equipos deben apoyarse en las fases actuales del tracker (`detection_phase`, `projection_phase`, `filtering_phase`, `identification_phase`) y no en atributos legacy del `Tracker`. En concreto, `team_detector_relabel_flow_utils.py` ya está adaptado a ese flujo y el notebook `team_detector_relabel_flow_ucl.ipynb` usa el clip UCL correcto también en las celdas de overlay final.
 
@@ -313,7 +314,7 @@ external/pathcrf/saved/120/model/state_dict_best_acc.pt
 
 #### `llama.cpp` local (`external/llama.cpp/config.yaml`)
 
-Con la configuración actual es obligatorio salvo que sobrescribas `tracking.commentary.llm_base_url` o arranques la interfaz con otro backend explícito.
+Con la configuración actual es obligatorio salvo que sobrescribas `commentary.llm_base_url` o arranques la interfaz con otro backend explícito.
 
 ```bash
 mkdir -p external/llama.cpp
@@ -553,7 +554,7 @@ Si quieres perfilar cuellos de botella por frame (sin alterar resultados), activ
 python scripts/track.py video_prueba_ajustado --profile-phases
 ```
 Esto imprime tiempos por fase y el total de cada frame.
-Alternativamente, puedes fijarlo en `config.yaml` con `tracking.profile_phases: true`.
+Alternativamente, puedes fijarlo en `config.yaml` con `canonical.profile_phases: true`.
 Para benchmarks o ejecuciones aisladas, `scripts/track.py` también acepta overrides útiles:
 ```bash
 python scripts/track.py video_prueba \
@@ -664,15 +665,15 @@ Por defecto usa `paths.data.video_prueba_corto` (si existe) y, en caso contrario
 El MP4 de salida se guarda en `output/pruebaTracker/` con el nombre del vídeo de entrada y sufijo `_tracking.mp4` (ejemplo: `partido_ajustado_tracking.mp4`).
 El JSON de tracks se guarda en `output/tracks_json/tracker/<video_sanitizado>_tracks.json` (formato esperado por `experiments/positions`) y además en `output/tracks_json/tracker/tracks.json` como compatibilidad legacy.
 También se guarda el resumen por vídeo en `output/tracks_json/tracker/<video_sanitizado>_summary.json`.
-Si el tracking online de roles está activo, `track.py` exporta además los CSV y PNG canónicos en `output/tracker/<video_sanitizado>_role_artifacts/`, incluyendo `<video_sanitizado>_frame_role_predictions.csv`, `<video_sanitizado>_player_role_summary.csv` y `<video_sanitizado>_greedy_role_diagnostics.csv`. La inferencia online usa el Set Transformer frame a frame con Hungarian por equipo contra `tracking.expected_roles_by_team`; el voto limpio de cada frame se acumula por segmento y, para pintar el rol definitivo, cada frame vuelve a resolver otra asignación Hungarian usando la mayoría acumulada de los segmentos activos. Esos segmentos se reinician cuando hay señales fuertes de relink o saltos estructurales, y los cortes se reflejan en `tracks.json` con metadatos como `identity_segment_id`, `identity_reset_reason`, `canonical_assignment_mode` y `source_raw_tracker_id`. También deja una copia de compatibilidad en `output/tracks_json/tracker/`.
+Si el tracking online de roles está activo, `track.py` exporta además los CSV y PNG canónicos en `output/tracker/<video_sanitizado>_role_artifacts/`, incluyendo `<video_sanitizado>_frame_role_predictions.csv`, `<video_sanitizado>_player_role_summary.csv` y `<video_sanitizado>_greedy_role_diagnostics.csv`. La inferencia online usa el Set Transformer frame a frame con Hungarian por equipo contra `positions.expected_roles_by_team`; el voto limpio de cada frame se acumula por segmento y, para pintar el rol definitivo, cada frame vuelve a resolver otra asignación Hungarian usando la mayoría acumulada de los segmentos activos. Esos segmentos se reinician cuando hay señales fuertes de relink o saltos estructurales, y los cortes se reflejan en `tracks.json` con metadatos como `identity_segment_id`, `identity_reset_reason`, `canonical_assignment_mode` y `source_raw_tracker_id`. También deja una copia de compatibilidad en `output/tracks_json/tracker/`.
 En identificación de equipos, el `bootstrap`/reclustering de colores sigue evaluándose cada 5 frames, pero la actualización pesada de clusters se limita a una sola vez por frame y por clase (`player`/`referee`) para evitar picos de latencia acumulados dentro del mismo frame.
 Y se actualiza automáticamente un dataset acumulado de métricas de tracking en `data/posiciones_etiquetadas/common/tracking_metrics.csv` (una fila por vídeo, con upsert por `video_source`). Ese resumen incluye también `ball_coverage`, para medir en qué fracción del clip el balón quedó trackeado.
 El tracking también calcula posesión online en la fase desacoplada `football_ai.posession` (`CANONICALTRACK -> POSESSION`), estimando equipo + jugador poseedor por frame. Ese dato se inyecta en los payloads de `tracks.json` (`ball_owning_team_id`, `ball_owning_player_id`, `player_id`, `is_possession_player`, `possession_reason`), se guarda también por frame en `tracks["possession"]` y se visualiza en el vídeo con un segundo recuadro amarillo en el jugador poseedor y un banner `POS: <equipo>`.
 Cuando `tracking.use_field_positions=true`, cada frame se calibra con `PnLCalib` y el tracker usa coordenadas 2D reales del campo para `player` y `goalkeeper`, reduciendo el efecto del paneo de cámara en el matching.
 La calibración adaptativa de `PnLCalib` ya no repite la inferencia de red en cada intento de thresholds: hace un único `forward` por frame, reutiliza esos heatmaps para reconstruir candidatos con cada par `keypoint_threshold`/`line_threshold` y solo reintenta la parte de decodificación, calibración y validación de calidad. El resultado externo se mantiene, pero baja el coste por frame cuando hay varios intentos adaptativos.
 `FILTERING` ya entrega en `clean` solo las detecciones aceptadas; el detalle completo de aceptadas/rechazadas y sus `reject_code` queda en `trace`.
-Si `tracking.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría. Mientras no se absorban, también se escriben en el JSON con `synthetic_seed=true`.
-Si `tracking.special_seed_role_team_assignment_enabled=true`, el tracking principal ejecuta además el modelo de `position_role` frame a frame durante el tracking para los jugadores normales y usa a los defensas detectados en ese frame para asignar equipo a los IDs reservados `1-2` por defensa más cercano. Esos dos IDs no entran al Set Transformer: se etiquetan manualmente como `POR`. Si defines `tracking.expected_roles_by_team`, ese once esperado sí se aplica frame a frame en la salida online mediante Hungarian por equipo, pero el histórico acumulado sigue guardando también la etiqueta cruda del modelo (`predicted_role_unconstrained`) para detectar swaps y evitar contaminar segmentos. Esos IDs no usan color de camiseta para recuperar identidad ni para fijar su equipo.
+Si `canonical.reserve_penalty_spot_seed_players=true`, el tracker reserva además dos IDs canónicos sintéticos como `player` en los puntos de penalti. No participan en el clustering de equipos y solo sirven para que una detección real posterior pueda heredar esos IDs por geometría. Mientras no se absorban, también se escriben en el JSON con `synthetic_seed=true`.
+Si `positions.special_seed_role_team_assignment_enabled=true`, el tracking principal ejecuta además el modelo de `position_role` frame a frame durante el tracking para los jugadores normales y usa a los defensas detectados en ese frame para asignar equipo a los IDs reservados `1-2` por defensa más cercano. Esos dos IDs no entran al Set Transformer: se etiquetan manualmente como `POR`. Si defines `positions.expected_roles_by_team`, ese once esperado sí se aplica frame a frame en la salida online mediante Hungarian por equipo, pero el histórico acumulado sigue guardando también la etiqueta cruda del modelo (`predicted_role_unconstrained`) para detectar swaps y evitar contaminar segmentos. Esos IDs no usan color de camiseta para recuperar identidad ni para fijar su equipo.
 Para `player/goalkeeper` con homografía disponible, la reasignación canónica final usa exactamente el mismo gate de distancia en campo que ByteTrack (`field_position_match_distance_*`), sin suelo extra ni expansión por velocidad en la capa 2. Así un ID final no puede reaparecer con un salto mayor que el permitido en la capa base.
 Si hay coordenadas de campo disponibles, el vídeo anotado muestra bajo cada `player` su posición `pos(m): x, y`.
 Si en un frame `PnLCalib` falla (por ejemplo, homografía singular), el pipeline no aborta: ese frame se procesa con `field_position_m` no disponible y el tracking continúa.
@@ -961,7 +962,7 @@ Genera `output/pruebaTracker/tracks.json` con todos los experimentos para analiz
 
 ## ⚙️ Configuración
 
-Toda la configuración está centralizada en `config.yaml`. Los valores más relevantes a ajustar:
+Toda la configuración está centralizada en `config.yaml`. Desde el refactor actual, la configuración visual queda separada por fase: `projector`, `bytetracker`, `posession`, `actions`, `commentary`, `canonical` y `positions` son bloques top-level; `tracking` se reserva para la orquestación general (`execution_mode`, `lineup_spec`, runtime). Los valores más relevantes a ajustar:
 
 ```yaml
 paths:
@@ -1040,7 +1041,6 @@ tracking:
   expected_roles_by_team:
     Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
-  require_field_position_for_reassign: true
   max_reassign_lost_frames: null  # null/0 = sin límite temporal de reaparición
   motion_std_gate_enabled: true
   motion_std_factor: 4.0
@@ -1119,22 +1119,16 @@ Parámetros relevantes de `TRACKER_CONF` (gestionados en `football_ai/tracking/t
 - `special_seed_canonical_ids`
 - `special_seed_defender_roles`
 - `expected_roles_by_team`
-- `role_stabilization_window_frames`
-- `role_stabilization_min_observations`
-- `role_stabilization_vote_ratio`
-- `require_field_position_for_reassign`
 - `max_reassign_lost_frames`
 - `max_reassign_lost_frames_by_class`
 - `motion_std_gate_enabled`
 - `motion_std_factor`
 - `motion_std_min_samples`
 - `motion_std_floor`
-- `referee_recovery_max_lost_frames`
-- `referee_recovery_max_distance`
 
 Si sigues viendo cambios de ID en clips largos, ajusta en este orden:
 1. Activa `strict_person_class_separation`.
-2. Activa `require_field_position_for_reassign` para `player/goalkeeper`.
+2. Ajusta los gates en campo (`field_distance_gate_*`) para `player/goalkeeper`.
 3. Baja `motion_std_factor` (por ejemplo: `6 -> 5 -> 4`).
 4. Baja `reassign_min_distance` (píxeles, para clases sin campo) o endurece `field_position_match_distance_*` si el problema está en `player/goalkeeper`.
 5. Baja `motion_std_min_samples` para que el gate estadístico actúe antes.

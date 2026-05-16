@@ -95,14 +95,13 @@ logger = get_logger(__name__)
 # 2. Tracking
 tracker = Tracker(
     model_path=str(config.get_path('paths', 'models', 'finetuned_player')),
-    conf=config.get('detection', 'conf_threshold'),
+    detector_conf=config.detection,
+    team_detector_conf=config.team_detector,
     tracker_conf=config.tracking,
-    team_colors=config.get_team_colors(),
-    ball_min_conf=config.get('detection', 'ball_min_conf'),
-    field_tracking_conf={
-        "enabled": config.get('tracking', 'use_field_positions', default=True),
-        "method": config.get('tracking', 'field_position_method', default='pnlcalib')
-    },
+    canonical_conf=config.canonical,
+    positions_conf=config.positions,
+    projector_conf=config.projector,
+    bytetracker_conf=config.bytetracker,
     project_root=config.project_root,
 )
 tracks = tracker.get_tracks(video_path, show_kmeans=False)
