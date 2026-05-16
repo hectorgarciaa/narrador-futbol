@@ -706,7 +706,7 @@ También acepta rutas desde la raíz del repo:
 
 La salida se guarda en `output/homography/<modelo>/<timestamp>/` con:
 - `homography.json`: detecciones por frame + metadatos completos de homografía (`quality_diagnostics`, intentos, keypoints, líneas, score, rechazo, etc.)
-- `homography.mp4`: vídeo a pantalla partida con detecciones a la izquierda y campo 2D a la derecha
+- `homography.mp4`: vídeo a pantalla partida con detecciones a la izquierda y campo 2D a la derecha (incluye proyección de detecciones; rechazadas en rojo). La vista izquierda dibuja líneas/keypoints y la derecha oscurece la zona del campo fuera de la vista del frame.
 
 `homography.py` ahora sigue el mismo flujo por fases que el tracker (`DetectionPhase -> ProjectionPhase -> FilteringPhase`) y por defecto usa `--execution-mode debug` para preservar la traza rica de homografía.
 

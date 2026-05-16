@@ -105,6 +105,8 @@ También acepta:
 - Usa `DetectionPhase -> ProjectionPhase -> FilteringPhase`, igual que el tracker, pero sin ByteTrack ni identificación.
 - Toma los thresholds y parámetros del proyector desde `tracking.projector.constructor` en `config.yaml`.
 - Es útil para depurar clips donde PnLCalib encuentra pocos keypoints/líneas o genera homografías degeneradas. En `debug` conserva `reference_points.trace.attempts` y `reference_points.trace.diagnostics`.
+- El panel 2D dibuja las detecciones proyectadas en el campo (aceptadas en color de clase; rechazadas en rojo).
+- El panel izquierdo dibuja las líneas y keypoints detectados en el frame; el panel 2D oscurece la zona de campo fuera de la vista del frame.
 
 ### `export_homography_frame_pairs.py` — 4 imágenes (frame bueno/malo + campo 2D)
 

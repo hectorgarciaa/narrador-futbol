@@ -128,6 +128,9 @@ class FieldPanel(BasePanel):
         panel = self.empty()
         field_length_m, field_width_m = data.get("field_size_m", (105.0, 68.0))
         self._draw_pitch(panel, field_length_m, field_width_m)
+        shade_polygon = data.get("shade_outside_polygon_m")
+        if shade_polygon:
+            self._shade_outside_polygon(panel, shade_polygon, field_length_m, field_width_m)
         for item in data.get("lines", []):
             self._draw_field_line(panel, item, field_length_m, field_width_m)
         for item in data.get("points", []):
@@ -190,6 +193,26 @@ class FieldPanel(BasePanel):
             tuple(item.get("color") or (255, 255, 255)),
             int(item.get("thickness", 2)),
         )
+
+    def _shade_outside_polygon(self, panel, polygon_m, field_length_m, field_width_m):
+        polygon_px = [
+            self._to_px(point, field_length_m, field_width_m)
+            for point in polygon_m
+            if self._valid_point(point)
+        ]
+        if len(polygon_px) < 3:
+            return
+        mask = np.zeros(panel.shape[:2], dtype=np.uint8)
+        cv2.fillPoly(mask, [np.asarray(polygon_px, dtype=np.int32)], 255)
+        outside = mask == 0
+        if not np.any(outside):
+            return
+        shade_color = np.asarray((10, 60, 10), dtype=np.uint8)
+        alpha = 0.55
+        panel[outside] = (
+            panel[outside].astype(np.float32) * (1.0 - alpha)
+            + shade_color.astype(np.float32) * alpha
+        ).astype(np.uint8)
 
     def _to_px(self, point, field_length_m, field_width_m):
         usable_width = max(1, self.width - (2 * self.padding))
