@@ -67,16 +67,18 @@ python scripts/<nombre>.py
 .venv/bin/python scripts/detect.py data/partidoPrueba/partido.mp4 models/yolo/v11/yolo11m.pt
 ```
 
+También acepta `--execution-mode runtime|debug`. Por defecto usa `runtime`.
+
 **Flujo:**
 1. Resuelve los dos argumentos como `paths.data.<atajo>` / `paths.models.<atajo>` o como rutas desde raíz.
-2. Ejecuta YOLO frame a frame.
+2. Ejecuta `DetectionPhase` frame a frame usando el mismo contrato de packet que el pipeline de tracking.
 3. Normaliza las clases a `player`, `referee`, `ball` y `goalkeeper`.
-4. Dibuja `bbox`, confianza y la inicial de clase (`ball` solo muestra caja).
+4. Dibuja `bbox`, confianza y la inicial de clase (`ball` solo muestra caja). Si estás en `runtime`, reconstruye los overlays a partir de `clean` sin depender de `trace`.
 5. Guarda MP4 y JSON en `output/detect/<modelo>/<timestamp>/`.
 
 ---
 
-### `analyze_pnlcalib_on_detections.py` — Detección + homografía frame a frame
+### `homography.py` — Detección + homografía frame a frame
 
 **Objetivo:** ejecutar YOLO y PnLCalib sobre un vídeo y guardar un JSON detallado con:
 - detecciones por frame,
@@ -88,23 +90,46 @@ python scripts/<nombre>.py
 
 **CLI básica:**
 ```bash
-python scripts/analyze_pnlcalib_on_detections.py
+.venv/bin/python scripts/homography.py video_prueba_medio modelo_base
+```
+
+También acepta:
+- `--execution-mode runtime|debug` (`debug` por defecto)
+- `--max-frames 50`
+
+**Salidas:**
+- `output/homography/<modelo>/<timestamp>/homography.json`
+- `output/homography/<modelo>/<timestamp>/homography.mp4`
+
+**Notas:**
+- Usa `DetectionPhase -> ProjectionPhase -> FilteringPhase`, igual que el tracker, pero sin ByteTrack ni identificación.
+- Toma los thresholds y parámetros del proyector desde `tracking.projector.constructor` en `config.yaml`.
+- Es útil para depurar clips donde PnLCalib encuentra pocos keypoints/líneas o genera homografías degeneradas. En `debug` conserva `reference_points.trace.attempts` y `reference_points.trace.diagnostics`.
+
+### `export_homography_frame_pairs.py` — 4 imágenes (frame bueno/malo + campo 2D)
+
+**Objetivo:** generar imágenes PNG para inspección rápida de calibración:
+- Frame original con keypoints y líneas detectadas por PnLCalib pintadas.
+- Campo 2D con proyección de `player/goalkeeper`.
+- Para cada caso (`good` y `bad`), se genera ese par de imágenes.
+- En el campo 2D, se oscurece la región del campo no visible desde la cámara del frame.
+
+**CLI básica:**
+```bash
+.venv/bin/python scripts/export_homography_frame_pairs.py video_prueba_medio modelo_base
 ```
 
 **Opciones útiles:**
-- `--video-key video_prueba_medio`
-- `--model-key modelo_base`
-- `--conf 0.01`
-- `--max-frames 50`
-- `--output-dir pnlcalib_analysis`
+- `--max-frames 900`: límite de frames a escanear.
+- `--frame-step 3`: procesa 1 de cada N frames para acelerar.
+- `--output-dir output/homography_frames/mi_run`: carpeta de salida personalizada.
 
 **Salidas:**
-- `output/pnlcalib_analysis/<video>_pnlcalib_detections.json`
-- `output/pnlcalib_analysis/<video>_pnlcalib_detections_summary.json`
-
-**Notas:**
-- Usa los thresholds y parámetros del proyector definidos en `tracking.projector.constructor` dentro de `config.yaml`.
-- Es útil para depurar clips donde PnLCalib encuentra pocos keypoints/líneas o genera homografías degeneradas. Si el pipeline activo del tracker usa rescate adaptativo de thresholds, conviene contrastar este análisis con la salida real de `reference_points.trace.attempts` y `reference_points.trace.diagnostics` para ver en qué intento se aceptó o rechazó cada frame.
+- `good_frame_overlay.png`
+- `good_field_2d.png`
+- `bad_frame_overlay.png`
+- `bad_field_2d.png`
+- `summary.json` (frame elegido y métricas de calidad/jugadores)
 
 ---
 

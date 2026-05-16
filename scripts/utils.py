@@ -5,18 +5,26 @@ from datetime import datetime
 from pathlib import Path
 
 from football_ai.core import get_config
-from football_ai.tracking.phases.detection import Detector
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def build_video_model_parser(description):
+def build_video_model_parser(description, *, execution_mode_default="runtime"):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("video_path", help="Shortcut de config paths.data o ruta desde la raiz")
     parser.add_argument("model_path", help="Shortcut de config paths.models o ruta desde la raiz")
     parser.add_argument("--config", default=None, help="Ruta alternativa a config.yaml")
     parser.add_argument("--max-frames", type=int, default=None, help="Limita frames procesados")
+    parser.add_argument(
+        "--execution-mode",
+        choices=("runtime", "debug"),
+        default=execution_mode_default,
+        help=(
+            "Controla cuánta traza interna se guarda en los packets. "
+            f"Por defecto: {execution_mode_default}."
+        ),
+    )
     return parser
 
 

@@ -2,14 +2,13 @@ import json
 import sys
 from pathlib import Path
 
-from football_ai.tracking.phases.detection import Detector
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from football_ai.core import config, convert_to_serializable
-from football_ai.tracking.phases.filtering import filter_reference_points
-from football_ai.tracking.phases.reference_points import PnLCalibFieldProjector
+from football_ai.core import convert_to_serializable, default_render_color_bgr
+from football_ai.tracking.phases.detection import DetectionPhase
+from football_ai.tracking.phases.filtering import FilteringPhase
+from football_ai.tracking.phases.reference_points import PnLCalibFieldProjector, ProjectionPhase
 from football_ai.visualization.simple_drawer import FieldPanel, VideoOutput, VideoPanel
 
 from scripts.utils import (
@@ -21,37 +20,111 @@ from scripts.utils import (
 
 REJECTED_DETECTION_COLOR = [0, 0, 255]
 
+
+def _trace_detections(packet):
+    trace_detections = packet.get("trace", {}).get("detections")
+    if trace_detections:
+        return trace_detections
+
+    clean = packet["clean"]
+    return [
+        {
+            "det_id": int(det_id),
+            "bbox_xyxy": list(bbox),
+            "confidence": float(confidence),
+            "class_name": str(class_name),
+            "render_color_bgr": default_render_color_bgr(class_name),
+        }
+        for det_id, bbox, confidence, class_name in zip(
+            clean["det_id"],
+            clean["bbox_xyxy"],
+            clean["confidence"],
+            clean["class_name"],
+        )
+    ]
+
+
+def _trace_filtering(packet, detector_packet):
+    trace_detections = packet.get("trace", {}).get("accepted_detections")
+    trace_rejections = packet.get("trace", {}).get("rejected_detections")
+    if trace_detections is not None and trace_rejections is not None:
+        merged = list(trace_detections) + list(trace_rejections)
+        return sorted(merged, key=lambda item: int(item["det_id"]))
+
+    clean = detector_packet["clean"]
+    kept_ids = set(packet["clean"]["det_id"])
+    field_positions = clean.get("field_positions_m", [])
+    return [
+        {
+            "det_id": int(det_id),
+            "bbox_xyxy": list(bbox),
+            "confidence": float(confidence),
+            "class_name": str(class_name),
+            "field_position_m": list(field_position) if field_position is not None else [0.0, 0.0],
+            "keep": int(det_id) in kept_ids,
+            "is_finite_field_position": True,
+            "inside_field": int(det_id) in kept_ids,
+            "rescued_by_track_overlap": False,
+            "max_iou_with_active_tracks": 0.0,
+        }
+        for det_id, bbox, confidence, class_name, field_position in zip(
+            clean["det_id"],
+            clean["bbox_xyxy"],
+            clean["confidence"],
+            clean["class_name"],
+            field_positions,
+        )
+    ]
+
+
 def _selected_attempt(reference_trace):
-    diagnostics = reference_trace["diagnostics"]
-    selected_attempt_index = int(diagnostics["selected_attempt_index"])
-    attempts = reference_trace["attempts"]
-    for attempt in attempts:
-        if int(attempt["attempt_index"]) == selected_attempt_index:
+    diagnostics = reference_trace.get("diagnostics", {})
+    selected_attempt_index = diagnostics.get("selected_attempt_index")
+    if selected_attempt_index is None:
+        return {}
+    for attempt in reference_trace.get("attempts", []):
+        if int(attempt.get("attempt_index", -1)) == int(selected_attempt_index):
             return attempt
     return {}
 
 
-def _homography_text_lines(reference_trace, filtering_trace, frame_index):
+def _homography_text_lines(reference_packet, filtering_packet, frame_index):
+    clean = reference_packet["clean"]
+    reference_trace = reference_packet.get("trace", {})
+    filtering_trace = filtering_packet.get("trace", {})
     selected_attempt = _selected_attempt(reference_trace)
-    diagnostics = reference_trace["diagnostics"]
+    diagnostics = reference_trace.get("diagnostics", {})
+    filtering_summary = filtering_trace.get("summary", {})
+    quality_status = diagnostics.get("quality_status") or (
+        "good" if clean.get("field_positions_usable_for_tracking") else "-"
+    )
+    quality_score = selected_attempt.get("quality_score", diagnostics.get("quality_score", 0.0))
     return [
         f"frame {frame_index}",
-        f"kp: {len(reference_trace['keypoints'])}",
-        f"lineas: {len(reference_trace['lines'])}",
-        f"intentos: {len(reference_trace['attempts'])}",
-        f"estado: {selected_attempt.get('quality_status') or '-'}",
-        f"score: {selected_attempt.get('quality_score', 0.0):.3f}",
-        f"rechazo: {diagnostics['rejection_type'] or '-'}",
-        f"kept: {filtering_trace['summary']['total_kept']}",
+        f"homography: {'yes' if clean.get('homography_valid') else 'no'}",
+        f"usable: {'yes' if clean.get('field_positions_usable_for_tracking') else 'no'}",
+        f"kp: {len(reference_trace.get('keypoints', []))}",
+        f"lineas: {len(reference_trace.get('lines', []))}",
+        f"intentos: {len(reference_trace.get('attempts', []))}",
+        f"estado: {quality_status}",
+        f"score: {float(quality_score):.3f}",
+        f"rechazo: {diagnostics.get('rejection_type') or '-'}",
+        f"kept: {filtering_summary.get('total_kept', filtering_packet['clean']['num_detections'])}",
     ]
 
 
 def _video_item(detector_trace_item, filtering_trace_item):
     keep = bool(filtering_trace_item.get("keep", False))
     extra_lines = []
-    reject_label = filtering_trace_item.get("reject_label")
-    if reject_label and reject_label != "kept":
-        extra_lines.append(reject_label)
+
+    if not keep:
+        if filtering_trace_item.get("rescued_by_track_overlap"):
+            extra_lines.append("rescued_by_iou")
+        elif filtering_trace_item.get("inside_field") is False:
+            extra_lines.append("outside_field")
+        elif filtering_trace_item.get("is_finite_field_position") is False:
+            extra_lines.append("invalid_projection")
+
     return {
         "bbox": detector_trace_item["bbox_xyxy"],
         "color": detector_trace_item["render_color_bgr"] if keep else REJECTED_DETECTION_COLOR,
@@ -81,12 +154,18 @@ def _field_line(line_trace_item):
 
 
 def main():
-    parser = build_video_model_parser("Detección + homografía PnLCalib")
+    parser = build_video_model_parser(
+        "Detección + homografía PnLCalib",
+        execution_mode_default="debug",
+    )
     args = parser.parse_args()
-    
-    config = load_config(args.config)
 
-    fps, width, height, total_frames, output_dir, video_path, model_path = prepare_context(args, config, "homography")
+    config = load_config(args.config)
+    fps, width, height, total_frames, output_dir, video_path, model_path = prepare_context(
+        args,
+        config,
+        "homography",
+    )
 
     writer = VideoOutput(
         output_dir / "homography.mp4",
@@ -94,55 +173,68 @@ def main():
         [[VideoPanel((height, width)), FieldPanel((height, width))]],
     )
 
-    detector = Detector(str(model_path), **config.detection)
-    
-    projector_conf = dict(config.projector.get("constructor", {}))
-    projector = PnLCalibFieldProjector(project_root=config.project_root, **projector_conf)
+    detection_phase = DetectionPhase(str(model_path), config.detection)
+
+    projector = None
+    if config.projector.get("enabled", False):
+        projector = PnLCalibFieldProjector(
+            project_root=config.project_root,
+            **dict(config.projector.get("constructor", {})),
+        )
+    projection_phase = ProjectionPhase(projector)
+    filtering_phase = FilteringPhase()
 
     frames = {}
     for frame_index, frame_time_ms, frame_bgr in iter_video_frames(video_path, args.max_frames):
-        detector_packet = detector.predict_frame(
+        detector_packet, detector_ms = detection_phase.process(
             frame_bgr,
             frame_index=frame_index,
             frame_time_ms=frame_time_ms,
+            execution_mode=args.execution_mode,
         )
-        reference_packet = projector.project_frame(
+        reference_packet, projection_ms = projection_phase.process(
             frame_bgr,
             detector_packet,
-            execution_mode="debug",
+            execution_mode=args.execution_mode,
         )
-        filtering_packet = filter_reference_points(
+        filtering_packet, filtering_ms = filtering_phase.process(
             reference_packet,
             active_track_boxes_xyxy=[],
-            geometry=projector.geometry,
-            field_length_m=projector.geometry.field_length_m,
-            field_width_m=projector.geometry.field_width_m,
+            geometry=projection_phase.geometry,
+            execution_mode=args.execution_mode,
         )
 
-        detector_trace = detector_packet["trace"]
-        reference_trace = reference_packet["trace"]
-        filtering_trace = filtering_packet["trace"]
-        trace_detections = detector_trace["detections"]
-        trace_filtering = filtering_trace["detections"]
+        detector_trace = _trace_detections(detector_packet)
+        filtering_trace = _trace_filtering(filtering_packet, reference_packet)
+        filtering_by_det_id = {
+            int(item["det_id"]): item
+            for item in filtering_trace
+        }
 
         writer.write_frame(
             [[
                 {
                     "frame": frame_bgr.copy(),
                     "items": [
-                        _video_item(det_item, filter_item)
-                        for det_item, filter_item in zip(trace_detections, trace_filtering)
+                        _video_item(det_item, filtering_by_det_id.get(int(det_item["det_id"]), {}))
+                        for det_item in detector_trace
                     ],
                 },
                 {
                     "field_size_m": (
-                        projector.geometry.field_length_m,
-                        projector.geometry.field_width_m,
-                    ),
+                        projection_phase.geometry.field_length_m,
+                        projection_phase.geometry.field_width_m,
+                    ) if projection_phase.geometry is not None else (105.0, 68.0),
                     "entities": [],
-                    "points": [_field_point(item) for item in reference_trace["keypoints"]],
-                    "lines": [_field_line(item) for item in reference_trace["lines"]],
-                    "text_lines": _homography_text_lines(reference_trace, filtering_trace, frame_index),
+                    "points": [
+                        _field_point(item)
+                        for item in reference_packet.get("trace", {}).get("keypoints", [])
+                    ],
+                    "lines": [
+                        _field_line(item)
+                        for item in reference_packet.get("trace", {}).get("lines", [])
+                    ],
+                    "text_lines": _homography_text_lines(reference_packet, filtering_packet, frame_index),
                 },
             ]]
         )
@@ -151,6 +243,11 @@ def main():
             "detector": detector_packet,
             "reference_points": reference_packet,
             "filtering": filtering_packet,
+            "profile_ms": {
+                "detector_ms": detector_ms,
+                "projection_ms": projection_ms,
+                "filtering_ms": filtering_ms,
+            },
         }
 
     writer.close()
@@ -163,6 +260,7 @@ def main():
         "width": width,
         "height": height,
         "total_frames": total_frames,
+        "execution_mode": args.execution_mode,
         "frames": frames,
     }
     with open(output_dir / "homography.json", "w", encoding="utf-8") as file:

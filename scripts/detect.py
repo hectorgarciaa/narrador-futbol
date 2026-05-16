@@ -2,12 +2,11 @@ import json
 import sys
 from pathlib import Path
 
-from football_ai.tracking.phases.detection import Detector
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from football_ai.core import convert_to_serializable
+from football_ai.core import convert_to_serializable, default_render_color_bgr
+from football_ai.tracking.phases.detection import DetectionPhase
 from football_ai.visualization.simple_drawer import VideoOutput, VideoPanel
 
 from scripts.utils import (
@@ -16,6 +15,29 @@ from scripts.utils import (
     load_config,
     prepare_context,
 )
+
+
+def _trace_detections(packet):
+    trace_detections = packet.get("trace", {}).get("detections")
+    if trace_detections:
+        return trace_detections
+
+    clean = packet["clean"]
+    return [
+        {
+            "det_id": int(det_id),
+            "bbox_xyxy": list(bbox),
+            "confidence": float(confidence),
+            "class_name": str(class_name),
+            "render_color_bgr": default_render_color_bgr(class_name),
+        }
+        for det_id, bbox, confidence, class_name in zip(
+            clean["det_id"],
+            clean["bbox_xyxy"],
+            clean["confidence"],
+            clean["class_name"],
+        )
+    ]
 
 
 def _video_item(trace_detection):
@@ -33,27 +55,36 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
-    fps, width, height, total_frames, output_dir, video_path, model_path = prepare_context(args, config, "detect")
+    fps, width, height, total_frames, output_dir, video_path, model_path = prepare_context(
+        args,
+        config,
+        "detect",
+    )
 
     writer = VideoOutput(
         output_dir / "detections.mp4",
         fps,
         [[VideoPanel((height, width))]],
     )
-    
-    detector = Detector(str(model_path), **config.detection)
+
+    detection_phase = DetectionPhase(str(model_path), config.detection)
 
     frames = {}
     for frame_index, frame_time_ms, frame_bgr in iter_video_frames(video_path, args.max_frames):
-        detector_packet = detector.predict_frame(
+        detector_packet, detector_ms = detection_phase.process(
             frame_bgr,
             frame_index=frame_index,
             frame_time_ms=frame_time_ms,
+            execution_mode=args.execution_mode,
         )
-        trace_detections = detector_packet["trace"]["detections"]
+        trace_detections = _trace_detections(detector_packet)
         writer.write_frame(
             [[{"frame": frame_bgr.copy(), "items": [_video_item(item) for item in trace_detections]}]]
         )
+        detector_packet.setdefault("trace", {})["script_runtime"] = {
+            "execution_mode": args.execution_mode,
+            "phase_elapsed_ms": detector_ms,
+        }
         frames[str(frame_index)] = detector_packet
 
     writer.close()
@@ -66,6 +97,7 @@ def main():
         "width": width,
         "height": height,
         "total_frames": total_frames,
+        "execution_mode": args.execution_mode,
         "frames": frames,
     }
     with open(output_dir / "detections.json", "w", encoding="utf-8") as file:

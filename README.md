@@ -35,7 +35,7 @@ El objetivo es construir un **pipeline completo de narración automática de fú
 - La fase de comentarios ya no reutiliza un manifiesto global por vídeo: cada ejecución escribe sus eventos y audios en un directorio propio de run, evitando mezclar nombres o `Jugador N` heredados de ejecuciones anteriores al montar el MP4 final con narración.
 - `IDENTIFICATION` consume `FILTERING.clean` y devuelve un `clean` enriquecido con `class_td`, `team`, `shirt_color`, `distances` y `bbox_size`, manteniendo la clase YOLO original en `class_name`. Su `trace` solo se construye en `tracking.execution_mode=debug` e incluye el detalle por detección, motivos de relabel y estado/eventos de clustering.
 - `IDENTIFICATION` mantiene la semántica histórica del tracker: usa `field_positions_m` cuando cada detección trae coordenadas finitas, y solo cae a `field_position=None` si la posición no existe o no es finita.
-- `BYTETRACK` consume `IDENTIFICATION.clean` como fase independiente y devuelve un `clean` mínimo para la canonización (`det_id`, `bbox_xyxy`, `confidence`, `class_name`, `field_positions_m`, `ground_points_image_original`, `tracked_detections`). La alineación detección↔track y las trazas ricas de matching viven en `trace`, y solo aparecen en `debug`.
+- `BYTETRACK` consume `IDENTIFICATION.clean` como fase independiente y asume el contrato alineado por detección (`det_id`, `bbox_xyxy`, `confidence`, `class_name`, `class_td`, `team`, `distances`, `shirt_color`, `bbox_size`, `field_positions_m`, `ground_points_image_original`) sin añadir validación defensiva extra en runtime. Devuelve un `clean` mínimo para la canonización (`det_id`, `bbox_xyxy`, `confidence`, `class_name`, `field_positions_m`, `ground_points_image_original`, `tracked_detections`). La alineación detección↔track y las trazas ricas de matching viven en `trace`, y solo aparecen en `debug`.
 - `CANONICALTRACK` consume exclusivamente `BYTETRACK.clean`, aplica canonización/relink/absorción forzada/seeds/selección de balón y devuelve `tracks_frame` por clase. Sus trazas de descarte y diagnóstico (`pending_assignments_debug`, `discard_reason_by_raw_idx`, `forced_absorption_debug`, `ball_selection_debug`) solo se construyen en `tracking.execution_mode=debug`.
 - Gate posicional para el relabel `player -> referee`: una detección solo puede convertirse en árbitro por color si, tras la homografía, cae en la franja lateral válida o entre la cuarta `x` más a la izquierda y la cuarta más a la derecha de los jugadores visibles.
 - Anti-solape de ByteTrack limitado al nacimiento de tracks nuevos: los `unconfirmed` ya nacidos siguen el matching normal y el filtro duro de solape solo se aplica antes de crear un track nuevo frente a activos, `unconfirmed` previos y otros candidatos del mismo frame, con thresholds independientes para cada comparación.
@@ -690,6 +690,8 @@ También acepta rutas desde la raíz del proyecto:
 .venv/bin/python scripts/detect.py data/partidoPrueba/partido.mp4 models/yolo/v11/yolo11m.pt
 ```
 
+Opcionalmente admite `--execution-mode runtime|debug`. `detect.py` usa por defecto `runtime`, pero reconstruye los overlays desde `clean` para seguir funcionando con el contrato nuevo de fases aunque no haya traza enriquecida.
+
 Para generar detecciones más homografía PnLCalib en una sola pasada:
 
 ```bash
@@ -705,6 +707,8 @@ También acepta rutas desde la raíz del repo:
 La salida se guarda en `output/homography/<modelo>/<timestamp>/` con:
 - `homography.json`: detecciones por frame + metadatos completos de homografía (`quality_diagnostics`, intentos, keypoints, líneas, score, rechazo, etc.)
 - `homography.mp4`: vídeo a pantalla partida con detecciones a la izquierda y campo 2D a la derecha
+
+`homography.py` ahora sigue el mismo flujo por fases que el tracker (`DetectionPhase -> ProjectionPhase -> FilteringPhase`) y por defecto usa `--execution-mode debug` para preservar la traza rica de homografía.
 
 El script normaliza clases a `player`, `referee`, `ball` y `goalkeeper`, dibuja `bbox + confidence + clase` y guarda el MP4 anotado junto al JSON en `output/detect/<modelo>/<timestamp>/`.
 
