@@ -63,6 +63,12 @@ tmp_downloads/
 
 # Generated outputs
 output/**
+!output/detect/
+!output/detect/**
+!output/homography/
+!output/homography/**
+!output/tracking/
+!output/tracking/**
 !output/.gitkeep
 runs/
 pruebaTracker

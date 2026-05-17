@@ -115,6 +115,8 @@ narrador-futbol/
     └── visualization/
 ```
 
+  Nota de repositorio: [output/](output/) se ignora por defecto para no subir artefactos pesados. Solo se versionan [output/detection/](output/detection/), [output/homography/](output/homography/) y [output/tracking/](output/tracking/) (ver [.gitignore](.gitignore)).
+
 Nota de arquitectura: el runtime productivo vive en `football_ai/` y `experiments/` actúa como capa de experimentación sobre ese runtime (sin dependencias inversas desde `football_ai` hacia `experiments`).
 La configuración operativa del pipeline visual está separada por fases en bloques top-level como `projector`, `bytetracker`, `canonical`, `positions`, `actions`, `commentary` y `posession`; el orquestador compone en runtime la configuración concreta que necesita cada fase.
 
