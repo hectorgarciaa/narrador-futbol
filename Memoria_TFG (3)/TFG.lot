@@ -1,0 +1,31 @@
+\babel@toc {spanish}{}\relax 
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {4.1}{\ignorespaces Prueba exploratoria de detección con YOLOv11m}}{35}{table.caption.62}%
+\contentsline {table}{\numberline {4.2}{\ignorespaces Conjuntos de datos utilizados para el fine-tuning del detector}}{36}{table.caption.65}%
+\contentsline {table}{\numberline {4.3}{\ignorespaces Métricas finales del fine-tuning secuencial}}{38}{table.caption.69}%
+\contentsline {table}{\numberline {4.4}{\ignorespaces Instancias y predicciones en la validación de DFL-Bundesliga}}{42}{table.caption.76}%
+\contentsline {table}{\numberline {4.5}{\ignorespaces Comparación estricta con IoU $\geq 0.50$}}{42}{table.caption.77}%
+\contentsline {table}{\numberline {4.6}{\ignorespaces Métricas laxas en la validación de DFL-Bundesliga}}{42}{table.caption.78}%
+\contentsline {table}{\numberline {4.7}{\ignorespaces Hiperparámetros de calibración y proyección métrica}}{47}{table.caption.84}%
+\contentsline {table}{\numberline {4.8}{\ignorespaces Hiperparámetros de clasificación de equipos}}{55}{table.caption.102}%
+\contentsline {table}{\numberline {4.9}{\ignorespaces Hiperparámetros de asociación temporal basada en ByteTrack}}{59}{table.caption.109}%
+\contentsline {table}{\numberline {4.10}{\ignorespaces Límites de identidades canónicas por clase y asignación de slots.}}{61}{table.caption.115}%
+\contentsline {table}{\numberline {4.11}{\ignorespaces Restricciones de movimiento usadas cuando no hay homografía fiable.}}{62}{table.caption.118}%
+\contentsline {table}{\numberline {4.12}{\ignorespaces Configuración de identidades sintéticas reservadas para porteros.}}{63}{table.caption.120}%
+\contentsline {table}{\numberline {4.13}{\ignorespaces Restricciones temporales utilizadas para seleccionar el balón.}}{65}{table.caption.124}%
+\contentsline {table}{\numberline {4.14}{\ignorespaces Hiperparámetros de la capa de tracking canónico}}{65}{table.caption.125}%
+\contentsline {table}{\numberline {4.15}{\ignorespaces Comparación heurística de detectores dentro del pipeline}}{67}{table.caption.131}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {5.1}{\ignorespaces Abreviaturas de las posiciones futbolísticas}}{71}{table.caption.140}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces Resumen cobertura de clips utilizados}}{73}{table.caption.142}%
+\contentsline {table}{\numberline {5.3}{\ignorespaces Distribución de clases posicionales}}{76}{table.caption.149}%
+\contentsline {table}{\numberline {5.4}{\ignorespaces Métricas de la mejor configuración del grid search con 13 clases.}}{83}{table.caption.163}%
+\contentsline {table}{\numberline {5.5}{\ignorespaces Métricas tras fusionar carrileros con laterales.}}{84}{table.caption.166}%
+\contentsline {table}{\numberline {5.6}{\ignorespaces Métricas del grid search completo con 11 clases.}}{84}{table.caption.169}%
+\contentsline {table}{\numberline {5.7}{\ignorespaces Métricas del modelo final tras el refinamiento de hiperparámetros.}}{85}{table.caption.172}%
+\contentsline {table}{\numberline {5.8}{\ignorespaces Hiperparámetros del modelo final.}}{87}{table.caption.176}%
+\contentsline {table}{\numberline {5.9}{\ignorespaces Resultados por clase del modelo final sobre el conjunto de test.}}{88}{table.caption.178}%
+\contentsline {table}{\numberline {5.10}{\ignorespaces Comparación de estrategias de entrenamiento}}{89}{table.caption.180}%

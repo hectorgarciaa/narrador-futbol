@@ -174,6 +174,6 @@ Hiperparámetros principales de la fase de clasificación de equipos.}
 \end{table}
 
 
-Como ya se ha comentado, el valor final de los hiperparámetros se decide tras realizar muchas pruebas visuales sobre vídeo de referencia. Este proceso se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+Como ya se ha comentado, el valor final de los hiperparámetros se decide tras realizar muchas pruebas visuales sobre vídeo de referencia. Este proceso se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Sección~\ref*{sec:evaluacion-heuristica-depuracion}}.
 
 Finalmente, cabe destacar que esta fase fue uno de los cuellos de botella iniciales del pipeline. En una primera versión, el clustering de cada camiseta se realizaba en CPU con \texttt{scikit-learn}, lo que incrementaba el tiempo de procesamiento por frame. Para reducir esta latencia se implementó una versión batched del KMeans con aceleración en GPU cuando está disponible (basada en \texttt{CuPy}), manteniendo \texttt{scikit-learn} como alternativa en CPU. En nuestras pruebas, esta optimización redujo el tiempo aproximado de identificación de camisetas y asignación de equipo de 1.5 s/frame a 0.05 s/frame, lo que supone una aceleración de aproximadamente $30\times$.

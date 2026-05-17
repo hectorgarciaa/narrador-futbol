@@ -1,0 +1,168 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\@writefile{toc}{\contentsline {chapter}{\numberline {4}Procesamiento Visual}{33}{chapter.58}\protected@file@percent }
+\@writefile{lof}{\addvspace {10\p@ }}
+\@writefile{lot}{\addvspace {10\p@ }}
+\newlabel{cap:procesamientoVisual}{{4}{33}{Procesamiento Visual}{chapter.58}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.1}{\ignorespaces Frame original del vídeo de entrada}}{34}{figure.caption.59}\protected@file@percent }
+\newlabel{fig:raw-football-image}{{4.1}{34}{Frame original del vídeo de entrada}{figure.caption.59}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.1}Detección de elementos del juego}{34}{section.60}\protected@file@percent }
+\newlabel{sec:deteccion-elementos-juego}{{4.1}{34}{Detección de elementos del juego}{section.60}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.2}{\ignorespaces Detección inicial con YOLOv11m}}{35}{figure.caption.61}\protected@file@percent }
+\newlabel{fig:raw-detection-yolo11m}{{4.2}{35}{Detección inicial con YOLOv11m}{figure.caption.61}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.1}{\ignorespaces Prueba exploratoria de detección con YOLOv11m}}{35}{table.caption.62}\protected@file@percent }
+\newlabel{tab:yolo11mBaseFrame}{{4.1}{35}{Prueba exploratoria de detección con YOLOv11m}{table.caption.62}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.1}Adaptación del detector mediante \textit  {fine-tuning}}{36}{subsection.63}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.1.1}Conjuntos de datos utilizados}{36}{subsubsection.64}\protected@file@percent }
+\newlabel{}{{\caption@xref {}{ on input line 90}}{36}{Conjuntos de datos utilizados}{table.caption.65}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.2}{\ignorespaces Conjuntos de datos utilizados para el fine-tuning del detector}}{36}{table.caption.65}\protected@file@percent }
+\newlabel{tab:datasets-finetuning-yolo}{{4.2}{36}{Conjuntos de datos utilizados para el fine-tuning del detector}{table.caption.65}{}}
+\citation{SoccerSynthDetection2025}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.1.2}Estrategias de entrenamiento}{37}{subsubsection.66}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.1.3}Resultados del \textit  {fine-tuning} secuencial}{37}{subsubsection.67}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.3}{\ignorespaces Curvas de entrenamiento del fine-tuning secuencial}}{38}{figure.caption.68}\protected@file@percent }
+\newlabel{fig:results_finetuning_compare}{{4.3}{38}{Curvas de entrenamiento del fine-tuning secuencial}{figure.caption.68}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.3}{\ignorespaces Métricas finales del fine-tuning secuencial}}{38}{table.caption.69}\protected@file@percent }
+\newlabel{tab:comparacion_modelos_finetuneados}{{4.3}{38}{Métricas finales del fine-tuning secuencial}{table.caption.69}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.4}{\ignorespaces Distribución de etiquetas y cajas en los datasets de fine-tuning}}{39}{figure.caption.70}\protected@file@percent }
+\newlabel{fig:datasets_summary}{{4.4}{39}{Distribución de etiquetas y cajas en los datasets de fine-tuning}{figure.caption.70}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.5}{\ignorespaces Matrices de confusión en los datasets de fine-tuning}}{40}{figure.caption.71}\protected@file@percent }
+\newlabel{fig:confusion_finetuning_compare}{{4.5}{40}{Matrices de confusión en los datasets de fine-tuning}{figure.caption.71}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.2}Evaluación sobre la validación de DFL-Bundesliga}{41}{subsection.72}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.2.1}Modelos comparados}{41}{subsubsection.73}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.1.2.2}Métricas utilizadas}{41}{subsubsection.74}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.3}Resultados cuantitativos}{42}{subsection.75}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4.4}{\ignorespaces Instancias y predicciones en la validación de DFL-Bundesliga}}{42}{table.caption.76}\protected@file@percent }
+\newlabel{tab:model_comparison_counts}{{4.4}{42}{Instancias y predicciones en la validación de DFL-Bundesliga}{table.caption.76}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.5}{\ignorespaces Comparación estricta con IoU $\geq 0.50$}}{42}{table.caption.77}\protected@file@percent }
+\newlabel{tab:model_comparison_iou50}{{4.5}{42}{Comparación estricta con IoU $\geq 0.50$}{table.caption.77}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.6}{\ignorespaces Métricas laxas en la validación de DFL-Bundesliga}}{42}{table.caption.78}\protected@file@percent }
+\newlabel{tab:model_comparison_soft}{{4.6}{42}{Métricas laxas en la validación de DFL-Bundesliga}{table.caption.78}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1.4}Interpretación de los Resultados}{42}{subsection.79}\protected@file@percent }
+\citation{PnLCalibRepo2024}
+\@writefile{toc}{\contentsline {section}{\numberline {4.2}Calibración del campo y proyección a coordenadas métricas}{43}{section.81}\protected@file@percent }
+\newlabel{sec:calibracion-campo-proyeccion-metricas}{{4.2}{43}{Calibración del campo y proyección a coordenadas métricas}{section.81}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.6}{\ignorespaces Resultado visual de la fase de detección}}{44}{figure.caption.80}\protected@file@percent }
+\newlabel{fig:detect_frame}{{4.6}{44}{Resultado visual de la fase de detección}{figure.caption.80}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2.1}Modelo utilizado y salida geométrica}{44}{subsection.82}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.7}{\ignorespaces Calibración geométrica y proyección al plano del campo}}{45}{figure.caption.83}\protected@file@percent }
+\newlabel{fig:calibracion-proyeccion-campo}{{4.7}{45}{Calibración geométrica y proyección al plano del campo}{figure.caption.83}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2.2}Problema de estabilidad: \textit  {jitter} y sensibilidad a umbrales}{46}{subsection.85}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2.3}Selección robusta de homografía: umbrales adaptativos y validación}{46}{subsection.86}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4.7}{\ignorespaces Hiperparámetros de calibración y proyección métrica}}{47}{table.caption.84}\protected@file@percent }
+\newlabel{tab:hiperparametros-referencia}{{4.7}{47}{Hiperparámetros de calibración y proyección métrica}{table.caption.84}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.3.1}Métricas de calidad y criterio de aceptación}{48}{subsubsection.87}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.3.2}Definición matemática de las métricas de calidad}{48}{subsubsection.88}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{1) Geometry fit}{48}{subsubsection.88}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{2) Support quality}{49}{subsubsection.88}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{3) Coverage quality}{49}{subsubsection.88}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Score final y aceptación}{49}{subsubsection.88}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2.4}Suavizado temporal}{49}{subsection.89}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2.5}Fallo controlado: \textit  {fallback} cuando no hay homografía}{50}{subsection.90}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.8}{\ignorespaces Resultado visual de la fase de calibración del campo y proyección.}}{50}{figure.caption.91}\protected@file@percent }
+\newlabel{fig:homography_frame}{{4.8}{50}{Resultado visual de la fase de calibración del campo y proyección}{figure.caption.91}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.3}Clasificación de equipos}{50}{section.92}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3.1}Identificación del color de la camiseta}{51}{subsection.93}\protected@file@percent }
+\newlabel{eq:color-camiseta-lab}{{4.1}{51}{Identificación del color de la camiseta}{equation.94}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4.9}{\ignorespaces Recorte de crop de jugador y KMeans}}{52}{figure.caption.95}\protected@file@percent }
+\newlabel{fig:shirt-crop-kmeans}{{4.9}{52}{Recorte de crop de jugador y KMeans}{figure.caption.95}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3.2}Asociación del equipo}{52}{subsection.96}\protected@file@percent }
+\newlabel{subsec:asociacionEquipo}{{4.3.2}{52}{Asociación del equipo}{subsection.96}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.3.2.1}Asignación por color y centro del equipo}{52}{subsubsection.97}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.3.2.2}Actualización online, \textit  {bootstrap} y \textit  {buckets} de muestras}{53}{subsubsection.98}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.10}{\ignorespaces Distribución de detecciones en el espacio LAB}}{54}{figure.caption.99}\protected@file@percent }
+\newlabel{fig:team-color-clusters-lab}{{4.10}{54}{Distribución de detecciones en el espacio LAB}{figure.caption.99}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.3.2.3}Reetiquetado de clase}{54}{subsubsection.100}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.11}{\ignorespaces Mapa de relabels en el campo}}{55}{figure.caption.101}\protected@file@percent }
+\newlabel{fig:field-relabel-map}{{4.11}{55}{Mapa de relabels en el campo}{figure.caption.101}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.8}{\ignorespaces Hiperparámetros de clasificación de equipos}}{55}{table.caption.102}\protected@file@percent }
+\newlabel{tab:clasificacion_equipos}{{4.8}{55}{Hiperparámetros de clasificación de equipos}{table.caption.102}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4.4}Capa de asociación temporal basada en ByteTrack}{56}{section.103}\protected@file@percent }
+\newlabel{sec:bytetrack-layer}{{4.4}{56}{Capa de asociación temporal basada en ByteTrack}{section.103}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.1}Base de la fase}{57}{subsection.104}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.2}Asociación multietapa en cada frame}{57}{subsection.105}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.3}Restricciones por clase y equipo}{57}{subsection.106}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.4}Uso de homografía y restricción espacial en metros}{58}{subsection.107}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.5}Control de creación de nuevos tracks}{58}{subsection.108}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4.9}{\ignorespaces Hiperparámetros de asociación temporal basada en ByteTrack}}{59}{table.caption.109}\protected@file@percent }
+\newlabel{tab:hiperparametros-bytetrack}{{4.9}{59}{Hiperparámetros de asociación temporal basada en ByteTrack}{table.caption.109}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4.6}Resumen de la capa}{59}{subsection.110}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4.5}Capa de tracking canónico}{60}{section.111}\protected@file@percent }
+\newlabel{sec:tracking-canonico}{{4.5}{60}{Capa de tracking canónico}{section.111}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.1}Entrada de la capa y objetivo de canonización}{60}{subsection.112}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.2}Proceso de asignación canónica por frame}{60}{subsection.113}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.3}IDs canónicos y límites por clase}{61}{subsection.114}\protected@file@percent }
+\newlabel{subsec:ids-canonicos-limites}{{4.5.3}{61}{IDs canónicos y límites por clase}{subsection.114}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.10}{\ignorespaces Límites de identidades canónicas por clase y asignación de slots.}}{61}{table.caption.115}\protected@file@percent }
+\newlabel{tab:limites-canonicos}{{4.10}{61}{Límites de identidades canónicas por clase y asignación de slots}{table.caption.115}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.4}Continuidad canonica y reasignacion}{61}{subsection.116}\protected@file@percent }
+\newlabel{subsec:continuidad-canonica-reasignacion}{{4.5.4}{61}{Continuidad canonica y reasignacion}{subsection.116}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.5}Reasignación cuando no hay homografía fiable}{62}{subsection.117}\protected@file@percent }
+\newlabel{subsec:reasignacion-sin-homografia}{{4.5.5}{62}{Reasignación cuando no hay homografía fiable}{subsection.117}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.11}{\ignorespaces Restricciones de movimiento usadas cuando no hay homografía fiable.}}{62}{table.caption.118}\protected@file@percent }
+\newlabel{tab:movimiento-imagen}{{4.11}{62}{Restricciones de movimiento usadas cuando no hay homografía fiable}{table.caption.118}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.6}Tratamiento específico de porteros}{63}{subsection.119}\protected@file@percent }
+\newlabel{subsec:tratamiento-porteros}{{4.5.6}{63}{Tratamiento específico de porteros}{subsection.119}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.12}{\ignorespaces Configuración de identidades sintéticas reservadas para porteros.}}{63}{table.caption.120}\protected@file@percent }
+\newlabel{tab:seeds-porteros}{{4.12}{63}{Configuración de identidades sintéticas reservadas para porteros}{table.caption.120}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.7}Tratamiento específico de árbitros}{63}{subsection.121}\protected@file@percent }
+\newlabel{subsec:tratamiento-arbitros}{{4.5.7}{63}{Tratamiento específico de árbitros}{subsection.121}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.8}Reabsorción de identidades perdidas}{64}{subsection.122}\protected@file@percent }
+\newlabel{subsec:reabsorcion-identidades}{{4.5.8}{64}{Reabsorción de identidades perdidas}{subsection.122}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.9}Seguimiento del balón}{64}{subsection.123}\protected@file@percent }
+\newlabel{subsec:seguimiento-balon-canonico}{{4.5.9}{64}{Seguimiento del balón}{subsection.123}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.13}{\ignorespaces Restricciones temporales utilizadas para seleccionar el balón.}}{65}{table.caption.124}\protected@file@percent }
+\newlabel{tab:balon-tracking}{{4.13}{65}{Restricciones temporales utilizadas para seleccionar el balón}{table.caption.124}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4.14}{\ignorespaces Hiperparámetros de la capa de tracking canónico}}{65}{table.caption.125}\protected@file@percent }
+\newlabel{tab:hiperparametros-canonico}{{4.14}{65}{Hiperparámetros de la capa de tracking canónico}{table.caption.125}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5.10}Salida del tracking}{65}{subsection.126}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4.6}Evaluación heurística y depuración del pipeline visual}{66}{section.127}\protected@file@percent }
+\newlabel{sec:evaluacion-heuristica-depuracion}{{4.6}{66}{Evaluación heurística y depuración del pipeline visual}{section.127}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6.1}Protocolo de evaluación}{66}{subsection.128}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6.2}Comparación de detectores dentro del pipeline}{67}{subsection.130}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4.15}{\ignorespaces Comparación heurística de detectores dentro del pipeline}}{67}{table.caption.131}\protected@file@percent }
+\newlabel{tab:comparacion-modelos-pipeline}{{4.15}{67}{Comparación heurística de detectores dentro del pipeline}{table.caption.131}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6.3}Uso de las métricas durante la depuración}{67}{subsection.132}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6.4}Resultado visual del pipeline}{68}{subsection.133}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4.12}{\ignorespaces Resultado del pipeline visual sobre un frame}}{68}{figure.caption.134}\protected@file@percent }
+\newlabel{fig:resultado-pipeline-visual}{{4.12}{68}{Resultado del pipeline visual sobre un frame}{figure.caption.134}{}}
+\@setckpt{Capitulos/04_Procesamiento_Visual/40_Procesamiento_visual}{
+\setcounter{page}{69}
+\setcounter{equation}{1}
+\setcounter{enumi}{0}
+\setcounter{enumii}{0}
+\setcounter{enumiii}{0}
+\setcounter{enumiv}{0}
+\setcounter{footnote}{1}
+\setcounter{mpfootnote}{0}
+\setcounter{part}{0}
+\setcounter{chapter}{4}
+\setcounter{section}{6}
+\setcounter{subsection}{4}
+\setcounter{subsubsection}{0}
+\setcounter{paragraph}{0}
+\setcounter{subparagraph}{0}
+\setcounter{figure}{12}
+\setcounter{table}{15}
+\setcounter{NAT@ctr}{0}
+\setcounter{parentequation}{0}
+\setcounter{section@level}{0}
+\setcounter{Item}{0}
+\setcounter{Hfootnote}{3}
+\setcounter{bookmark@seq@number}{84}
+\setcounter{caption@flags}{2}
+\setcounter{continuedfloat}{0}
+\setcounter{KVtest}{0}
+\setcounter{subfigure}{0}
+\setcounter{subfigure@save}{0}
+\setcounter{lofdepth}{1}
+\setcounter{subtable}{0}
+\setcounter{subtable@save}{0}
+\setcounter{lotdepth}{1}
+\setcounter{lstnumber}{1}
+\setcounter{AM@survey}{0}
+\setcounter{nlinenum}{0}
+\setcounter{float@type}{8}
+\setcounter{lstlisting}{0}
+\setcounter{lastyear}{2025}
+}

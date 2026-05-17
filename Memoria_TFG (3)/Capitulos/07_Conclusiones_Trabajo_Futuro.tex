@@ -51,7 +51,7 @@ Además, parte del contexto narrativo se encuentra simulado. El sistema permite 
 
 \section{Trabajo futuro}
 
-Una línea de trabajo futura muy relevante sería construir una base de datos amplia para todo el futbol 11 federado en España y luego escalarlo. Esta base de datos podría incluir equipos, plantillas, jugadores, goleadores, clasificaciones, categorías, calendarios y resultados. De esta forma, al lanzar la interfaz no sería necesario escribir manualmente toda la información contextual: bastaría con seleccionar los equipos y el sistema podría preparar automáticamente datos útiles para la narración.
+Una línea de trabajo futura muy relevante sería construir una base de datos amplia para todo el fútbol 11 federado en España y luego escalarlo. Esta base de datos podría incluir equipos, plantillas, jugadores, goleadores, clasificaciones, categorías, calendarios y resultados. De esta forma, al lanzar la interfaz no sería necesario escribir manualmente toda la información contextual: bastaría con seleccionar los equipos y el sistema podría preparar automáticamente datos útiles para la narración.
 
 Otra mejora importante sería conectar el sistema a una cámara real. Esto permitiría pasar de vídeos grabados a una retransmisión automática sobre partidos en directo. Para ello habría que diseñar una arquitectura de captura robusta, con procesamiento por ventanas, control de latencia, sincronización entre vídeo y audio, y mecanismos de recuperación ante caídas o frames perdidos.
 
@@ -60,6 +60,5 @@ También sería necesario seguir refinando la detección de acciones. En particu
 En la parte de audio, una línea futura sería optimizar el sistema para una latencia más baja manteniendo una calidad vocal alta. La combinación de Qwen VoiceDesign con XTTS ha resultado útil como solución local, mientras que ElevenLabs ofrece una calidad superior para demostraciones. En el futuro podrían aparecer modelos TTS locales más rápidos, motores de inferencia optimizados o una estrategia híbrida donde el vídeo se retrase ligeramente para que la narración parezca completamente sincronizada.
 
 En conjunto, el proyecto demuestra que es posible construir un narrador automático de fútbol combinando módulos de visión, modelos de lenguaje y síntesis de voz. El resultado todavía tiene margen de mejora, especialmente en tiempo real, robustez y riqueza contextual, pero constituye una base funcional sobre la que seguir trabajando. La principal aportación no es solo cada módulo por separado, sino haberlos integrado en un pipeline completo capaz de convertir vídeo futbolístico en una narración automática audible.
-
 
 

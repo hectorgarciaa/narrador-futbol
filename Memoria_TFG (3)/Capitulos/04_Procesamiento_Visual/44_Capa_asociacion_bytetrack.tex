@@ -7,15 +7,15 @@ En nuestro caso, el tracking es una fase crítica porque gran parte de la inform
 
 Esta fase ha sido una de las más complejas del proyecto. En fútbol aparecen muchos problemas propios del dominio: oclusiones entre jugadores, cruces continuos, jugadores del mismo equipo con apariencia muy parecida, cambios de escala por el zoom, movimientos de cámara, detecciones perdidas durante varios frames y elementos que salen temporalmente del plano. Además, intentar solucionar uno de estos problemas de forma aislada puede empeorar otro. Por ejemplo, permitir reasociaciones muy amplias ayuda a recuperar jugadores tras una oclusión, pero también aumenta el riesgo de intercambiar IDs entre jugadores cercanos. Por ello, el sistema se ha construido como una combinación de varias restricciones complementarias.
 
-La fase de asociación temporal se ha dividido en dos capas. La primera capa, tratada en esta sección, es una adaptación de ByteTrack orientada a producir asociaciones robustas entre detecciones consecutivas. La segunda capa, descrita en la \hyperref[sec:tracking-canonico]{Seccion~\ref*{sec:tracking-canonico}}, intenta coser esas asociaciones de ByteTrack para estabilizar las 26 identidades finales del partido.
+La fase de asociación temporal se ha dividido en dos capas. La primera capa, tratada en esta sección, es una adaptación de ByteTrack orientada a producir asociaciones robustas entre detecciones consecutivas. La segunda capa, descrita en la \hyperref[sec:tracking-canonico]{Sección~\ref*{sec:tracking-canonico}}, intenta coser esas asociaciones de ByteTrack para estabilizar las 26 identidades finales del partido.
 
-En la \hyperref[sec:tracking-tecnologias]{Seccion~\ref*{sec:tracking-tecnologias}} se introdujo ByteTrack desde un punto de vista general. En este apartado se describe su integración concreta como primera capa de tracking del pipeline visual y las modificaciones realizadas sobre el algoritmo clásico.
+En la \hyperref[sec:tracking-tecnologias]{Sección~\ref*{sec:tracking-tecnologias}} se introdujo ByteTrack desde un punto de vista general. En este apartado se describe su integración concreta como primera capa de tracking del pipeline visual y las modificaciones realizadas sobre el algoritmo clásico.
 
 \subsection{Base de la fase}
 
-Sobre la estructura original de ByteTrack se han añadido señales propias del proyecto: clase reajustada, equipo estimado y posicion proyectada sobre el campo.
+Sobre la estructura original de ByteTrack se han añadido señales propias del proyecto: clase reajustada, equipo estimado y posición proyectada sobre el campo.
 
-La fase consume las detecciones enriquecidas de identificacion y produce una salida intermedia de detecciones asociadas con \textit{raw tracker id}. Esta salida no es todavia la identidad final del jugador, sino una asociacion temporal que alimentará la siguiente capa.
+La fase consume las detecciones enriquecidas de identificación y produce una salida intermedia de detecciones asociadas con \textit{raw tracker id}. Esta salida no es todavía la identidad final del jugador, sino una asociación temporal que alimentará la siguiente capa.
 
 \subsection{Asociación multietapa en cada frame}
 
@@ -35,21 +35,21 @@ Mientras que las tres primeras subfases usan el solape entre cajas como función
 
 Otra mejora introducida sobre ByteTrack consiste en utilizar la clase del objeto y el equipo asignado como restricciones de asociación. Si un ID canónico corresponde a un jugador, no debería poder reasociarse con una detección de balón o de árbitro. Del mismo modo, si un jugador pertenece a un equipo, no debería heredar la identidad de un jugador del equipo contrario.
 
-Por lo tanto, en nuestra adaptación del ByteTrack, se usan la clase de la detección y su equipo asociado como restricciones de asociación duras. Si la clase del track y la clase de la deteccion candidata no coinciden, la asociacion se descarta automáticamente.
+Por lo tanto, en nuestra adaptación de ByteTrack se usan la clase de la detección y su equipo asociado como restricciones de asociación duras. Si la clase del track y la clase de la detección candidata no coinciden, la asociación se descarta automáticamente.
 
-Del mismo modo, para \texttt{player}, cuando hay informacion de equipo tanto en el track como en la detección, se aplica también una restricción dura: si no coinciden, la asociacion se descarta.
+Del mismo modo, para \texttt{player}, cuando hay información de equipo tanto en el track como en la detección, se aplica también una restricción dura: si no coinciden, la asociación se descarta.
 
 Estas restricciones reducen los intercambios entre elementos de distinta clase y entre jugadores de equipos diferentes. Sin embargo, todavía puede haber intercambios entre jugadores del mismo equipo, especialmente cuando se cruzan o aparecen muy juntos en la imagen. Para reducir este problema fue necesario incorporar información geométrica del campo.
 
-\subsection{Uso de homografia y restricción espacial en metros}
+\subsection{Uso de homografía y restricción espacial en metros}
 
 En nuestra versión de ByteTrack adaptada también se aplica un gate espacial en campo para las clases \texttt{player} y \texttt{goalkeeper}. Si la distancia proyectada entre el track y la detección candidata supera el límite configurado (8 metros), la asociación se descarta. En cambio, si está dentro del rango permitido, la pareja se mantiene como factible y el coste se decide por el criterio de matching de la subfase (IoU o distancia de centros en las fases de rescate).
 
-Durante el desarrollo se evaluó usar la posición de las detecciones proyectada al campo como coste principal de la asociación. En la practica, esta opción degradaba el rendimiento ya que esta señal presentaba mucha vibracion frame a frame debido a pequeños cambios en la homografía entre frames.  Por este motivo había variaciones bruscas en las trayectorias estimadas de las identidades. Esto afectaba especialmente a la prediccion del estado con el filtro de Kalman y acababa propagando errores al proceso de matching. Por este motivo, en la version final la posicion en campo se utiliza como compuerta geometrica de factibilidad (gate duro) y no como termino principal de coste.
+Durante el desarrollo se evaluó usar la posición de las detecciones proyectada al campo como coste principal de la asociación. En la práctica, esta opción degradaba el rendimiento, ya que esta señal presentaba mucha vibración frame a frame debido a pequeños cambios en la homografía entre frames. Por este motivo había variaciones bruscas en las trayectorias estimadas de las identidades. Esto afectaba especialmente a la predicción del estado con el filtro de Kalman y acababa propagando errores al proceso de \textit{matching}. Por este motivo, en la versión final la posición en campo se utiliza como compuerta geométrica de factibilidad (gate duro) y no como término principal de coste.
 
-\subsection{Control de creacion de nuevos tracks}
+\subsection{Control de creación de nuevos tracks}
 
-Otro problema relevante es la creacion excesiva de nuevos tracks. Esto puede ocurrir cuando el detector produce bounding boxes duplicados o cuando ByteTrack pierde temporalmente una identidad. Para reducir este efecto, se añadieron reglas de supresión por solape de tracks nuevos:
+Otro problema relevante es la creación excesiva de nuevos tracks. Esto puede ocurrir cuando el detector produce \textit{bounding boxes} duplicadas o cuando ByteTrack pierde temporalmente una identidad. Para reducir este efecto, se añadieron reglas de supresión por solape de tracks nuevos:
 \begin{itemize}
     \item contra tracks activos ya consolidados,
     \item contra tracks tentativos no confirmados,
@@ -182,10 +182,10 @@ Hiperparámetros principales de la capa de asociación temporal basada en ByteTr
 \end{table}
 
 
-La decisión sobre el valor final de estos hiperparámetros se trata en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+La decisión sobre el valor final de estos hiperparámetros se trata en la \hyperref[sec:evaluacion-heuristica-depuracion]{Sección~\ref*{sec:evaluacion-heuristica-depuracion}}.
 
 \subsection{Resumen de la capa}
 
 En resumen, esta fase no se limita a ejecutar ByteTrack sobre cajas de YOLO, sino que integra restricciones de clase, equipo, geometría en campo y control de creación de tracks para mejorar la asociación temporal en vídeo de fútbol broadcast. La capa siguiente toma estas asociaciones y construye las identidades canónicas estables del partido.
 
-La elección final de los hiperparámetros de esta fase se realizó mediante prueba y error, acumulando muchos experimentos y evaluando su efecto sobre las métricas del sistema; este proceso se describe con más detalle en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+La elección final de los hiperparámetros de esta fase se realizó mediante prueba y error, acumulando muchos experimentos y evaluando su efecto sobre las métricas del sistema; este proceso se describe con más detalle en la \hyperref[sec:evaluacion-heuristica-depuracion]{Sección~\ref*{sec:evaluacion-heuristica-depuracion}}.

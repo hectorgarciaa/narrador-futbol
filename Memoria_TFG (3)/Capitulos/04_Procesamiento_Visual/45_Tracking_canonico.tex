@@ -1,7 +1,7 @@
 \section{Capa de tracking canónico}
 \label{sec:tracking-canonico}
 
-La salida de la capa de asociación basada en ByteTrack (Seccion~\ref{sec:bytetrack-layer}) proporciona asociaciones robustas entre detecciones consecutivas de frames cercanos, pero esos IDs internos no garantizan por sí solos estabilidad global durante todo el partido. Cuando hay oclusiones largas, salidas de plano o cambios de escala bruscos, un mismo jugador puede reaparecer con otro \textit{tracker id}.
+La salida de la capa de asociación basada en ByteTrack (Sección~\ref{sec:bytetrack-layer}) proporciona asociaciones robustas entre detecciones consecutivas de frames cercanos, pero esos IDs internos no garantizan por sí solos estabilidad global durante todo el partido. Cuando hay oclusiones largas, salidas de plano o cambios de escala bruscos, un mismo jugador puede reaparecer con otro \textit{tracker id}.
 
 Por este motivo, el pipeline incorpora una segunda capa: la canonización. Su objetivo es transformar las asociaciones \textit{raw} en identidades finales estables, con límites por clase y reglas específicas para jugadores, porteros, árbitros y balón.
 
@@ -11,41 +11,41 @@ De esta forma, podría ocurrir que, por ejemplo, un jugador esté asociado al \t
 
 La capa canónica consume el paquete devuelto por la capa de ByteTrack y opera sobre detecciones ya asociadas, junto con metadatos de clase, equipo, posición en el campo y confianza. A partir de esa entrada, decide para cada detección si:
 \begin{itemize}
-    \item mantiene continuidad con un ID canonico existente,
-    \item reengancha un ID canonico previo sobre un nuevo \textit{raw tracker id},
-    \item crea una identidad canonica nueva dentro de los limites permitidos,
-    \item o descarta la deteccion si no cumple los criterios de consistencia.
+    \item mantiene continuidad con un ID canónico existente,
+    \item reengancha un ID canónico previo sobre un nuevo \textit{raw tracker id},
+    \item crea una identidad canónica nueva dentro de los límites permitidos,
+    \item o descarta la detección si no cumple los criterios de consistencia.
 \end{itemize}
 
 \subsection{Proceso de asignación canónica por frame}
 
-En cada frame, la capa canónica aplica un flujo secuencial compacto. Primero intenta mantener continuidad directa entre \textit{raw tracker ids} ya conocidos y sus IDs canónicos previos, siempre que la compatibilidad de clase/equipo y las compuertas de continuidad sean válidas según la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
+En cada frame, la capa canónica aplica un flujo secuencial compacto. Primero intenta mantener continuidad directa entre \textit{raw tracker ids} ya conocidos y sus IDs canónicos previos, siempre que la compatibilidad de clase/equipo y las compuertas de continuidad sean válidas según la \hyperref[subsec:continuidad-canonica-reasignacion]{Subsección~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subsección~\ref*{subsec:reasignacion-sin-homografia}}.
 
-Despues, con los tracks de ByteTrack que no han sido resueltos en esa primera fase, se abre una fase de reasignación sobre IDs canónicos perdidos o libres, respetando de nuevo las reglas de continuidad en campo y en imagen definidas en la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
-Si un track de ByteTrack sigue sin una asignación válida, la capa evalúa la creación de un nuevo slot canónico dentro de los límites y reservas definidos en la \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} y explicados en la \hyperref[subsec:ids-canonicos-limites]{Subseccion~\ref*{subsec:ids-canonicos-limites}}.
+Después, con los tracks de ByteTrack que no han sido resueltos en esa primera fase, se abre una fase de reasignación sobre IDs canónicos perdidos o libres, respetando de nuevo las reglas de continuidad en campo y en imagen definidas en la \hyperref[subsec:continuidad-canonica-reasignacion]{Subsección~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subsección~\ref*{subsec:reasignacion-sin-homografia}}.
+Si un track de ByteTrack sigue sin una asignación válida, la capa evalúa la creación de un nuevo slot canónico dentro de los límites y reservas definidos en la \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} y explicados en la \hyperref[subsec:ids-canonicos-limites]{Subsección~\ref*{subsec:ids-canonicos-limites}}.
 
-Sobre ese flujo base se aplican reglas específicas por clase, detalladas en sus apartados correspondientes: porteros en la \hyperref[subsec:tratamiento-porteros]{Subseccion~\ref*{subsec:tratamiento-porteros}}, árbitros en la \hyperref[subsec:tratamiento-arbitros]{Subseccion~\ref*{subsec:tratamiento-arbitros}}, balón en la \hyperref[subsec:seguimiento-balon-canonico]{Subseccion~\ref*{subsec:seguimiento-balon-canonico}} y reabsorción conservadora en la \hyperref[subsec:reabsorcion-identidades]{Subseccion~\ref*{subsec:reabsorcion-identidades}}.
+Sobre ese flujo base se aplican reglas específicas por clase, detalladas en sus apartados correspondientes: porteros en la \hyperref[subsec:tratamiento-porteros]{Subsección~\ref*{subsec:tratamiento-porteros}}, árbitros en la \hyperref[subsec:tratamiento-arbitros]{Subsección~\ref*{subsec:tratamiento-arbitros}}, balón en la \hyperref[subsec:seguimiento-balon-canonico]{Subsección~\ref*{subsec:seguimiento-balon-canonico}} y reabsorción conservadora en la \hyperref[subsec:reabsorcion-identidades]{Subsección~\ref*{subsec:reabsorcion-identidades}}.
 
 \subsection{IDs canónicos y límites por clase}
 \label{subsec:ids-canonicos-limites}
 
 A diferencia de ByteTrack, que puede crear tracks internos adicionales de forma flexible, la capa canónica impone una estructura final acotada.
 
-En la configuración actual, los slots canónicos quedan reservados de forma explicita: el balón se fija en el ID 0, los porteros ocupan los IDs 1 y 2, los jugadores de campo se reparten en dos bloques por equipo (3--12 y 13--22), y, por último, los arbitros usan los IDs 23, 24 y 25. Además, los slots de árbitro no son intercambiables: 23 se asocia al arbitro central, 24 al asistente de la banda superior y 25 al asistente de la banda inferior. La \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} resume esta asignación junto con los limites finales por clase.
+En la configuración actual, los slots canónicos quedan reservados de forma explícita: el balón se fija en el ID 0, los porteros ocupan los IDs 1 y 2, los jugadores de campo se reparten en dos bloques por equipo (3--12 y 13--22), y, por último, los árbitros usan los IDs 23, 24 y 25. Además, los slots de árbitro no son intercambiables: 23 se asocia al árbitro central, 24 al asistente de la banda superior y 25 al asistente de la banda inferior. La \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} resume esta asignación junto con los límites finales por clase.
 
 \begin{table}[htbp]
     \centering
     \scriptsize
     \begin{tabular}{c|c|p{7.5cm}}
-        \textbf{Parametro} & \textbf{Valor} & \textbf{Descripcion} \\
+        \textbf{Parámetro} & \textbf{Valor} & \textbf{Descripción} \\
         \hline\hline
-        \texttt{max\_tracks\_per\_class.player} & 20 & Jugadores de campo en slots canonicos de equipo (3--12 y 13--22). \\
+        \texttt{max\_tracks\_per\_class.player} & 20 & Jugadores de campo en slots canónicos de equipo (3--12 y 13--22). \\
         \texttt{max\_tracks\_per\_class.goalkeeper} & 2 & Porteros con IDs reservados (1 y 2). \\
-        \texttt{max\_tracks\_per\_class.referee} & 3 & Arbitro central y asistentes con IDs reservados (23, 24, 25). \\
-        \texttt{max\_tracks\_per\_class.ball} & 1 & Balon, almacenado siempre con ID 0. \\
+        \texttt{max\_tracks\_per\_class.referee} & 3 & Árbitro central y asistentes con IDs reservados (23, 24, 25). \\
+        \texttt{max\_tracks\_per\_class.ball} & 1 & Balón, almacenado siempre con ID 0. \\
         \hline
     \end{tabular}
-    \caption{Limites de identidades canonicas por clase y asignacion de slots.}
+    \caption{Límites de identidades canónicas por clase y asignación de slots.}
     \label{tab:limites-canonicos}
 \end{table}
 
@@ -53,9 +53,9 @@ En la configuración actual, los slots canónicos quedan reservados de forma exp
 \subsection{Continuidad canonica y reasignacion}
 \label{subsec:continuidad-canonica-reasignacion}
 
-Cuando hay posicion proyectada fiable en campo, la continuidad de \texttt{player}/\texttt{goalkeeper} se valida con un gate metrico dependiente de los frames perdidos. El gate parte de un valor base y crece de forma controlada hasta un maximo, evitando saltos fisicamente incompatibles y permitiendo recuperar identidades tras oclusiones cortas.
+Cuando hay posición proyectada fiable en campo, la continuidad de \texttt{player}/\texttt{goalkeeper} se valida con un gate métrico dependiente de los frames perdidos. El gate parte de un valor base y crece de forma controlada hasta un máximo, evitando saltos físicamente incompatibles y permitiendo recuperar identidades tras oclusiones cortas.
 
-Siendo \(f\) el numero de frames desde la ultima observacion valida del ID canonico. El gate se calcula con base \(g_0=2.1\) m, decaimiento \(\delta=0.3\) m/frame, tope temporal \(f_{\max}=10\) y cap absoluto \(G_{\max}=8.0\) m:
+Siendo \(f\) el número de frames desde la última observación válida del ID canónico, el gate se calcula con base \(g_0=2.1\) m, decaimiento \(\delta=0.3\) m/frame, tope temporal \(f_{\max}=10\) y cap absoluto \(G_{\max}=8.0\) m:
 
 \[
 f'=\min(f,f_{\max}),
@@ -77,7 +77,7 @@ G(5)=7.5,\;
 G(6)=8.0,
 \]
 
-y a partir de ahi queda saturado en \(8.0\) m. Una candidata en campo se considera factible solo si su distancia al estado canonico cumple:
+y a partir de ahí queda saturado en \(8.0\) m. Una candidata en campo se considera factible solo si su distancia al estado canónico cumple:
 
 \[
 d_{\text{campo}} \leq G(f).
@@ -101,10 +101,10 @@ donde $f$ es el número de frames perdidos. El valor 12 actúa como límite máx
     \centering
     \scriptsize
     \begin{tabular}{c|c|p{7.5cm}}
-        \textbf{Parametro} & \textbf{Valor} & \textbf{Funcion} \\
+        \textbf{Parámetro} & \textbf{Valor} & \textbf{Función} \\
         \hline\hline
-        \texttt{reassign\_min\_distance} & 10 px & Radio minimo cuando todavia no hay historico suficiente. \\
-        \texttt{reassign\_motion\_growth\_cap\_frames} & 12 & Limita el numero de frames durante los que el radio de busqueda puede crecer. \\
+        \texttt{reassign\_min\_distance} & 10 px & Radio mínimo cuando todavía no hay histórico suficiente. \\
+        \texttt{reassign\_motion\_growth\_cap\_frames} & 12 & Limita el número de frames durante los que el radio de búsqueda puede crecer. \\
         \texttt{reassign\_min\_samples} & 3 & Observaciones necesarias para estimar el desplazamiento medio. \\
         \texttt{reassign\_motion\_factor} & 0.75 & Reduce la distancia extrapolada para evitar reasociaciones demasiado amplias. \\
         \hline
@@ -120,7 +120,7 @@ Los porteros presentan un problema particular: en muchos planos tácticos o de i
 
 Estas detecciones no proceden de YOLO, sino que son semillas sintéticas generadas a partir de la geometría del campo. Mientras no haya una detección real compatible, se almacenan con confianza 0 y sin equipo asignado. Cuando aparece una detección de clase \textit{goalkeeper} compatible, la capa canónica asigna ese track sintético a la detección compatible.
 
-El radio de absorción desde el punto de penalti es de 20 metros. Aunque parece un valor alto, no significa que cualquier jugador pueda absorber el ID del portero. Primero, solo se consideran detecciones compatibles con la clase \texttt{goalkeeper}. Segundo, la semilla está situada en el punto de penalti, pero el portero real puede aparecer sobre la línea de gol, dentro del área pequeña, desplazado lateralmente o con error de homografía. Por eso se utiliza un radio amplio, protegido por la restricción de clase. La \hyperref[tab:seeds-porteros]{Tabla~\ref*{tab:seeds-porteros}} resume los hiperparametros de configuracion asociados a estas semillas canónicas de portero.
+El radio de absorción desde el punto de penalti es de 20 metros. Aunque parece un valor alto, no significa que cualquier jugador pueda absorber el ID del portero. Primero, solo se consideran detecciones compatibles con la clase \texttt{goalkeeper}. Segundo, la semilla está situada en el punto de penalti, pero el portero real puede aparecer sobre la línea de gol, dentro del área pequeña, desplazado lateralmente o con error de homografía. Por eso se utiliza un radio amplio, protegido por la restricción de clase. La \hyperref[tab:seeds-porteros]{Tabla~\ref*{tab:seeds-porteros}} resume los hiperparámetros de configuración asociados a estas semillas canónicas de portero.
 
 \begin{table}[htbp]
     \centering
@@ -128,7 +128,7 @@ El radio de absorción desde el punto de penalti es de 20 metros. Aunque parece 
     \begin{tabular}{c|c|p{7.5cm}}
         \textbf{Concepto} & \textbf{Valor} & \textbf{Función} \\
         \hline\hline
-        \texttt{reserve\_penalty\_spot\_seed\_match\_distance\_m} & 20 m & Fija el radio maximo de absorcion entre una seed de portero y una deteccion real compatible. \\
+        \texttt{reserve\_penalty\_spot\_seed\_match\_distance\_m} & 20 m & Fija el radio máximo de absorción entre una seed de portero y una detección real compatible. \\
         \hline
     \end{tabular}
     \caption{Configuración de identidades sintéticas reservadas para porteros.}
@@ -172,23 +172,23 @@ Si ninguna candidata resulta coherente con la predicción temporal y las validac
     \begin{tabular}{c|c|p{7.5cm}}
         \textbf{Concepto} & \textbf{Valor} & \textbf{Función} \\
         \hline\hline
-        \texttt{ball\_min\_conf} & 0.0035 & Permite considerar candidatas debiles antes del filtrado temporal. \\
-        \texttt{ball\_expected\_position\_gate\_px} & 90 px & Define el radio base alrededor de la posicion esperada del balon. \\
+        \texttt{ball\_min\_conf} & 0.0035 & Permite considerar candidatas débiles antes del filtrado temporal. \\
+        \texttt{ball\_expected\_position\_gate\_px} & 90 px & Define el radio base alrededor de la posición esperada del balón. \\
         \texttt{ball\_expected\_position\_gate\_growth\_per\_frame} & 35 px & Amplia el gate posicional por cada frame perdido. \\
-        \texttt{ball\_expected\_position\_confidence\_relax} & 1.4 & Relaja el gate posicional y el ratio de tamano cuando la candidata tiene alta confianza. \\
+        \texttt{ball\_expected\_position\_confidence\_relax} & 1.4 & Relaja el gate posicional y el ratio de tamaño cuando la candidata tiene alta confianza. \\
         \texttt{ball\_size\_ratio\_per\_frame} & 1.8 & Limita los cambios de escala plausibles entre observaciones consecutivas. \\
-        \texttt{ball\_size\_min\_samples} & 5 & Numero minimo de observaciones para activar la comprobacion estadistica de tamano. \\
-        \texttt{ball\_size\_std\_factor} & 3.0 & Factor multiplicativo usado en la banda estadistica de tamano aceptable. \\
-        \texttt{ball\_size\_std\_floor} & 1.0 & Impone un suelo para que la banda estadistica de tamano no colapse. \\
-        \texttt{ball\_max\_reassign\_lost\_frames} & 30 & Limita la ventana tras la que deja de intentarse continuidad con el ultimo estado valido del balon. \\
-        \texttt{ball\_high\_conf\_override} & 0.6 & Define el umbral a partir del cual una candidata se trata como deteccion de alta confianza. \\
+        \texttt{ball\_size\_min\_samples} & 5 & Número mínimo de observaciones para activar la comprobación estadística de tamaño. \\
+        \texttt{ball\_size\_std\_factor} & 3.0 & Factor multiplicativo usado en la banda estadística de tamaño aceptable. \\
+        \texttt{ball\_size\_std\_floor} & 1.0 & Impone un suelo para que la banda estadística de tamaño no colapse. \\
+        \texttt{ball\_max\_reassign\_lost\_frames} & 30 & Limita la ventana tras la que deja de intentarse continuidad con el último estado válido del balón. \\
+        \texttt{ball\_high\_conf\_override} & 0.6 & Define el umbral a partir del cual una candidata se trata como detección de alta confianza. \\
         \hline
     \end{tabular}
     \caption{Restricciones temporales utilizadas para seleccionar el balón.}
     \label{tab:balon-tracking}
 \end{table}
 
-La configuracion de esta capa se resume en la \hyperref[tab:hiperparametros-canonico]{Tabla~\ref*{tab:hiperparametros-canonico}}. Esta tabla final solo recoge los parametros del bloque de track \texttt{canonical} que no se han detallado ya en tablas especificas anteriores de esta misma seccion.
+La configuración de esta capa se resume en la \hyperref[tab:hiperparametros-canonico]{Tabla~\ref*{tab:hiperparametros-canonico}}. Esta tabla final solo recoge los parámetros del bloque de track \texttt{canonical} que no se han detallado ya en tablas específicas anteriores de esta misma sección.
 
 \begin{table}[htbp]
 \centering
@@ -252,7 +252,7 @@ Hiperparámetros principales de la capa de tracking canónico.}
 \label{tab:hiperparametros-canonico}
 \end{table}
 
-El valor final de los parámetros se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+El valor final de los parámetros se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Sección~\ref*{sec:evaluacion-heuristica-depuracion}}.
 
 \subsection{Salida del tracking}
 

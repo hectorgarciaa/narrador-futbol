@@ -5,7 +5,7 @@ La generación de lenguaje permite transformar información estructurada en text
 
 \subsection{Modelos de lenguaje locales y cuantización}
 
-Los modelos Transformer \citep{vaswani2017attention}son la base de gran parte de los modelos de lenguaje modernos. Estos modelos utilizan mecanismos de atención para relacionar los distintos tokens de una secuencia y generar texto condicionado por el contexto de entrada. En aplicaciones donde se necesita controlar la latencia, el coste o la privacidad, resulta especialmente interesante ejecutar modelos de lenguaje en local en lugar de depender de servicios externos.
+Los modelos Transformer \citep{vaswani2017attention} son la base de gran parte de los modelos de lenguaje modernos. Estos modelos utilizan mecanismos de atención para relacionar los distintos tokens de una secuencia y generar texto condicionado por el contexto de entrada. En aplicaciones donde se necesita controlar la latencia, el coste o la privacidad, resulta especialmente interesante ejecutar modelos de lenguaje en local en lugar de depender de servicios externos.
 
 En el caso de sistemas locales, familias abiertas como Gemma \citep{gemma2024} permiten ejecutar modelos relativamente ligeros en hardware propio, manteniendo control sobre latencia, coste y privacidad. Para poder desplegar estos modelos, a veces se utilizan técnicas de cuantización que reducen la precisión de los pesos y, por tanto, el consumo de memoria. Esta reducción permite ejecutar modelos de mayor tamaño o disminuir los requisitos de hardware, aunque puede afectar ligeramente a la calidad de la generación.
 

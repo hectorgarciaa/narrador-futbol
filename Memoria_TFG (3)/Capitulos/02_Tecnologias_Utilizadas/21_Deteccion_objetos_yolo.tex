@@ -1,11 +1,11 @@
 \section{Detección de objetos con YOLO}
 \label{sec:yolo-tecnologias}
 
-La detección de objetos es una de las tareas principales dentro de la visión por computador. Su objetivo es localizar e identificar las instancias de una o varias clases presentes en una imagen, normalmente mediante cajas bounding box asociadas a una etiqueta y a una puntuación de confianza. En esta seccion se describe como YOLO afronta este problema.
+La detección de objetos es una de las tareas principales dentro de la visión por computador. Su objetivo es localizar e identificar las instancias de una o varias clases presentes en una imagen, normalmente mediante cajas \textit{bounding box} asociadas a una etiqueta y a una puntuación de confianza. En esta sección se describe cómo YOLO afronta este problema.
 
 \subsection{Modelo de detección YOLO}
 
-Uno de los enfoques más utilizados para detección en tiempo real es YOLO \citep{RedmonYOLO2016}. Esta red neuronal convolucional plantea la detección como un problema de regresión directa sobre la imagen completa, prediciendo cajas y clases en una sola pasada. Esta filosofía de detector de una etapa resulta especialmente adecuada para vídeo, donde no basta con obtener buena precisión en imágenes aisladas, sino que también es importante mantener una velocidad de inferencia suficiente para procesar secuencias largas. Las implementaciones modernas de Ultralytics \citep{UltralyticsYOLO2023}  \footnote{Ultralytics es una empresa y comunidad de desarrollo de software especializada en herramientas de visión por computador, conocida principalmente por mantener implementaciones modernas de YOLO y facilitar su entrenamiento, evaluación y despliegue.}han popularizado su uso práctico mediante modelos preentrenados, herramientas de entrenamiento y despliegue, y soporte para fine-tuning sobre datasets propios.
+Uno de los enfoques más utilizados para detección en tiempo real es YOLO \citep{RedmonYOLO2016}. Esta red neuronal convolucional plantea la detección como un problema de regresión directa sobre la imagen completa, prediciendo cajas y clases en una sola pasada. Esta filosofía de detector de una etapa resulta especialmente adecuada para vídeo, donde no basta con obtener buena precisión en imágenes aisladas, sino que también es importante mantener una velocidad de inferencia suficiente para procesar secuencias largas. Las implementaciones modernas de Ultralytics \citep{UltralyticsYOLO2023} \footnote{Ultralytics es una empresa y comunidad de desarrollo de software especializada en herramientas de visión por computador, conocida principalmente por mantener implementaciones modernas de YOLO y facilitar su entrenamiento, evaluación y despliegue.} han popularizado su uso práctico mediante modelos preentrenados, herramientas de entrenamiento y despliegue, y soporte para fine-tuning sobre datasets propios.
 
 
 En la formulación original de YOLO, la imagen se divide en una cuadrícula de $S \times S$ celdas. Cada celda es responsable de predecir los objetos cuyo centro cae dentro de ella. Para cada celda, la red estima una o varias cajas delimitadoras junto con una confianza de objeto y una distribución de probabilidad sobre las clases. De forma simplificada, cada predicción puede representarse como:
@@ -31,15 +31,14 @@ El flujo de este modelo de detección se muestra en la \hyperref[fig:yolo-grid]{
 
 Durante el entrenamiento, la función de pérdida combina varios objetivos. Por un lado, penaliza el error de localización entre la caja predicha y la caja real. Por otro lado, penaliza los errores de confianza, diferenciando entre regiones que contienen objetos y regiones de fondo. Finalmente, incorpora el error de clasificación. Esto obliga al modelo a aprender simultáneamente tres tareas: localizar el objeto, decidir si realmente existe y asignarle una clase correcta.
 
-\subsection{Post-procesado mediante Non-Maximum Supression}
+\subsection{Post-procesado mediante Non-Maximum Suppression}
 Tras la inferencia, es habitual que el detector produzca varias cajas muy próximas para un mismo objeto. Para eliminar estas detecciones redundantes se aplica \textit{Non-Maximum Suppression} (NMS). Este algoritmo ordena las cajas por puntuación, conserva la de mayor confianza y elimina aquellas cajas de la misma clase cuyo solape con ella supere un determinado umbral. El solape se mide mediante la intersección sobre la unión, o IoU:
 
 \[
 IoU(A,B)=\frac{\operatorname{area}(A \cap B)}{\operatorname{area}(A \cup B)}
 \]
 
-Si dos cajas tienen un IoU superior al umbral $\lambda_{nms}$, se considera que ambas representan el mismo objeto y se conserva únicamentse la de mayor confianza. La Figura 
-\hyperref[fig:yolo-nms]{Figura~\ref*{fig:yolo-nms}} ilustra este proceso, en el que múltiples predicciones cercanas se reducen a una única caja final. Esto también puede observarse en el segundo paso de la \hyperref[fig:yolo-grid]{Figura~\ref*{fig:yolo-grid}}
+Si dos cajas tienen un IoU superior al umbral $\lambda_{nms}$, se considera que ambas representan el mismo objeto y se conserva únicamente la de mayor confianza. La \hyperref[fig:yolo-nms]{Figura~\ref*{fig:yolo-nms}} ilustra este proceso, en el que múltiples predicciones cercanas se reducen a una única caja final. Esto también puede observarse en el segundo paso de la \hyperref[fig:yolo-grid]{Figura~\ref*{fig:yolo-grid}}.
 
 \begin{figure}[H]
     \centering
@@ -73,7 +72,7 @@ El valor F1 combina ambas métricas mediante su media armónica:
 F1 = 2 \cdot \frac{\text{Precisión} \cdot \text{Recall}}{\text{Precisión} + \text{Recall}}
 \]
 
-Esta métrica resulta útil cuando se desea valorar conjuntamente falsos positivos, asociados a la precision y falsos negativos, asociados al recall.
+Esta métrica resulta útil cuando se desea valorar conjuntamente falsos positivos, asociados a la precisión, y falsos negativos, asociados al recall.
 
 En detección de objetos también es habitual emplear la métrica mAP (\textit{mean Average Precision}). El mAP@50 considera correcta una detección cuando alcanza un IoU mínimo de 0.50, mientras que el mAP@50-95 calcula el rendimiento medio usando varios umbrales de IoU entre 0.50 y 0.95.
 
@@ -81,4 +80,4 @@ En detección de objetos también es habitual emplear la métrica mAP (\textit{m
 \subsection{Papel de YOLO dentro del pipeline}
 En este proyecto, YOLO se utiliza como detector inicial del pipeline para localizar jugadores, árbitros, porteros y balón en cada fotograma. Sus salidas sirven como entrada para las etapas posteriores de seguimiento y análisis temporal.
 
-En esta sección se ha introducido YOLO desde un punto de vista conceptual. Su aplicación concreta dentro del sistema, se desarrollan posteriormente en la \hyperref[sec:deteccion-elementos-juego]{Sección~\ref*{sec:deteccion-elementos-juego} Deteccion Elementos del Juego}.
+En esta sección se ha introducido YOLO desde un punto de vista conceptual. Su aplicación concreta dentro del sistema se desarrolla posteriormente en la \hyperref[sec:deteccion-elementos-juego]{Sección~\ref*{sec:deteccion-elementos-juego}, Detección de elementos del juego}.

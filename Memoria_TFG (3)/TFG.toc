@@ -1,0 +1,140 @@
+\babel@toc {spanish}{}\relax 
+\contentsline {chapter}{\numberline {1}Introducción}{1}{chapter.6}%
+\contentsline {section}{\numberline {1.1}Motivación}{1}{section.7}%
+\contentsline {section}{\numberline {1.2}Objetivos}{2}{section.8}%
+\contentsline {section}{\numberline {1.3}Plan de trabajo}{3}{section.9}%
+\contentsline {section}{\numberline {1.4}Organización de la Memoria}{5}{section.11}%
+\contentsline {chapter}{\numberline {2}Tecnologías Utilizadas}{7}{chapter.12}%
+\contentsline {section}{\numberline {2.1}Detección de objetos con YOLO}{7}{section.13}%
+\contentsline {subsection}{\numberline {2.1.1}Modelo de detección YOLO}{7}{subsection.14}%
+\contentsline {subsection}{\numberline {2.1.2}Post-procesado mediante Non-Maximum Suppression}{9}{subsection.17}%
+\contentsline {subsection}{\numberline {2.1.3}Métricas de evaluación en detección de objetos}{9}{subsection.19}%
+\contentsline {subsection}{\numberline {2.1.4}Papel de YOLO dentro del pipeline}{10}{subsection.20}%
+\contentsline {section}{\numberline {2.2}Calibración geométrica mediante homogarfía}{10}{section.21}%
+\contentsline {subsection}{\numberline {2.2.1}Homografía entre planos}{11}{subsection.22}%
+\contentsline {subsection}{\numberline {2.2.2}Estimación de homografía mediante PnLCalib}{12}{subsection.25}%
+\contentsline {subsection}{\numberline {2.2.3}Papel de la homografía dentro del pipeline}{14}{subsection.28}%
+\contentsline {section}{\numberline {2.3}Tracking multiobjeto}{15}{section.29}%
+\contentsline {subsection}{\numberline {2.3.1}ByteTrack}{15}{subsection.30}%
+\contentsline {subsection}{\numberline {2.3.2}Papel del tracking dentro del pipeline}{17}{subsection.32}%
+\contentsline {section}{\numberline {2.4}Modelado de conjuntos con Set Transformer}{17}{section.33}%
+\contentsline {subsection}{\numberline {2.4.1}Representación de datos como conjuntos}{18}{subsection.34}%
+\contentsline {subsection}{\numberline {2.4.2}Atención multi-cabeza en conjuntos}{18}{subsection.35}%
+\contentsline {subsection}{\numberline {2.4.3}Bloques principales de Set Transformer}{19}{subsection.36}%
+\contentsline {subsection}{\numberline {2.4.4}Papel de Set Transformer dentro del pipeline}{20}{subsection.37}%
+\contentsline {section}{\numberline {2.5}Detección de eventos: PathCRF}{21}{section.38}%
+\contentsline {subsection}{\numberline {2.5.1}Entrada y salida del modelo}{21}{subsection.39}%
+\contentsline {subsection}{\numberline {2.5.2}Representación de trayectorias como grafo}{21}{subsection.40}%
+\contentsline {subsection}{\numberline {2.5.3}Backbone de atención y representación de nodos y aristas}{22}{subsection.41}%
+\contentsline {subsection}{\numberline {2.5.4}CRF dinámico y decodificación de eventos}{22}{subsection.42}%
+\contentsline {subsection}{\numberline {2.5.5}Papel de PathCRF dentro del pipeline}{23}{subsection.43}%
+\contentsline {section}{\numberline {2.6}Generación de lenguaje con modelos locales}{24}{section.44}%
+\contentsline {subsection}{\numberline {2.6.1}Modelos de lenguaje locales y cuantización}{24}{subsection.45}%
+\contentsline {subsection}{\numberline {2.6.2}Ejecución mediante herramientas locales}{25}{subsection.46}%
+\contentsline {subsection}{\numberline {2.6.3}Papel del modelo de lenguaje dentro del pipeline}{25}{subsection.47}%
+\contentsline {section}{\numberline {2.7}Síntesis de voz neuronal}{25}{section.48}%
+\contentsline {subsection}{\numberline {2.7.1}Evolución de los modelos neuronales de voz}{25}{subsection.49}%
+\contentsline {subsection}{\numberline {2.7.2}Síntesis multilingüe con XTTS}{26}{subsection.50}%
+\contentsline {subsection}{\numberline {2.7.3}Papel de la síntesis de voz dentro del pipeline}{27}{subsection.52}%
+\contentsline {chapter}{\numberline {3}Trabajo Relacionado}{29}{chapter.53}%
+\contentsline {section}{\numberline {3.1}Detección de jugadores y balón en fútbol}{29}{section.54}%
+\contentsline {section}{\numberline {3.2}Tracking multiobjeto en vídeo deportivo}{30}{section.55}%
+\contentsline {section}{\numberline {3.3}Detección de eventos en fútbol}{31}{section.57}%
+\contentsline {chapter}{\numberline {4}Procesamiento Visual}{33}{chapter.58}%
+\contentsline {section}{\numberline {4.1}Detección de elementos del juego}{34}{section.60}%
+\contentsline {subsection}{\numberline {4.1.1}Adaptación del detector mediante \textit {fine-tuning}}{36}{subsection.63}%
+\contentsline {subsubsection}{\numberline {4.1.1.1}Conjuntos de datos utilizados}{36}{subsubsection.64}%
+\contentsline {subsubsection}{\numberline {4.1.1.2}Estrategias de entrenamiento}{37}{subsubsection.66}%
+\contentsline {subsubsection}{\numberline {4.1.1.3}Resultados del \textit {fine-tuning} secuencial}{37}{subsubsection.67}%
+\contentsline {subsection}{\numberline {4.1.2}Evaluación sobre la validación de DFL-Bundesliga}{41}{subsection.72}%
+\contentsline {subsubsection}{\numberline {4.1.2.1}Modelos comparados}{41}{subsubsection.73}%
+\contentsline {subsubsection}{\numberline {4.1.2.2}Métricas utilizadas}{41}{subsubsection.74}%
+\contentsline {subsection}{\numberline {4.1.3}Resultados cuantitativos}{42}{subsection.75}%
+\contentsline {subsection}{\numberline {4.1.4}Interpretación de los Resultados}{42}{subsection.79}%
+\contentsline {section}{\numberline {4.2}Calibración del campo y proyección a coordenadas métricas}{43}{section.81}%
+\contentsline {subsection}{\numberline {4.2.1}Modelo utilizado y salida geométrica}{44}{subsection.82}%
+\contentsline {subsection}{\numberline {4.2.2}Problema de estabilidad: \textit {jitter} y sensibilidad a umbrales}{46}{subsection.85}%
+\contentsline {subsection}{\numberline {4.2.3}Selección robusta de homografía: umbrales adaptativos y validación}{46}{subsection.86}%
+\contentsline {subsubsection}{\numberline {4.2.3.1}Métricas de calidad y criterio de aceptación}{48}{subsubsection.87}%
+\contentsline {subsubsection}{\numberline {4.2.3.2}Definición matemática de las métricas de calidad}{48}{subsubsection.88}%
+\contentsline {paragraph}{1) Geometry fit}{48}{subsubsection.88}%
+\contentsline {paragraph}{2) Support quality}{49}{subsubsection.88}%
+\contentsline {paragraph}{3) Coverage quality}{49}{subsubsection.88}%
+\contentsline {paragraph}{Score final y aceptación}{49}{subsubsection.88}%
+\contentsline {subsection}{\numberline {4.2.4}Suavizado temporal}{49}{subsection.89}%
+\contentsline {subsection}{\numberline {4.2.5}Fallo controlado: \textit {fallback} cuando no hay homografía}{50}{subsection.90}%
+\contentsline {section}{\numberline {4.3}Clasificación de equipos}{50}{section.92}%
+\contentsline {subsection}{\numberline {4.3.1}Identificación del color de la camiseta}{51}{subsection.93}%
+\contentsline {subsection}{\numberline {4.3.2}Asociación del equipo}{52}{subsection.96}%
+\contentsline {subsubsection}{\numberline {4.3.2.1}Asignación por color y centro del equipo}{52}{subsubsection.97}%
+\contentsline {subsubsection}{\numberline {4.3.2.2}Actualización online, \textit {bootstrap} y \textit {buckets} de muestras}{53}{subsubsection.98}%
+\contentsline {subsubsection}{\numberline {4.3.2.3}Reetiquetado de clase}{54}{subsubsection.100}%
+\contentsline {section}{\numberline {4.4}Capa de asociación temporal basada en ByteTrack}{56}{section.103}%
+\contentsline {subsection}{\numberline {4.4.1}Base de la fase}{57}{subsection.104}%
+\contentsline {subsection}{\numberline {4.4.2}Asociación multietapa en cada frame}{57}{subsection.105}%
+\contentsline {subsection}{\numberline {4.4.3}Restricciones por clase y equipo}{57}{subsection.106}%
+\contentsline {subsection}{\numberline {4.4.4}Uso de homografía y restricción espacial en metros}{58}{subsection.107}%
+\contentsline {subsection}{\numberline {4.4.5}Control de creación de nuevos tracks}{58}{subsection.108}%
+\contentsline {subsection}{\numberline {4.4.6}Resumen de la capa}{59}{subsection.110}%
+\contentsline {section}{\numberline {4.5}Capa de tracking canónico}{60}{section.111}%
+\contentsline {subsection}{\numberline {4.5.1}Entrada de la capa y objetivo de canonización}{60}{subsection.112}%
+\contentsline {subsection}{\numberline {4.5.2}Proceso de asignación canónica por frame}{60}{subsection.113}%
+\contentsline {subsection}{\numberline {4.5.3}IDs canónicos y límites por clase}{61}{subsection.114}%
+\contentsline {subsection}{\numberline {4.5.4}Continuidad canonica y reasignacion}{61}{subsection.116}%
+\contentsline {subsection}{\numberline {4.5.5}Reasignación cuando no hay homografía fiable}{62}{subsection.117}%
+\contentsline {subsection}{\numberline {4.5.6}Tratamiento específico de porteros}{63}{subsection.119}%
+\contentsline {subsection}{\numberline {4.5.7}Tratamiento específico de árbitros}{63}{subsection.121}%
+\contentsline {subsection}{\numberline {4.5.8}Reabsorción de identidades perdidas}{64}{subsection.122}%
+\contentsline {subsection}{\numberline {4.5.9}Seguimiento del balón}{64}{subsection.123}%
+\contentsline {subsection}{\numberline {4.5.10}Salida del tracking}{65}{subsection.126}%
+\contentsline {section}{\numberline {4.6}Evaluación heurística y depuración del pipeline visual}{66}{section.127}%
+\contentsline {subsection}{\numberline {4.6.1}Protocolo de evaluación}{66}{subsection.128}%
+\contentsline {subsection}{\numberline {4.6.2}Comparación de detectores dentro del pipeline}{67}{subsection.130}%
+\contentsline {subsection}{\numberline {4.6.3}Uso de las métricas durante la depuración}{67}{subsection.132}%
+\contentsline {subsection}{\numberline {4.6.4}Resultado visual del pipeline}{68}{subsection.133}%
+\contentsline {chapter}{\numberline {5}Análisis Táctico}{69}{chapter.135}%
+\contentsline {section}{\numberline {5.1}Inferencia heurística de la posesión}{69}{section.136}%
+\contentsline {section}{\numberline {5.2}Inferencia de posiciones futbolísticas}{70}{section.137}%
+\contentsline {subsection}{\numberline {5.2.1}Motivación}{71}{subsection.138}%
+\contentsline {subsection}{\numberline {5.2.2}Definición de la tarea}{71}{subsection.139}%
+\contentsline {subsection}{\numberline {5.2.3}Construcción del conjunto de datos}{72}{subsection.141}%
+\contentsline {subsection}{\numberline {5.2.4}Proceso de etiquetado}{73}{subsection.143}%
+\contentsline {subsection}{\numberline {5.2.5}Normalización táctica del campo}{74}{subsection.146}%
+\contentsline {subsection}{\numberline {5.2.6}Variables utilizadas}{75}{subsection.147}%
+\contentsline {subsection}{\numberline {5.2.7}Distribución de clases}{76}{subsection.148}%
+\contentsline {subsection}{\numberline {5.2.8}Arquitectura del modelo}{77}{subsection.150}%
+\contentsline {subsubsection}{\numberline {5.2.8.1}Codificación del jugador objetivo}{77}{subsubsection.155}%
+\contentsline {subsubsection}{\numberline {5.2.8.2}Codificación de los compañeros}{78}{subsubsection.156}%
+\contentsline {subsubsection}{\numberline {5.2.8.3}Bloques de auto-atención}{78}{subsubsection.157}%
+\contentsline {subsubsection}{\numberline {5.2.8.4}Pooling por atención}{79}{subsubsection.158}%
+\contentsline {subsubsection}{\numberline {5.2.8.5}Clasificador final}{80}{subsubsection.159}%
+\contentsline {subsection}{\numberline {5.2.9}Entrenamiento}{81}{subsection.160}%
+\contentsline {subsection}{\numberline {5.2.10}Grid search de hiperparámetros}{82}{subsection.161}%
+\contentsline {subsubsection}{\numberline {5.2.10.1}Prueba 1: grid search con 13 clases}{82}{subsubsection.162}%
+\contentsline {subsubsection}{\numberline {5.2.10.2}Prueba 2: fusión de carrileros con laterales}{83}{subsubsection.165}%
+\contentsline {subsubsection}{\numberline {5.2.10.3}Prueba 3: grid search completo con 11 clases}{84}{subsubsection.168}%
+\contentsline {subsubsection}{\numberline {5.2.10.4}Prueba 4: refinamiento de los tres mejores modelos}{85}{subsubsection.171}%
+\contentsline {subsection}{\numberline {5.2.11}Hiperparámetros del modelo final}{86}{subsection.175}%
+\contentsline {subsection}{\numberline {5.2.12}Resultados por clase}{88}{subsection.177}%
+\contentsline {subsection}{\numberline {5.2.13}Reentrenamiento con \textit {train+val}}{88}{subsection.179}%
+\contentsline {subsection}{\numberline {5.2.14}Asignación táctica final de posiciones}{89}{subsection.181}%
+\contentsline {subsubsection}{\numberline {5.2.14.1}Asignación online por frame}{89}{subsubsection.182}%
+\contentsline {subsubsection}{\numberline {5.2.14.2}Apertura y cierre de segmentos}{90}{subsubsection.183}%
+\contentsline {subsubsection}{\numberline {5.2.14.3}Acumulación de evidencia por segmento}{91}{subsubsection.184}%
+\contentsline {subsubsection}{\numberline {5.2.14.4}Reasignación estable por segmentos}{92}{subsubsection.185}%
+\contentsline {subsubsection}{\numberline {5.2.14.5}Salida final y trazabilidad}{92}{subsubsection.186}%
+\contentsline {section}{\numberline {5.3}Clasificación de acciones}{92}{section.187}%
+\contentsline {subsection}{\numberline {5.3.1}Adaptación de tracks al formato PathCRF}{93}{subsection.188}%
+\contentsline {subsubsection}{\numberline {5.3.1.1}Estabilidad de identidades}{93}{subsubsection.189}%
+\contentsline {subsubsection}{\numberline {5.3.1.2}Relleno de observaciones ausentes}{93}{subsubsection.190}%
+\contentsline {subsubsection}{\numberline {5.3.1.3}Suavizado de trayectorias}{94}{subsubsection.191}%
+\contentsline {subsection}{\numberline {5.3.2}Modelo PathCRF}{94}{subsection.192}%
+\contentsline {subsubsection}{\numberline {5.3.2.1}Arquitectura}{95}{subsubsection.193}%
+\contentsline {subsection}{\numberline {5.3.3}Inferencia sobre ventana deslizante}{95}{subsection.194}%
+\contentsline {subsubsection}{\numberline {5.3.3.1}Ventana de trabajo}{95}{subsubsection.195}%
+\contentsline {subsubsection}{\numberline {5.3.3.2}Ejecución asíncrona en segundo plano}{95}{subsubsection.196}%
+\contentsline {subsection}{\numberline {5.3.4}Postprocesado de aristas a eventos discretos}{96}{subsection.197}%
+\contentsline {subsubsection}{\numberline {5.3.4.1}Consolidación temporal de aristas}{96}{subsubsection.198}%
+\contentsline {subsubsection}{\numberline {5.3.4.2}Eventos base}{96}{subsubsection.199}%
+\contentsline {subsubsection}{\numberline {5.3.4.3}Eventos base}{97}{subsubsection.200}%
+\contentsline {subsection}{\numberline {5.3.5}Resultado de la clasificación de acciones}{97}{subsection.201}%

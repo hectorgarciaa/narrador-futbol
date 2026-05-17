@@ -135,15 +135,15 @@ Esta estrategia permite generar un número elevado de muestras sin etiquetar man
 
 Un aspecto clave es que los equipos atacan en direcciones opuestas. Sin una normalización previa, un lateral izquierdo de un equipo podría aparecer en coordenadas similares a un extremo derecho del rival. Para evitarlo, todas las muestras se transforman a una misma vista táctica antes de construir las variables de entrada del modelo.
 
-La dirección de ataque no se introduce manualmente, sino que se infiere a partir de las observaciones del propio tracking. Cuando hay porteros detectados para ambos equipos, se toma como referencia la mediana de su coordenada normalizada \(x\): el equipo cuyo portero aparece más a la izquierda se considera asociado a la porteria propia izquierda y, por tanto, se representa atacando hacia \(+x\), mientras que el otro equipo se representa atacando hacia \(-x\). Si no hay suficiente informacion fiable de porteros, se usa como respaldo la mediana de la coordenada \(x\) de todos los jugadores visibles del equipo.
+La dirección de ataque no se introduce manualmente, sino que se infiere a partir de las observaciones del propio tracking. Cuando hay porteros detectados para ambos equipos, se toma como referencia la mediana de su coordenada normalizada \(x\): el equipo cuyo portero aparece más a la izquierda se considera asociado a la portería propia izquierda y, por tanto, se representa atacando hacia \(+x\), mientras que el otro equipo se representa atacando hacia \(-x\). Si no hay suficiente información fiable de porteros, se usa como respaldo la mediana de la coordenada \(x\) de todos los jugadores visibles del equipo.
 
-Una vez estimada esta direccion, todas las muestras se reorientan para que ambos equipos queden expresados en el mismo sistema táctico. Si el equipo ataca hacia \(+x\), las coordenadas se mantienen. Si el equipo ataca hacia \(-x\), se aplica la transformación:
+Una vez estimada esta dirección, todas las muestras se reorientan para que ambos equipos queden expresados en el mismo sistema táctico. Si el equipo ataca hacia \(+x\), las coordenadas se mantienen. Si el equipo ataca hacia \(-x\), se aplica la transformación:
 
 \[
 x' = 1 - x, \qquad y' = 1 - y
 \]
 
-Con esta transformacion, la porteria propia de ambos equipos queda siempre en la misma referencia relativa, y las etiquetas izquierda/derecha conservan el mismo significado tactico independientemente del lado real del campo en el que esté jugando cada equipo.
+Con esta transformación, la portería propia de ambos equipos queda siempre en la misma referencia relativa, y las etiquetas izquierda/derecha conservan el mismo significado táctico independientemente del lado real del campo en el que esté jugando cada equipo.
 
 Esta canonización es fundamental para que el modelo aprenda conceptos futbolísticos y no solo coordenadas absolutas dependientes del lado del campo. En caso contrario, dos jugadores con el mismo rol pero pertenecientes a equipos opuestos podrían ocupar regiones geométricamente parecidas en la imagen normalizada y, sin embargo, representar funciones tácticas distintas.
 
