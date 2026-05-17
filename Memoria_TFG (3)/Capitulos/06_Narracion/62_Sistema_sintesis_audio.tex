@@ -185,7 +185,7 @@ La penalización de latencia fue mínima, mientras que la mejora subjetiva del t
 
 \subsection{Pruebas por tipo de comentario con el enfoque mixto}
 
-Una vez validado el enfoque Qwen VoiceDesign + XTTS, se generó una tanda de comentarios con varios tipos de acción con su tiempos de síntesis reflejados en la Tabla~\ref{tab:comparacion_tiempo_acciones}. El objetivo era comprobar cómo afectaba la longitud del texto a la síntesis y al tiempo total de escucha.
+Una vez validado el enfoque Qwen VoiceDesign + XTTS, se generó una tanda de comentarios con varios tipos de acción, cuyos tiempos de síntesis se reflejan en la Tabla~\ref{tab:comparacion_tiempo_acciones}. El objetivo era comprobar cómo afectaba la longitud del texto a la síntesis y al tiempo total de escucha.
 
 \begin{table}[ht]
 \centering
@@ -284,7 +284,7 @@ El modelo \texttt{eleven\_flash\_v2\_5} fue el más rápido, pero con menor cali
 
 \subsection{Decisión final}
 
-La evaluación dejó una conclusión clara: Qwen generaba una voz de referencia muy interesante, pero no era suficientemente rápido como sintetizador completo. XTTS era mucho más rápido, pero las primeras referencias propias no tenían la calidad vocal deseada. Esto queda reflejado en la Tabla~\ref{tab:soluciones-sintesis} El enfoque mixto Qwen VoiceDesign + XTTS resolvió ese conflicto: Qwen se usa para diseñar la voz y XTTS para sintetizar los comentarios.
+La evaluación dejó una conclusión clara: Qwen generaba una voz de referencia muy interesante, pero no era suficientemente rápido como sintetizador completo. XTTS era mucho más rápido, pero las primeras referencias propias no tenían la calidad vocal deseada. Esto queda reflejado en la Tabla~\ref{tab:soluciones-sintesis}. El enfoque mixto Qwen VoiceDesign + XTTS resolvió ese conflicto: Qwen se usa para diseñar la voz y XTTS para sintetizar los comentarios.
 
 \begin{table}[ht]
 \centering

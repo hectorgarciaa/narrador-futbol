@@ -1,4 +1,4 @@
-\section{Capa de asociacion temporal basada en ByteTrack}
+\section{Capa de asociación temporal basada en ByteTrack}
 \label{sec:bytetrack-layer}
 
 El proceso de detección permite identificar que en un frame aparece un elemento de una determinada clase, pero cada frame se procesa de forma independiente. Para que el sistema pueda reconocer a un mismo jugador a lo largo del vídeo, no basta con detectar jugadores, porteros, árbitros y balón en cada imagen: es necesario asociar las detecciones de frames consecutivos y mantener una identidad temporal estable. Este proceso se conoce como \textit{tracking multiobjeto}.
@@ -7,9 +7,9 @@ En nuestro caso, el tracking es una fase crítica porque gran parte de la inform
 
 Esta fase ha sido una de las más complejas del proyecto. En fútbol aparecen muchos problemas propios del dominio: oclusiones entre jugadores, cruces continuos, jugadores del mismo equipo con apariencia muy parecida, cambios de escala por el zoom, movimientos de cámara, detecciones perdidas durante varios frames y elementos que salen temporalmente del plano. Además, intentar solucionar uno de estos problemas de forma aislada puede empeorar otro. Por ejemplo, permitir reasociaciones muy amplias ayuda a recuperar jugadores tras una oclusión, pero también aumenta el riesgo de intercambiar IDs entre jugadores cercanos. Por ello, el sistema se ha construido como una combinación de varias restricciones complementarias.
 
-La fase de asociacion temporal se ha dividido en dos capas. La primera capa, tratada en esta seccion, es una adaptacion de ByteTrack orientada a producir asociaciones robustas entre detecciones consecutivas. La segunda capa, descrita en la \hyperref[sec:tracking-canonico]{Seccion~\ref*{sec:tracking-canonico}}, intenta coser esas asociaciones de ByteTrack para estabilizar las 26 identidades finales del partido.
+La fase de asociación temporal se ha dividido en dos capas. La primera capa, tratada en esta sección, es una adaptación de ByteTrack orientada a producir asociaciones robustas entre detecciones consecutivas. La segunda capa, descrita en la \hyperref[sec:tracking-canonico]{Seccion~\ref*{sec:tracking-canonico}}, intenta coser esas asociaciones de ByteTrack para estabilizar las 26 identidades finales del partido.
 
-En la \hyperref[sec:tracking-tecnologias]{Seccion~\ref*{sec:tracking-tecnologias}} se introdujo ByteTrack desde un punto de vista general. En este apartado se describe su integracion concreta como primera capa de tracking del pipeline visual y las modificaciones realizadas sobre el algoritmo clásico.
+En la \hyperref[sec:tracking-tecnologias]{Seccion~\ref*{sec:tracking-tecnologias}} se introdujo ByteTrack desde un punto de vista general. En este apartado se describe su integración concreta como primera capa de tracking del pipeline visual y las modificaciones realizadas sobre el algoritmo clásico.
 
 \subsection{Base de la fase}
 
@@ -17,10 +17,9 @@ Sobre la estructura original de ByteTrack se han añadido señales propias del p
 
 La fase consume las detecciones enriquecidas de identificacion y produce una salida intermedia de detecciones asociadas con \textit{raw tracker id}. Esta salida no es todavia la identidad final del jugador, sino una asociacion temporal que alimentará la siguiente capa.
 
-\subsection{Asociacion multi-etapa en cada frame}
+\subsection{Asociación multietapa en cada frame}
 
-Manteniendo la logica general explicada en la \hyperref[sec:tracking-tecnologias]{Figura~\ref*{sec:tracking-tecnologias}}, la implementacion actual ejecuta seis subfases de matching en vez de las 3 descritas en \hyperref[sec:tracking-tecnologias]{2.4}:
-Manteniendo la logica general de ByteTrack descrita en la \hyperref[sec:tracking-tecnologias]{Sección~\ref*{sec:tracking-tecnologias}} (asociacion progresiva de tracks activos, perdidos y no confirmados), nuestra adaptación desdobla el matching en seis subfases, ampliando el esquema base presentado en 2.4.
+Manteniendo la lógica general de ByteTrack descrita en la \hyperref[sec:tracking-tecnologias]{Sección~\ref*{sec:tracking-tecnologias}} (asociación progresiva de tracks activos, perdidos y no confirmados), nuestra adaptación desdobla el \textit{matching} en seis subfases, ampliando el esquema base presentado en ese apartado.
 \begin{itemize}
     \item \texttt{high\_iou}
     \item \texttt{low\_iou}
@@ -30,7 +29,7 @@ Manteniendo la logica general de ByteTrack descrita en la \hyperref[sec:tracking
     \item \texttt{unconfirmed\_bbox}
 \end{itemize}
 
-Mientras que las primeras tres subfases usan el solape entre cajas como función de coste, las últimas 3 subfases, utilizan la distancias entre los centros de las \textit{bounding box}, y actuan como rescate cuando el solape no es suficiente, reduciendo fragmentaciones en escenas con zoom, paneos y discontinuidades de deteccion.
+Mientras que las tres primeras subfases usan el solape entre cajas como función de coste, las tres últimas utilizan la distancia entre los centros de las \textit{bounding boxes} y actúan como mecanismo de rescate cuando el solape no es suficiente, reduciendo fragmentaciones en escenas con zoom, paneos y discontinuidades de detección.
 
 \subsection{Restricciones por clase y equipo}
 
@@ -59,7 +58,7 @@ Otro problema relevante es la creacion excesiva de nuevos tracks. Esto puede ocu
 
 Un candidato a track nuevo se descarta si solapa demasiado con un track activo, si solapa con un track tentativo no consolidado, o si solapa con otro candidato nuevo de mayor confianza. Ante cualquier solape entre dos candidatos nuevos, se conserva únicamente el de mayor confianza. Con esta regla se consigue reducir tracks duplicados sin alterar el seguimiento de tracks ya consolidados.
 
-La configuracion completa de la capa se resume en la \hyperref[tab:hiperparametros-bytetrack]{Tabla~\ref*{tab:hiperparametros-bytetrack}}.
+La configuración completa de la capa se resume en la \hyperref[tab:hiperparametros-bytetrack]{Tabla~\ref*{tab:hiperparametros-bytetrack}}.
 
 
 \begin{table}[htbp]
@@ -187,6 +186,6 @@ La decisión sobre el valor final de estos hiperparámetros se trata en la \hype
 
 \subsection{Resumen de la capa}
 
-En resumen, esta fase no se limita a ejecutar ByteTrack sobre cajas de YOLO, sino que integra restricciones de clase, equipo, geometria en campo y control de creación de tracks para mejorar la asociacion temporal en video de futbol broadcast. La capa siguiente toma estas asociaciones y construye las identidades canonicas estables del partido.
+En resumen, esta fase no se limita a ejecutar ByteTrack sobre cajas de YOLO, sino que integra restricciones de clase, equipo, geometría en campo y control de creación de tracks para mejorar la asociación temporal en vídeo de fútbol broadcast. La capa siguiente toma estas asociaciones y construye las identidades canónicas estables del partido.
 
-La eleccion final de los hiperparametros de esta fase se realizo mediante prueba y error, acumulando muchos experimentos y evaluando su efecto sobre las metricas del sistema; este proceso se describe con mas detalle en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+La elección final de los hiperparámetros de esta fase se realizó mediante prueba y error, acumulando muchos experimentos y evaluando su efecto sobre las métricas del sistema; este proceso se describe con más detalle en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.

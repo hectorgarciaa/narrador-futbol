@@ -38,7 +38,7 @@ En esta sección se describe la lógica para asociar cada track detectado a uno 
 
 \subsubsection{Asignación por color y centro del equipo}
 
-Una vez obtenido el color de camiseta de cada detección candidata, representado por el vector $\mathbf{c}_{\text{camiseta}}$ definido en la Ecuación~\eqref{eq:color-camiseta-lab}, el objetivo es asociarlo a uno de los dos equipos de campo del partido. Para ello se acumulan muestras de colores LAB de las camistas de los jugadores y se aplica KMeans con $k=2$, esta vez no sobre píxeles individuales, sino sobre los colores de las camisetas ya extraídos. Cada cluster representa uno de los dos equipos de campo.
+Una vez obtenido el color de camiseta de cada detección candidata, representado por el vector $\mathbf{c}_{\text{camiseta}}$ definido en la Ecuación~\eqref{eq:color-camiseta-lab}, el objetivo es asociarlo a uno de los dos equipos de campo del partido. Para ello se acumulan muestras de colores LAB de las camisetas de los jugadores y se aplica KMeans con $k=2$, esta vez no sobre píxeles individuales, sino sobre los colores de las camisetas ya extraídos. Cada cluster representa uno de los dos equipos de campo.
 
 El centro de cada equipo se calcula mediante la mediana de las muestras LAB del cluster, en lugar de usar directamente la media. Esta decisión hace que la referencia de color sea más robusta frente a detecciones erróneas, sombras, reflejos o recortes en los que la camiseta no se haya aislado correctamente.
 
@@ -67,7 +67,7 @@ Además, para cada equipo se calculan estadísticas robustas de distancia intra-
 
 En el caso del árbitro, el color de referencia no se estima con KMeans, sino mediante media recortada (\textit{trimmed mean}) sobre las muestras LAB acumuladas (recorte del 15\% por canal), lo que reduce la influencia de valores extremos y mejora la robustez del modelo.
 
-En la \hyperref[fig:team-color-clusters-lab]{Figura~\ref*{fig:team-color-clusters-lab}} se puede ver como queda el estado de color de un partido después una ejecución. Se puede ver como el sistema es capaz de definir clusters bastante acertados sobre los colores de cada grupo de detecciones. Concretamente se puede ver el cluster del Equipo 1, de color verde, el cluster del Equipo 2, de color blanco, y el cluster de árbitros, de color negro. 
+En la \hyperref[fig:team-color-clusters-lab]{Figura~\ref*{fig:team-color-clusters-lab}} se puede ver cómo queda el estado de un partido tras una ejecución. El sistema es capaz de definir clusters bastante acertados para los colores de cada grupo de detecciones. En concreto, se observa el cluster del Equipo 1, de color verde; el cluster del Equipo 2, de color blanco; y el cluster de árbitros, de color negro.
 
 \begin{figure}[H]
     \centering

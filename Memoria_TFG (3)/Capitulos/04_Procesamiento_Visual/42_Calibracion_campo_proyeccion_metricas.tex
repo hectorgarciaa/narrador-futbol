@@ -1,4 +1,4 @@
-\section{Calibración del campo y proyeccion a coordenadas métricas}
+\section{Calibración del campo y proyección a coordenadas métricas}
 \label{sec:calibracion-campo-proyeccion-metricas}
 
 En la \hyperref[sec:homografia-tecnologias]{Sección~\ref*{sec:homografia-tecnologias}} se introdujo el concepto de homografía y se describió PnLCalib como método para estimar la calibración geométrica del campo en vídeo broadcast. En esta sección se resume cómo se ha integrado dicha calibración dentro del sistema y, especialmente, qué estrategias de robustez han sido necesarias para poder usar la homografía como una señal fiable dentro del pipeline.
@@ -209,7 +209,7 @@ Hiperparámetros principales de la fase de calibración geométrica y proyecció
 \label{tab:hiperparametros-referencia}
 \end{table}
 
-El valor de estos hiperparametros que aparece en la tabla se decidió mediante depuracion iterativa y pruebas visuales sobre vídeo de referencia. Este proceso de depuración se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+El valor final de estos hiperparámetros recogidos en la tabla, se decidió mediante depuración iterativa y pruebas visuales sobre el vídeo de referencia. Este proceso de depuración se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
 
 \subsection{Problema de estabilidad: \textit{jitter} y sensibilidad a umbrales}
 
@@ -217,7 +217,7 @@ Durante las primeras pruebas se observó que la homografía estimada frame a fra
 
 Este comportamiento ocurría principalmente con planos cerrados (esquinas o área), cuando la cámara realiza paneos o zooms rápidos, etc. 
 
-Además, el método depende de umbrales de confianza para decidir qué puntos y líneas se consideran observados. En la práctica, fijar estos umbrales de forma única para todos los vídeos resulta difícil: con umbrales altos se obtienen menos referencias y muchos frames quedan sin homografía. Con umbrales bajos se aceptan referencias ruidosas que degradan la calibración. Por tanto, la elección de umbrales tienen un componente arbitrario, y el ``mejor'' valor depende del vídeo (calidad, resolución, iluminación y tipo de plano).
+Además, el método depende de umbrales de confianza para decidir qué puntos y líneas se consideran observados. En la práctica, fijar estos umbrales de forma única para todos los vídeos resulta difícil: con umbrales altos se obtienen menos referencias y muchos frames quedan sin homografía, mientras que con umbrales bajos se aceptan referencias ruidosas que degradan la calibración. Por tanto, la elección de umbrales tiene un componente arbitrario y el ``mejor'' valor depende del vídeo (calidad, resolución, iluminación y tipo de plano).
 
 \subsection{Selección robusta de homografía: umbrales adaptativos y validación}
 
@@ -327,10 +327,10 @@ En la implementación, el resultado suavizado se conserva únicamente si tambié
 
 Por último, cuando no se consigue una homografía fiable, el pipeline no se detiene: se descarta la proyección métrica en ese frame y las fases posteriores continúan trabajando en coordenadas de imagen. Esta decisión evita que una calibración errónea contamine el resto del sistema.
 
-En la \hyperref[fig:homography_frame]{Figura~\ref*{fig:homography_frame}} se muestra un ejemplo visual de la salida de esta fase para un frame del vídeo de prueba. Las detecciones, puntos y lineas de referencia encontrados se muestran en el panel de la izquierda. Mientras que en la derecha se muestra como quedan ubicados sobre el campo las detecciones trás la homografía. El video del resultado completo se puede encontrar en \url{https://github.com/hectorgarciaa/narrador-futbol/output/homography/best/20260516_180637/homography.mp4}
+En la \hyperref[fig:homography_frame]{Figura~\ref*{fig:homography_frame}} se muestra un ejemplo visual de la salida de esta fase para un frame del vídeo de prueba. En el panel de la izquierda aparecen las detecciones, los puntos y las líneas de referencia encontrados. En el de la derecha se muestra cómo quedan ubicadas las detecciones sobre el campo tras aplicar la homografía. El vídeo del resultado completo puede consultarse en \url{https://github.com/hectorgarciaa/narrador-futbol/output/homography/best/20260516_180637/homography.mp4}.
 \begin{figure}[h]
     \centering
-    \includegraphics[width=0.5\textwidth]{Imagenes/Propias/detect_homography.png}
-    \caption{Resultado visual de la fase de calibración de campo y proyección}
+    \includegraphics[width=0.85\textwidth]{Imagenes/Propias/homography_frame.png}
+    \caption{Resultado visual de la fase de calibración del campo y proyección.}
     \label{fig:homography_frame}
 \end{figure}

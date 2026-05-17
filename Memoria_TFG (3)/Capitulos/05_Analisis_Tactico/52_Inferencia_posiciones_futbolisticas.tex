@@ -55,14 +55,14 @@ Por tanto, el modelo final trabaja con 11 clases de jugadores de campo:
 \texttt{LI}, \texttt{DFC\_IZQ}, \texttt{DFC\_CENT}, \texttt{DFC\_DER}, \texttt{LD}, \texttt{MC}, \texttt{MI}, \texttt{MD}, \texttt{EI}, \texttt{ED}, \texttt{DC}
 \]
 
-La clase \texttt{POR} no se aprende mediante el modelo. En su lugar, se asigna de forma heurística cuando el sistema de detección/tracking identifica al objeto como portero como se explicó en la sección\hyperref[subsec:tratamiento-porteros]{\ref*{subsec:tratamiento-porteros}}.
+La clase \texttt{POR} no se aprende mediante el modelo. En su lugar, se asigna de forma heurística cuando el sistema de detección/tracking identifica al objeto como portero, como se explicó en la \hyperref[subsec:tratamiento-porteros]{Subsección~\ref*{subsec:tratamiento-porteros}}.
 
-Para realizar esta tarea se procede a la construcción de un conjunto de datos etiquetados. En las siguientes secciones se describe cómo se realiza esta construcción, detallando el proceso de etiquetado, las variables utilizadas, las normalizaciones necesarias y las distribución de clases obtenida.
+Para realizar esta tarea se procede a la construcción de un conjunto de datos etiquetados. En las siguientes secciones se describe cómo se lleva a cabo esta construcción, detallando el proceso de etiquetado, las variables utilizadas, las normalizaciones necesarias y la distribución de clases obtenida.
 
 \subsection{Construcción del conjunto de datos}
 \label{subsec:dataset-inferencia-posicional}
 
-Para construir el conjunto de datos se partió de clips de partidos de aproximadamente 30 segundos de duración(750 frames a 25 FPS). Estos clips no estaban anotados con posiciones futbolísticas ni con identidades de tracking. Es decir, el material de partida consistía únicamente en secuencias de vídeo, sin indicar qué jugador aparecía en cada bounding box ni qué rol táctico ocupaba.
+Para construir el conjunto de datos se partió de clips de partidos de aproximadamente 30 segundos de duración (750 frames a 25 FPS). Estos clips no estaban anotados con posiciones futbolísticas ni con identidades de tracking. Es decir, el material de partida consistía únicamente en secuencias de vídeo, sin indicar qué jugador aparecía en cada \textit{bounding box} ni qué rol táctico ocupaba.
 
 El primer paso consistió en procesar cada clip con el pipeline de procesamiento visual descrito en el \hyperref[cap:procesamientoVisual]{Capítulo~\ref*{cap:procesamientoVisual}} para obtener los tracks. A partir de estos tracks se construyó el dataset de inferencia posicional. La idea es que, si en un determinado frame se asigna manualmente una posición futbolística a un track, esa etiqueta puede propagarse a las observaciones posteriores del mismo track sin tener que etiquetar manualmente cada bounding box de cada frame. Por tanto, el tracking actúa como mecanismo intermedio para convertir un etiquetado manual escaso en un conjunto de muestras supervisadas mucho mayor.
 
@@ -638,7 +638,7 @@ El parámetro \texttt{objective\_num\_layers} indica cuántas capas ocultas tien
 
 El número de bloques de auto-atención que se aplican sobre los compañeros está definido por \texttt{num\_set\_blocks}. El modelo final usa 5 bloques, permitiendo refinar varias veces las relaciones espaciales del conjunto. \texttt{num\_heads} indica el número de cabezas de atención en paralelo. Con 4 cabezas, el modelo puede aprender distintos tipos de relaciones tácticas simultáneamente.
 
-Para controlar cuánto se expande la dimensión interna dentro del feed-forward de caba bloque de atención se utiliza \texttt{ff\_expansion}. \texttt{dropout} introduce regularización apagando aleatoriamente neuronas durante el entrenamiento. El valor final, 0.27, es relativamente alto, coherente con el sobreajuste observado.
+Para controlar cuánto se expande la dimensión interna dentro del bloque \textit{feed-forward} de cada bloque de atención se utiliza \texttt{ff\_expansion}. \texttt{dropout} introduce regularización apagando aleatoriamente neuronas durante el entrenamiento. El valor final, 0.27, es relativamente alto, coherente con el sobreajuste observado.
 
 Con \texttt{label\_smoothing} se suavizan las etiquetas durante el entrenamiento. En vez de asignar probabilidad 1 a la clase correcta y 0 al resto, reparte una pequeña fracción de probabilidad entre las demás clases. Esto es útil porque algunas posiciones son tácticamente ambiguas.
 

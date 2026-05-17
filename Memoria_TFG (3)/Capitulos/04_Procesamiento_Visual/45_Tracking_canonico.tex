@@ -1,15 +1,15 @@
 \section{Capa de tracking canónico}
 \label{sec:tracking-canonico}
 
-La salida de la capa de asociacion basada en ByteTrack (Seccion~\ref{sec:bytetrack-layer}) proporciona asociaciones robustas entre detecciones consecutivas de frames cercanos, pero esos IDs internos no garantizan por si solos estabilidad global durante todo el partido. Cuando hay oclusiones largas, salidas de plano o cambios de escala bruscos, un mismo jugador puede reaparecer con otro \textit{tracker id}.
+La salida de la capa de asociación basada en ByteTrack (Seccion~\ref{sec:bytetrack-layer}) proporciona asociaciones robustas entre detecciones consecutivas de frames cercanos, pero esos IDs internos no garantizan por sí solos estabilidad global durante todo el partido. Cuando hay oclusiones largas, salidas de plano o cambios de escala bruscos, un mismo jugador puede reaparecer con otro \textit{tracker id}.
 
-Por este motivo, el pipeline incorpora una segunda capa: la canonizacion. Su objetivo es transformar las asociaciones \textit{raw} en identidades finales estables, con limites por clase y reglas especificas para jugadores, porteros, arbitros y balon.
+Por este motivo, el pipeline incorpora una segunda capa: la canonización. Su objetivo es transformar las asociaciones \textit{raw} en identidades finales estables, con límites por clase y reglas específicas para jugadores, porteros, árbitros y balón.
 
-De esta forma, podría ocurrir que, por ejemplo, un jugador esté asociado al \textit{tracker id} 14 durante una parte del vídeo, se pierda durante varios frames y reaparecer con \textit{tracker id} 37. Si la capa canónica determina que ambos tracks corresponden al mismo jugador, entonces se conservará el mismo \textit{id canónico} para los dos tramos.
+De esta forma, podría ocurrir que, por ejemplo, un jugador esté asociado al \textit{tracker id} 14 durante una parte del vídeo, se pierda durante varios frames y reaparezca con \textit{tracker id} 37. Si la capa canónica determina que ambos tracks corresponden al mismo jugador, entonces se conservará el mismo \textit{id canónico} para los dos tramos.
 
-\subsection{Entrada de la capa y objetivo de canonizacion}
+\subsection{Entrada de la capa y objetivo de canonización}
 
-La capa canonica consume el paquete devuelto por la capa de ByteTrack y opera sobre detecciones ya asociadas, junto con metadatos de clase, equipo, posición en el campo y confianza. A partir de esa entrada, decide para cada deteccion si:
+La capa canónica consume el paquete devuelto por la capa de ByteTrack y opera sobre detecciones ya asociadas, junto con metadatos de clase, equipo, posición en el campo y confianza. A partir de esa entrada, decide para cada detección si:
 \begin{itemize}
     \item mantiene continuidad con un ID canonico existente,
     \item reengancha un ID canonico previo sobre un nuevo \textit{raw tracker id},
@@ -17,14 +17,14 @@ La capa canonica consume el paquete devuelto por la capa de ByteTrack y opera so
     \item o descarta la deteccion si no cumple los criterios de consistencia.
 \end{itemize}
 
-\subsection{Proceso de asignacion canonica por frame}
+\subsection{Proceso de asignación canónica por frame}
 
-En cada frame, la capa canonica aplica un flujo secuencial compacto. Primero intenta mantener continuidad directa entre \textit{raw tracker ids} ya conocidos y sus IDs canonicos previos, siempre que la compatibilidad de clase/equipo y los gates de continuidad sean validos segun la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
+En cada frame, la capa canónica aplica un flujo secuencial compacto. Primero intenta mantener continuidad directa entre \textit{raw tracker ids} ya conocidos y sus IDs canónicos previos, siempre que la compatibilidad de clase/equipo y las compuertas de continuidad sean válidas según la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
 
-Despues, con los tracks de ByteTrack que no han sido resueltos en esa primera fase, se abre una fase de reasignacion sobre IDs canonicos perdidos o libres, respetando de nuevo las reglas de continuidad en campo y en imagen definidas en la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
-Si un track de ByteTrack sigue sin asignacion valida, la capa evalua la creacion de un nuevo slot canonico dentro de los limites y reservas definidos en la \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} y explicados en la \hyperref[subsec:ids-canonicos-limites]{Subseccion~\ref*{subsec:ids-canonicos-limites}}.
+Despues, con los tracks de ByteTrack que no han sido resueltos en esa primera fase, se abre una fase de reasignación sobre IDs canónicos perdidos o libres, respetando de nuevo las reglas de continuidad en campo y en imagen definidas en la \hyperref[subsec:continuidad-canonica-reasignacion]{Subseccion~\ref*{subsec:continuidad-canonica-reasignacion}} y la \hyperref[subsec:reasignacion-sin-homografia]{Subseccion~\ref*{subsec:reasignacion-sin-homografia}}.
+Si un track de ByteTrack sigue sin una asignación válida, la capa evalúa la creación de un nuevo slot canónico dentro de los límites y reservas definidos en la \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} y explicados en la \hyperref[subsec:ids-canonicos-limites]{Subseccion~\ref*{subsec:ids-canonicos-limites}}.
 
-Sobre ese flujo base se aplican reglas especificas por clase, detalladas en sus apartados correspondientes: porteros en la \hyperref[subsec:tratamiento-porteros]{Subseccion~\ref*{subsec:tratamiento-porteros}}, arbitros en la \hyperref[subsec:tratamiento-arbitros]{Subseccion~\ref*{subsec:tratamiento-arbitros}}, balon en la \hyperref[subsec:seguimiento-balon-canonico]{Subseccion~\ref*{subsec:seguimiento-balon-canonico}}, y reabsorcion conservadora en la \hyperref[subsec:reabsorcion-identidades]{Subseccion~\ref*{subsec:reabsorcion-identidades}}.
+Sobre ese flujo base se aplican reglas específicas por clase, detalladas en sus apartados correspondientes: porteros en la \hyperref[subsec:tratamiento-porteros]{Subseccion~\ref*{subsec:tratamiento-porteros}}, árbitros en la \hyperref[subsec:tratamiento-arbitros]{Subseccion~\ref*{subsec:tratamiento-arbitros}}, balón en la \hyperref[subsec:seguimiento-balon-canonico]{Subseccion~\ref*{subsec:seguimiento-balon-canonico}} y reabsorción conservadora en la \hyperref[subsec:reabsorcion-identidades]{Subseccion~\ref*{subsec:reabsorcion-identidades}}.
 
 \subsection{IDs canónicos y límites por clase}
 \label{subsec:ids-canonicos-limites}
@@ -138,7 +138,7 @@ El radio de absorción desde el punto de penalti es de 20 metros. Aunque parece 
 \subsection{Tratamiento específico de árbitros}
 \label{subsec:tratamiento-arbitros}
 
-También se reservan IDs específicos para los árbitros. En concreto, el ID 23 se asocia al árbitro central, el 24 al árbitro asistende de la parte superior de la imágen y el 25 a su homólogo de la parte inferior. Esto se hace para no tratarlos como 3 árbitros intercambiables y, así, evitar swaps entre ellos.
+También se reservan IDs específicos para los árbitros. En concreto, el ID 23 se asocia al árbitro central, el 24 al árbitro asistente de la parte superior de la imagen y el 25 a su homólogo de la parte inferior. Esto se hace para no tratarlos como tres árbitros intercambiables y, así, evitar intercambios entre ellos.
 
 Las detecciones de clase árbitro se asocian a uno de los tracks canónicos de árbitro de banda si su posición proyectada está a menos de 3 metros de la línea lateral.
 
@@ -147,13 +147,13 @@ Para el ID 23 asociado al árbitro central, se añade una restricción horizonta
 \subsection{Reabsorción de identidades perdidas}
 \label{subsec:reabsorcion-identidades}
 
-Debido a las reglas de continuidad anteriores, puede ocurrir que un jugador desaparezca durante un tramo largo y vuelva con un \textit{raw tracker id} nuevo. Si todos los IDs canónicos ya están creados (se han alcanzado los límites por clase definidos en la\hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}}, y ningún track canónico compatible está lo suficientemente cerca del raw track de ByteTrack como para poder absorberlo, entonces ese track se quedará perdido en el limbo sin materializarse como track canónico real y perderemos esa identidad.  Para estos casos, la capa canónica incorpora una reabsorción forzada orientada a recuperar estos tracks perdidos de la forma más segura posible.
+Debido a las reglas de continuidad anteriores, puede ocurrir que un jugador desaparezca durante un tramo largo y vuelva con un \textit{raw tracker id} nuevo. Si todos los IDs canónicos ya están creados, se han alcanzado los límites por clase definidos en la \hyperref[tab:limites-canonicos]{Tabla~\ref*{tab:limites-canonicos}} y ningún track canónico compatible está lo suficientemente cerca del raw track de ByteTrack como para absorberlo, entonces ese track se quedará perdido en el limbo sin materializarse como track canónico real y se perderá esa identidad. Para estos casos, la capa canónica incorpora una reabsorción forzada orientada a recuperar estos tracks perdidos de la forma más segura posible.
 
 El mecanismo se activa solo para \texttt{player}. Primero se identifican IDs canónicos de jugador que llevan perdidos al menos 20 frames. En paralelo, se buscan tracks \textit{raw} huérfanos que no hayan sido asignados en el frame actual y que se hayan mantenido al menos 10 frames consecutivos con clase \texttt{player} y el mismo equipo.
 
-Con esos candidatos, la capa construye emparejamientos posibles únicamente dentro del mismo equipo. Cuando hay varios candidatos compatibles, se prioriza la asociación con mayor consistencia espacial y temporal (distancia menor respecto al último estado canónico útil). De manera que el track huérfano más compitble se reenganche al ID canónico perdido.
+Con esos candidatos, la capa construye emparejamientos posibles únicamente dentro del mismo equipo. Cuando hay varios candidatos compatibles, se prioriza la asociación con mayor consistencia espacial y temporal (menor distancia respecto al último estado canónico útil), de modo que el track huérfano más compatible se reenganche al ID canónico perdido.
 
-De este modo, la reabsorción actúa como una vía de recuperación tardía, pero con condiciones estrictas de clase, equipo y consistencia espacial,.
+De este modo, la reabsorción actúa como una vía de recuperación tardía, pero con condiciones estrictas de clase, equipo y consistencia espacial.
 
 \subsection{Seguimiento del balón}
 \label{subsec:seguimiento-balon-canonico}
@@ -162,7 +162,7 @@ El balón se gestiona de forma distinta a los jugadores. Es un objeto más peque
 
 Si el balón ya había sido visto recientemente, se estima una posición esperada a partir de su movimiento inmediato anterior (desplazamiento entre las últimas observaciones válidas) y se proyecta esa tendencia sobre los frames perdidos. Con esa predicción se aplica un gate posicional dinámico: parte de un radio base de 90 píxeles y crece con los frames perdidos (35 píxeles por frame). En paralelo, también se comprueba la compatibilidad de tamaño para descartar cambios de escala no plausibles.
 
-Cuando una candidata tiene confianza alta (\(\geq 0.6\)), las restricciones se relajan de forma controlada: tanto el radio posicional como el ratio de tamaño permitido se escalan por 1.4. Todas estas restricciones y configuraciones se reflejan en la \hyperref[tab:balon-tracking]{Tabla~\ref*{tab:balon-tracking}}
+Cuando una candidata tiene confianza alta (\(\geq 0.6\)), las restricciones se relajan de forma controlada: tanto el radio posicional como el ratio de tamaño permitido se escalan por 1.4. Todas estas restricciones y configuraciones se reflejan en la \hyperref[tab:balon-tracking]{Tabla~\ref*{tab:balon-tracking}}.
 
 Si ninguna candidata resulta coherente con la predicción temporal y las validaciones de tamaño, el sistema prefiere dejar el frame sin balón antes que aceptar una detección errónea. El balón se almacena siempre con ID canónico 0.
 
