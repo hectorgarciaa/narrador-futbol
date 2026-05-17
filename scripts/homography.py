@@ -2,6 +2,9 @@ import json
 import sys
 from pathlib import Path
 
+import cv2
+import numpy as np
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -9,6 +12,7 @@ from football_ai.core import convert_to_serializable, default_render_color_bgr
 from football_ai.tracking.phases.detection import DetectionPhase
 from football_ai.tracking.phases.filtering import FilteringPhase
 from football_ai.tracking.phases.reference_points import ProjectionPhase
+from football_ai.tracking.phases.reference_points.geometry import project_image_points
 from football_ai.visualization.simple_drawer import FieldPanel, VideoOutput, VideoPanel
 
 from scripts.utils import (
@@ -60,7 +64,7 @@ def _trace_filtering(packet, detector_packet):
             "bbox_xyxy": list(bbox),
             "confidence": float(confidence),
             "class_name": str(class_name),
-            "field_position_m": list(field_position) if field_position is not None else [0.0, 0.0],
+            "field_position_m": list(field_position) if field_position is not None else None,
             "keep": int(det_id) in kept_ids,
             "is_finite_field_position": True,
             "inside_field": int(det_id) in kept_ids,
@@ -153,6 +157,76 @@ def _field_line(line_trace_item):
     }
 
 
+def _draw_reference_overlay(frame_bgr, reference_packet):
+    overlay = frame_bgr.copy()
+    trace = reference_packet.get("trace", {})
+    for line in trace.get("lines", []):
+        point_1 = line.get("image_point_1_px")
+        point_2 = line.get("image_point_2_px")
+        if point_1 is None or point_2 is None:
+            continue
+        p1 = (int(point_1[0]), int(point_1[1]))
+        p2 = (int(point_2[0]), int(point_2[1]))
+        cv2.line(overlay, p1, p2, (255, 255, 0), 2)
+
+    for keypoint in trace.get("keypoints", []):
+        point = keypoint.get("image_position_px")
+        if point is None:
+            continue
+        center = (int(point[0]), int(point[1]))
+        cv2.circle(overlay, center, 4, (255, 0, 255), -1)
+
+    return overlay
+
+
+def _visible_field_polygon(reference_packet):
+    clean = reference_packet.get("clean", {})
+    if not clean.get("homography_valid"):
+        return None
+    if not clean.get("field_positions_usable_for_tracking"):
+        return None
+    homography = np.asarray(clean.get("homography_image_to_field_3x3"), dtype=np.float64)
+    if homography.shape != (3, 3):
+        return None
+    width = int(reference_packet.get("image_width") or 0)
+    height = int(reference_packet.get("image_height") or 0)
+    if width <= 0 or height <= 0:
+        return None
+    corners = np.asarray(
+        [[0.0, 0.0], [width, 0.0], [width, height], [0.0, height]],
+        dtype=np.float32,
+    )
+    projected = project_image_points(corners, homography)
+    if projected is None or len(projected) < 3:
+        return None
+    projected = np.asarray(projected, dtype=np.float32)
+    finite = np.all(np.isfinite(projected), axis=1)
+    if not np.any(finite):
+        return None
+    return projected[finite].tolist()
+
+
+def _field_entity(det_trace_item):
+    position = det_trace_item.get("field_position_m")
+    if position is None:
+        return None
+    class_name = det_trace_item.get("class_name")
+    keep = bool(det_trace_item.get("keep", False))
+    color = (
+        default_render_color_bgr(class_name)
+        if keep
+        else REJECTED_DETECTION_COLOR
+    )
+    radius = 4 if class_name == "ball" else 6
+    return {
+        "position_m": position,
+        "color": color,
+        "radius": radius,
+        "canonical_id": None,
+        "position_label": None,
+    }
+
+
 def main():
     parser = build_video_model_parser(
         "Detección + homografía PnLCalib",
@@ -209,10 +283,11 @@ def main():
             for item in filtering_trace
         }
 
+        shaded_polygon = _visible_field_polygon(reference_packet)
         writer.write_frame(
             [[
                 {
-                    "frame": frame_bgr.copy(),
+                    "frame": _draw_reference_overlay(frame_bgr, reference_packet),
                     "items": [
                         _video_item(det_item, filtering_by_det_id.get(int(det_item["det_id"]), {}))
                         for det_item in detector_trace
@@ -223,7 +298,15 @@ def main():
                         projection_phase.geometry.field_length_m,
                         projection_phase.geometry.field_width_m,
                     ) if projection_phase.geometry is not None else (105.0, 68.0),
-                    "entities": [],
+                    "shade_outside_polygon_m": shaded_polygon,
+                    "entities": [
+                        entity
+                        for entity in (
+                            _field_entity(item)
+                            for item in filtering_trace
+                        )
+                        if entity is not None
+                    ],
                     "points": [
                         _field_point(item)
                         for item in reference_packet.get("trace", {}).get("keypoints", [])

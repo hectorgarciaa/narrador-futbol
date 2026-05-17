@@ -115,6 +115,8 @@ narrador-futbol/
     └── visualization/
 ```
 
+  Nota de repositorio: [output/](output/) se ignora por defecto para no subir artefactos pesados. Solo se versionan [output/detection/](output/detection/), [output/homography/](output/homography/) y [output/tracking/](output/tracking/) (ver [.gitignore](.gitignore)).
+
 Nota de arquitectura: el runtime productivo vive en `football_ai/` y `experiments/` actúa como capa de experimentación sobre ese runtime (sin dependencias inversas desde `football_ai` hacia `experiments`).
 La configuración operativa del pipeline visual está separada por fases en bloques top-level como `projector`, `bytetracker`, `canonical`, `positions`, `actions`, `commentary` y `posession`; el orquestador compone en runtime la configuración concreta que necesita cada fase.
 
@@ -706,7 +708,7 @@ También acepta rutas desde la raíz del repo:
 
 La salida se guarda en `output/homography/<modelo>/<timestamp>/` con:
 - `homography.json`: detecciones por frame + metadatos completos de homografía (`quality_diagnostics`, intentos, keypoints, líneas, score, rechazo, etc.)
-- `homography.mp4`: vídeo a pantalla partida con detecciones a la izquierda y campo 2D a la derecha
+- `homography.mp4`: vídeo a pantalla partida con detecciones a la izquierda y campo 2D a la derecha (incluye proyección de detecciones; rechazadas en rojo). La vista izquierda dibuja líneas/keypoints y la derecha oscurece la zona del campo fuera de la vista del frame.
 
 `homography.py` ahora sigue el mismo flujo por fases que el tracker (`DetectionPhase -> ProjectionPhase -> FilteringPhase`) y por defecto usa `--execution-mode debug` para preservar la traza rica de homografía.
 
