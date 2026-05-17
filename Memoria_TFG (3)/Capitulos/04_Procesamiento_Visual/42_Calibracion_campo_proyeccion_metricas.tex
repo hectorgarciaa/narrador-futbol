@@ -40,6 +40,177 @@ y = y_2 - 0.04 \cdot (y_2 - y_1)
 \]
 donde $(x_1,y_1,x_2,y_2)$ son las coordenadas de la \textit{bounding box}. Este punto se transforma mediante la homografía para obtener una posición $(x,y)$ en el campo.
 
+La configuración de esta fase se resume en la \hyperref[tab:hiperparametros-referencia]{Tabla~\ref*{tab:hiperparametros-referencia}}, donde se recogen los parámetros utilizados por el módulo de proyección y sobre los que se irá hablando a lo largo de la sección.
+
+\begin{table}[htbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.10}
+\begin{tabularx}{\textwidth}{
+>{\raggedright\arraybackslash}p{2.5cm}
+>{\raggedright\arraybackslash}p{3.3cm}
+>{\raggedright\arraybackslash}p{1.4cm}
+>{\raggedright\arraybackslash}X
+}
+\toprule
+\textbf{Bloque} & \textbf{Parámetro} & \textbf{Valor} & \textbf{Uso en pipeline} \\
+\midrule
+
+Redimensionado y punto de apoyo &
+\texttt{bottom\_offset\_ratio} &
+\texttt{0.04} &
+Fija el desplazamiento vertical del punto proyectado sobre el césped. \\
+
+\midrule
+
+Umbrales base de inferencia &
+\texttt{kp\_threshold} &
+\texttt{0.30} &
+Controla qué puntos de referencia se aceptan inicialmente. \\
+
+&
+\texttt{line\_threshold} &
+\texttt{0.60} &
+Controla qué líneas del campo se aceptan inicialmente. \\
+
+&
+\texttt{pnl\_refine} &
+\texttt{false} &
+Desactiva el refinamiento PnL adicional en esta configuración. \\
+
+\midrule
+
+Suavizado temporal &
+\texttt{temporal\_blend} &
+\texttt{0.20} &
+Mezcla la homografía del frame actual con la anterior si la solución suavizada mantiene la calidad requerida. \\
+
+\midrule
+
+Búsqueda adaptativa &
+\texttt{adaptive\_thresholds} &
+\texttt{true} &
+Activa varios intentos de calibración relajando umbrales. \\
+
+&
+\texttt{adaptive\_max\_attempts} &
+\texttt{4} &
+Número máximo de intentos por frame. \\
+
+&
+\texttt{adaptive\_kp\_step} &
+\texttt{0.02} &
+Reducción progresiva del umbral de puntos. \\
+
+&
+\texttt{adaptive\_line\_step} &
+\texttt{0.05} &
+Reducción progresiva del umbral de líneas. \\
+
+&
+\texttt{min. kp/line thresholds} &
+\texttt{0.28/0.55} &
+Límites inferiores hasta los que se relajan los umbrales. \\
+
+\midrule
+
+Soporte mínimo &
+\texttt{min\_visible\_kp} &
+\texttt{7} &
+Número mínimo de puntos visibles requerido para aceptar una calibración. \\
+
+&
+\texttt{min\_visible\_lines} &
+\texttt{1} &
+Número mínimo de líneas visibles requerido para aceptar una calibración. \\
+
+\midrule
+
+Validación global &
+\texttt{val\_score\_th} &
+\texttt{0.56} &
+Umbral mínimo del score compuesto de validación. \\
+
+&
+\texttt{val\_geometry\_fit\_min} &
+\texttt{0.38} &
+Mínimo requerido para la calidad del ajuste geométrico. \\
+
+&
+\texttt{val\_support\_quality\_min} &
+\texttt{0.31} &
+Mínimo requerido para la calidad del soporte geométrico. \\
+
+&
+\texttt{val\_coverage\_quality\_min} &
+\texttt{0.18} &
+Mínimo requerido para la cobertura de referencias. \\
+
+\midrule
+
+Validación geométrica &
+\texttt{val\_reproj\_err\_px} &
+\texttt{8.0} &
+Rechaza soluciones con error de reproyección elevado. \\
+
+&
+\texttt{val\_H\_cond\_th} &
+\texttt{1e8} &
+Descarta homografías mal condicionadas. \\
+
+&
+\texttt{val\_kp\_world\_err\_m} &
+\texttt{3.0} &
+Limita el error métrico permitido en puntos. \\
+
+&
+\texttt{val\_line\_world\_err\_m} &
+\texttt{4.0} &
+Limita el error métrico permitido en líneas. \\
+
+\midrule
+
+Objetivos de cobertura &
+\texttt{val\_target\_visible\_kp} &
+\texttt{9} &
+Objetivo de puntos visibles para considerar una calibración estable. \\
+
+&
+\texttt{val\_target\_visible\_lines} &
+\texttt{4} &
+Objetivo de líneas visibles. \\
+
+&
+\texttt{val\_target\_hull\_area} &
+\texttt{0.18} &
+Mide la cobertura espacial de los puntos en la imagen. \\
+
+&
+\texttt{val\_target\_x\_span} &
+\texttt{0.55} &
+Mide la extensión horizontal de las referencias. \\
+
+&
+\texttt{val\_target\_y\_span} &
+\texttt{0.40} &
+Mide la extensión vertical de las referencias. \\
+
+&
+\texttt{val\_target\_field\_cov} &
+\texttt{0.20} &
+Mide si las referencias cubren suficiente campo para estimar una homografía estable. \\
+
+\bottomrule
+\end{tabularx}
+
+\caption[Hiperparámetros de calibración y proyección métrica]{
+Hiperparámetros principales de la fase de calibración geométrica y proyección a coordenadas métricas.}
+\label{tab:hiperparametros-referencia}
+\end{table}
+
+El valor de estos hiperparametros que aparece en la tabla se decidió mediante depuracion iterativa y pruebas visuales sobre vídeo de referencia. Este proceso de depuración se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+
 \subsection{Problema de estabilidad: \textit{jitter} y sensibilidad a umbrales}
 
 Durante las primeras pruebas se observó que la homografía estimada frame a frame era una señal poco estable: pequeñas variaciones en los puntos/líneas detectados producían cambios apreciables en la proyección, generando \textit{jitter} (vibración) tanto en la reconstrucción del campo como en las trayectorias proyectadas de los jugadores.
@@ -155,3 +326,11 @@ En la implementación, el resultado suavizado se conserva únicamente si tambié
 \subsection{Fallo controlado: \textit{fallback} cuando no hay homografía}
 
 Por último, cuando no se consigue una homografía fiable, el pipeline no se detiene: se descarta la proyección métrica en ese frame y las fases posteriores continúan trabajando en coordenadas de imagen. Esta decisión evita que una calibración errónea contamine el resto del sistema.
+
+En la \hyperref[fig:homography_frame]{Figura~\ref*{fig:homography_frame}} se muestra un ejemplo visual de la salida de esta fase para un frame del vídeo de prueba. Las detecciones, puntos y lineas de referencia encontrados se muestran en el panel de la izquierda. Mientras que en la derecha se muestra como quedan ubicados sobre el campo las detecciones trás la homografía. El video del resultado completo se puede encontrar en \url{https://github.com/hectorgarciaa/narrador-futbol/output/homography/best/20260516_180637/homography.mp4}
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.5\textwidth]{Imagenes/Propias/detect_homography.png}
+    \caption{Resultado visual de la fase de calibración de campo y proyección}
+    \label{fig:homography_frame}
+\end{figure}

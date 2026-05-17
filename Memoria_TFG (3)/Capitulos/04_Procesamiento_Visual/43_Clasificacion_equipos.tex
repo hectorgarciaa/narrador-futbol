@@ -99,28 +99,81 @@ La \hyperref[fig:field-relabel-map]{Figura~\ref*{fig:field-relabel-map}} muestra
 \end{figure}
 
 
-La configuración operativa del módulo se resume en la Tabla~\ref{tab:clasificacion_equipos}. 
+La configuración operativa del módulo se resume en la \hyperref[tab:clasificacion_equipos]{Tabla~\ref*{tab:clasificacion_equipos}}, donde se describen los hiperparámetros del bloque de clasificación de equipos.
+
+
 \begin{table}[htbp]
-    \centering
-    \begin{tabular}{c|c}
-        \textbf{Parámetro} & \textbf{Valor utilizado} \\
-        \hline\hline
-        Espacio de color & LAB \\
-        Región analizada & 50\% superior del bounding box \\
-        Clusters para camiseta & 2 \\
-        Clusters para equipos de campo & 2 \\
-        Muestras mínimas (\texttt{player}) & 60 acumuladas \\
-        Muestras mínimas (\texttt{referee}) & 15 acumuladas \\
-        Frecuencia de actualización de clusters & cada 5 frames \\
-        Tamaño mínimo de cluster (\texttt{min\_size\_cluster}) & 15 \\
-        Centro de equipo & mediana LAB del cluster \\
-        Referencia de árbitro & \textit{trimmed mean} LAB (15\%) \\
-        Distancia de asignación & euclídea en LAB \\
-        \hline
-    \end{tabular}
-    \caption{Configuración principal del módulo de clasificación de equipos.}
-    \label{tab:clasificacion_equipos}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{
+>{\raggedright\arraybackslash}p{2.7cm}
+>{\raggedright\arraybackslash}p{3.3cm}
+>{\raggedright\arraybackslash}p{1.7cm}
+>{\raggedright\arraybackslash}X
+}
+\toprule
+\textbf{Bloque} & \textbf{Parámetro} & \textbf{Valor} & \textbf{Uso en pipeline} \\
+\midrule
+
+Bootstrap por clase &
+\texttt{min\_samples\_player} &
+\texttt{60} &
+Número mínimo de muestras acumuladas antes de consolidar los centros cromáticos de jugadores. \\
+
+&
+\texttt{min\_samples\_referee} &
+\texttt{15} &
+Número mínimo de muestras acumuladas antes de consolidar el centro cromático del árbitro. \\
+
+\midrule
+
+Validación mínima de clusters &
+\texttt{min\_cluster\_size} &
+\texttt{15} &
+Rechaza particiones demasiado desbalanceadas al ajustar los clusters de jugadores. \\
+
+\midrule
+
+Confianza mínima de muestreo &
+\texttt{min\_conf\_player} &
+\texttt{0.8} &
+Filtra las detecciones de jugadores que pueden entrar en los buckets de color. \\
+
+&
+\texttt{min\_conf\_referee} &
+\texttt{0.7} &
+Filtra las detecciones de árbitro que pueden entrar en su bucket cromático. \\
+
+\midrule
+
+Memoria de muestras &
+\texttt{max\_samples\_class} &
+\texttt{500} &
+Limita el número de muestras LAB almacenadas por clase para el ajuste online. \\
+
+\midrule
+
+Bootstrap de árbitros &
+\texttt{ref\_bootstrap\_margin} &
+\texttt{10} &
+Controla cuándo se puede consolidar el bucket cromático del árbitro. \\
+
+&
+\texttt{ref\_upper\_bound\_cap} &
+\texttt{20.0} &
+Limita el radio de pertenencia del árbitro en el espacio LAB. \\
+
+\bottomrule
+\end{tabularx}
+
+\caption[Hiperparámetros de clasificación de equipos]{
+Hiperparámetros principales de la fase de clasificación de equipos.}
+\label{tab:clasificacion_equipos}
 \end{table}
 
-Finalmente, cabe destacar que esta fase fue uno de los cuellos de botella iniciales del pipeline. En una primera versión, el clustering de cada camiseta se realizaba en CPU con \texttt{scikit-learn}, lo que incrementaba el tiempo de procesamiento por frame. Para reducir esta latencia se implementó una versión batched del KMeans con aceleración en GPU cuando está disponible (basada en \texttt{CuPy}), manteniendo \texttt{scikit-learn} como alternativa en CPU. En nuestras pruebas, esta optimización redujo el tiempo aproximado de identificación de camisetas y asignación de equipo de 1.5 s/frame a 0.05 s/frame, lo que supone una aceleración de aproximadamente $30\times$.
 
+Como ya se ha comentado, el valor final de los hiperparámetros se decide tras realizar muchas pruebas visuales sobre vídeo de referencia. Este proceso se describe en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
+
+Finalmente, cabe destacar que esta fase fue uno de los cuellos de botella iniciales del pipeline. En una primera versión, el clustering de cada camiseta se realizaba en CPU con \texttt{scikit-learn}, lo que incrementaba el tiempo de procesamiento por frame. Para reducir esta latencia se implementó una versión batched del KMeans con aceleración en GPU cuando está disponible (basada en \texttt{CuPy}), manteniendo \texttt{scikit-learn} como alternativa en CPU. En nuestras pruebas, esta optimización redujo el tiempo aproximado de identificación de camisetas y asignación de equipo de 1.5 s/frame a 0.05 s/frame, lo que supone una aceleración de aproximadamente $30\times$.

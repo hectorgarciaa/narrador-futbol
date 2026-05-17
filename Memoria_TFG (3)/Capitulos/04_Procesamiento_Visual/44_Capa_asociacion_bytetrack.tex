@@ -59,23 +59,134 @@ Otro problema relevante es la creacion excesiva de nuevos tracks. Esto puede ocu
 
 Un candidato a track nuevo se descarta si solapa demasiado con un track activo, si solapa con un track tentativo no consolidado, o si solapa con otro candidato nuevo de mayor confianza. Ante cualquier solape entre dos candidatos nuevos, se conserva únicamente el de mayor confianza. Con esta regla se consigue reducir tracks duplicados sin alterar el seguimiento de tracks ya consolidados.
 
-La configuración concreta de estos umbrales de solape se resume en la \hyperref[tab:supresion-nuevos-tracks-bytetrack]{Tabla~\ref*{tab:supresion-nuevos-tracks-bytetrack}}.
+La configuracion completa de la capa se resume en la \hyperref[tab:hiperparametros-bytetrack]{Tabla~\ref*{tab:hiperparametros-bytetrack}}.
+
 
 \begin{table}[htbp]
-    \centering
-    \scriptsize
-    \begin{tabular}{c|c|p{7.5cm}}
-        \textbf{Concepto} & \textbf{Valor} & \textbf{Funcion} \\
-        \hline\hline
-        Solape maximo con tracks activos & 0.2 & Evita crear un nuevo ID sobre un track ya consolidado. \\
-        Solape maximo con tracks tentativos & 0.1 & Evita duplicados sobre tracks aun no consolidados. \\
-        Solape entre candidatos nuevos & 0.0 & Conserva solo el candidato nuevo de mayor confianza si hay solape. \\
-        \hline
-    \end{tabular}
-    \caption{Reglas de supresion en la creacion de nuevos tracks de ByteTrack.}
-    \label{tab:supresion-nuevos-tracks-bytetrack}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{
+>{\raggedright\arraybackslash}p{2.7cm}
+>{\raggedright\arraybackslash}p{3.1cm}
+>{\raggedright\arraybackslash}p{1.5cm}
+>{\raggedright\arraybackslash}X
+}
+\toprule
+\textbf{Bloque} & \textbf{Parámetro} & \textbf{Valor} & \textbf{Uso en pipeline} \\
+\midrule
+
+Creación de nuevos tracks &
+\texttt{new\_active\_iou} &
+\texttt{0.20} &
+Evita crear un nuevo ID sobre un track ya consolidado. \\
+
+&
+\texttt{new\_unconfirmed\_iou} &
+\texttt{0.10} &
+Evita duplicados sobre tracks aún no consolidados. \\
+
+&
+\texttt{new\_candidate\_iou} &
+\texttt{0.00} &
+Conserva solo el candidato nuevo de mayor confianza si hay solape. \\
+
+\midrule
+
+Activación y persistencia &
+\texttt{track\_act\_th} &
+\texttt{0.10} &
+Umbral mínimo de confianza para activar un nuevo track. \\
+
+&
+\texttt{low\_conf\_th} &
+\texttt{0.01} &
+Permite usar detecciones de baja confianza en fases posteriores de asociación. \\
+
+&
+\texttt{min\_consec\_frames} &
+\texttt{5} &
+Número mínimo de frames consecutivos para estabilizar una identidad. \\
+
+&
+\texttt{lost\_buffer} &
+\texttt{90} &
+Número de frames durante los que se conserva un track perdido antes de eliminarlo. \\
+
+\midrule
+
+Matching por IoU &
+\texttt{min\_match\_iou} &
+\texttt{0.0} &
+Controla las asociaciones basadas en solape entre cajas. \\
+
+&
+\texttt{second\_iou\_th} &
+\texttt{0.9} &
+Umbral usado en fases secundarias de asociación por IoU. \\
+
+\midrule
+
+Gate espacial en campo &
+\texttt{field\_gate\_m} &
+\texttt{8.0} &
+Descarta asociaciones físicamente incoherentes cuando existe posición proyectada al campo. \\
+
+\midrule
+
+Penalización por track perdido &
+\texttt{lost\_penalty\_w} &
+\texttt{0.10} &
+Penaliza el coste de asociación de tracks que llevan varios frames perdidos. \\
+
+&
+\texttt{lost\_penalty\_max} &
+\texttt{10} &
+Limita el efecto máximo de la penalización temporal. \\
+
+\midrule
+
+Coste de rescate en imagen &
+\texttt{center\_gate} &
+\texttt{3.0} &
+Controla la distancia máxima entre centros de caja en fases de rescate sin IoU suficiente. \\
+
+\midrule
+
+Consenso de clase &
+\texttt{class\_hard\_gate} &
+\texttt{true} &
+Evita asociar detecciones con tracks de clase incompatible. \\
+
+\midrule
+
+Gate de tamaño de caja &
+\texttt{height\_ratio\_th} &
+\texttt{0.45} &
+Descarta asociaciones con cambios bruscos en la altura de la caja. \\
+
+\midrule
+
+Consenso de equipo &
+\texttt{team\_hard\_gate} &
+\texttt{true} &
+Evita asociaciones entre detecciones y tracks con equipos incompatibles. \\
+
+\bottomrule
+\end{tabularx}
+
+\caption[Hiperparámetros de asociación temporal basada en ByteTrack]{
+Hiperparámetros principales de la capa de asociación temporal basada en ByteTrack. Algunos nombres se han abreviado para mejorar la legibilidad: \texttt{act} indica activación, \texttt{th} indica umbral, \texttt{iou} indica solape entre cajas, \texttt{gate} indica restricción dura y \texttt{w} indica peso.
+}
+\label{tab:hiperparametros-bytetrack}
 \end{table}
+
+
+La decisión sobre el valor final de estos hiperparámetros se trata en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.
 
 \subsection{Resumen de la capa}
 
 En resumen, esta fase no se limita a ejecutar ByteTrack sobre cajas de YOLO, sino que integra restricciones de clase, equipo, geometria en campo y control de creación de tracks para mejorar la asociacion temporal en video de futbol broadcast. La capa siguiente toma estas asociaciones y construye las identidades canonicas estables del partido.
+
+La eleccion final de los hiperparametros de esta fase se realizo mediante prueba y error, acumulando muchos experimentos y evaluando su efecto sobre las metricas del sistema; este proceso se describe con mas detalle en la \hyperref[sec:evaluacion-heuristica-depuracion]{Seccion~\ref*{sec:evaluacion-heuristica-depuracion}}.

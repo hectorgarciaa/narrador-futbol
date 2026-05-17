@@ -1,4 +1,5 @@
 \section{Modelado de conjuntos con Set Transformer}
+\label{sec:setTransformer}
 
 En esta sección se introducen los modelos Set Transformer, una arquitectura diseñada para procesar conjuntos de elementos sin imponer un orden sobre ellos. Este tipo de modelo resulta útil cuando la predicción depende tanto de las características individuales de cada elemento como de las relaciones entre todos los elementos del conjunto.
 
@@ -24,10 +25,10 @@ El bloque básico de estas arquitecturas es el mecanismo de atención. Este part
 
 \[
 \operatorname{Attention}(Q,K,V) =
-\operatorname{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V
+\operatorname{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
 \]
 
-El término $QK^T$ mide la compatibilidad entre cada consulta y cada clave. La división por $\sqrt{d}$ evita que estos productos escalares crezcan demasiado cuando la dimensión de las claves es grande, lo que podría hacer que la función \textit{softmax} produzca distribuciones excesivamente concentradas. Por eso se denomina atención escalada.
+El término $QK^T$ mide la compatibilidad entre cada consulta y cada clave. $d_k$ representa la dimensión de los vectores de clave, por tanto, la división por $\sqrt{d_k}$ es una manera de normalizar y  evitar que estos productos escalares crezcan demasiado cuando la dimensión de las claves es grande, lo que podría hacer que la función \textit{softmax} produzca distribuciones excesivamente concentradas. Por eso se denomina atención escalada.
 
 La función \textit{softmax} convierte esas compatibilidades en pesos de atención. Cada salida se obtiene entonces como una combinación ponderada de los valores $V$: los elementos cuyas claves son más similares a una consulta reciben mayor peso en la combinación final. Por tanto, la similitud se calcula entre consultas y claves, mientras que los valores son la información que se agrega.
 

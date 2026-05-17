@@ -24,7 +24,7 @@ Para asignar una puntuación a cada posible arista, PathCRF utiliza primero un \
 
 El uso de atención resulta adecuado en este contexto porque los jugadores forman un conjunto de elementos relacionados entre sí. La interpretación de una acción no depende únicamente de la posición de un jugador aislado, sino también de su relación espacial y temporal con compañeros y rivales.
 
-A partir de las representaciones de los nodos, PathCRF construye una representación para cada arista candidata concatenando el embedding del nodo origen y el embedding del nodo destino, y aplicando después un perceptrón multicapa, o MLP. Esta representación de arista se transforma posteriormente en un score de emisión, que mide la compatibilidad local de esa arista con el estado de posesión en un instante concreto.
+A partir de las representaciones de los nodos, PathCRF construye una representación para cada arista candidata concatenando el embedding del nodo origen y el embedding del nodo destino, y aplicando después un perceptrón multicapa, o MLP (MultiLayer Perceptron) \citep{goodfellow2016deep}. Esta representación de arista se transforma posteriormente en un score de emisión, que mide la compatibilidad local de esa arista con el estado de posesión en un instante concreto.
 
 Sin embargo, este score local no determina por sí solo la arista final seleccionada. Como se explica en la \hyperref[subsec:crf-dinamico]{Sección~\ref*{subsec:crf-dinamico}}, PathCRF combina estos scores de emisión con scores de transición entre aristas consecutivas para obtener una secuencia de posesión temporalmente coherente.
 
