@@ -1,0 +1,261 @@
+{
+  "total": 16,
+  "events": [
+    {
+      "action_index": 1,
+      "event": {
+        "action": "pase",
+        "event_time_s": 0.4,
+        "player_name": "Carvajal",
+        "player_position": "LD",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Modric",
+        "action_index": 1
+      },
+      "text": "Carvajal realiza el pase a Modric."
+    },
+    {
+      "action_index": 2,
+      "event": {
+        "action": "pase",
+        "event_time_s": 2.4,
+        "player_name": "Valverde",
+        "player_position": "ED",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Carvajal",
+        "action_index": 2
+      },
+      "text": "Valverde realiza un pase a Carvajal."
+    },
+    {
+      "action_index": 3,
+      "event": {
+        "action": "control",
+        "event_time_s": 3.6,
+        "player_name": "Carvajal",
+        "player_position": "LD",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Carvajal",
+        "action_index": 3
+      },
+      "text": "Carvajal realiza el control con maestría."
+    },
+    {
+      "action_index": 4,
+      "event": {
+        "action": "pase",
+        "event_time_s": 5.0,
+        "player_name": "Carvajal",
+        "player_position": "LD",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Courtois",
+        "action_index": 4
+      },
+      "text": "Carvajal realiza el pase a Courtois."
+    },
+    {
+      "action_index": 5,
+      "event": {
+        "action": "control",
+        "event_time_s": 6.4,
+        "player_name": "Courtois",
+        "player_position": "POR",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Courtois",
+        "action_index": 5
+      },
+      "text": "Courtois realiza un control espectacular."
+    },
+    {
+      "action_index": 6,
+      "event": {
+        "action": "pase",
+        "event_time_s": 8.6,
+        "player_name": "Alaba",
+        "player_position": "DFC_DER",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Courtois",
+        "action_index": 6
+      },
+      "text": "Alaba realiza un pase a Courtois."
+    },
+    {
+      "action_index": 7,
+      "event": {
+        "action": "pase",
+        "event_time_s": 9.6,
+        "player_name": "Alaba",
+        "player_position": "DFC_DER",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Courtois",
+        "action_index": 7
+      },
+      "text": "Alaba realiza un pase a Courtois."
+    },
+    {
+      "action_index": 8,
+      "event": {
+        "action": "control",
+        "event_time_s": 11.2,
+        "player_name": "Courtois",
+        "player_position": "POR",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Courtois",
+        "action_index": 8
+      },
+      "text": "Courtois realiza un control espectacular."
+    },
+    {
+      "action_index": 9,
+      "event": {
+        "action": "pase",
+        "event_time_s": 12.8,
+        "player_name": "Courtois",
+        "player_position": "POR",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Fabinho",
+        "action_index": 9
+      },
+      "text": "Courtois realiza un pase a Fabinho."
+    },
+    {
+      "action_index": 10,
+      "event": {
+        "action": "control",
+        "event_time_s": 14.6,
+        "player_name": "Fabinho",
+        "player_position": "MC",
+        "team_name": "Liverpool",
+        "opponent_team_name": "Real Madrid",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Fabinho",
+        "action_index": 10
+      },
+      "text": "Fabinho realiza un control perfecto."
+    },
+    {
+      "action_index": 11,
+      "event": {
+        "action": "pase",
+        "event_time_s": 16.2,
+        "player_name": "Courtois",
+        "player_position": "POR",
+        "team_name": "Real Madrid",
+        "opponent_team_name": "Liverpool",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Virgil",
+        "action_index": 11
+      },
+      "text": "Courtois realiza un pase a Virgil."
+    },
+    {
+      "action_index": 12,
+      "event": {
+        "action": "control",
+        "event_time_s": 17.6,
+        "player_name": "Virgil",
+        "player_position": "DFC_IZQ",
+        "team_name": "Liverpool",
+        "opponent_team_name": "Real Madrid",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Virgil",
+        "action_index": 12
+      },
+      "text": "Virgil realiza el control perfecto y mantiene la posesión."
+    },
+    {
+      "action_index": 13,
+      "event": {
+        "action": "control",
+        "event_time_s": 19.2,
+        "player_name": "Virgil",
+        "player_position": "DFC_IZQ",
+        "team_name": "Liverpool",
+        "opponent_team_name": "Real Madrid",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Virgil",
+        "action_index": 13
+      },
+      "text": "Virgil realiza un control perfecto del balón."
+    },
+    {
+      "action_index": 14,
+      "event": {
+        "action": "control",
+        "event_time_s": 20.8,
+        "player_name": "Virgil",
+        "player_position": "DFC_IZQ",
+        "team_name": "Liverpool",
+        "opponent_team_name": "Real Madrid",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Virgil",
+        "action_index": 14
+      },
+      "text": "Virgil realiza el control perfecto del balón."
+    },
+    {
+      "action_index": 15,
+      "event": {
+        "action": "control",
+        "event_time_s": 22.4,
+        "player_name": "Virgil",
+        "player_position": "DFC_IZQ",
+        "team_name": "Liverpool",
+        "opponent_team_name": "Real Madrid",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Virgil",
+        "action_index": 15
+      },
+      "text": "Virgil realiza un control perfecto del balón."
+    },
+    {
+      "action_index": 16,
+      "event": {
+        "action": "control",
+        "event_time_s": 24.4,
+        "player_name": "Henderson",
+        "player_position": "MD",
+        "team_name": "Liverpool",
+        "opponent_team_name": "Real Madrid",
+        "team_in_favor": null,
+        "field_zone": null,
+        "action_target": "Henderson",
+        "action_index": 16
+      },
+      "text": "Henderson realiza un control perfecto del balón."
+    }
+  ]
+}
