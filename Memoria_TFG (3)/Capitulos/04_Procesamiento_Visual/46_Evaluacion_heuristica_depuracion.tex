@@ -1,0 +1,66 @@
+\section{Evaluación heurística y depuración del pipeline visual}
+\label{sec:evaluacion-heuristica-depuracion}
+
+En esta sección se evalúa el comportamiento del pipeline visual una vez integradas las fases de detección, clasificación de equipos, homografía y tracking. A diferencia de la evaluación aislada del detector, aquí el objetivo no es medir únicamente la precisión de las cajas, sino analizar si el sistema produce trayectorias estables y coherentes a lo largo del vídeo.
+
+
+\subsection{Protocolo de evaluación}
+
+No se contaba de un conjunto de datos anotado frame a frame que permitiera evaluar de forma supervisada todo el pipeline visual, especialmente la calidad de las identidades generadas por el tracking. Por ello, la validación se apoyó en una estrategia heurística basada en dos fuentes complementarias: inspección visual del vídeo generado y métricas agregadas calculadas tras cada ejecución.
+
+La inspección cualitativa se realizó sobre un vídeo de prueba de referencia\footnote{\url{https://github.com/hectorgarciaa/narrador-futbol/blob/main/data/partidoPrueba/partido.mp4}}, revisando la evolución temporal de las identidades en situaciones difíciles como oclusiones, cruces entre jugadores, pérdidas temporales y reapariciones.
+
+Además, el sistema calcula un resumen de métricas heurísticas para jugadores y balón. Entre ellas se incluyen la cobertura media de cada identidad, el número medio de fragmentos por track, la longitud media de los huecos sin detección, la velocidad máxima (px/frame de las bounding box), la confianza media de las detecciones asociadas y la variación del color de camiseta. Estas métricas permiten comparar ejecuciones y detectar síntomas de inestabilidad en el pipeline.
+
+\subsection{Comparación de detectores dentro del pipeline}
+
+Aunque en la \hyperref[sec:deteccion-elementos-juego]{Sección~\ref*{sec:deteccion-elementos-juego}} el modelo secuencial entrenado con SoccerSynth-Detection y DFL-Bundesliga obtenía mejores resultados en detección aislada, la elección final del detector se realizó teniendo en cuenta su impacto sobre el pipeline completo. Para ello se compararon los dos detectores principales: el modelo afinado directamente sobre el dataset pequeño de Roboflow fútbol y el modelo secuencial SoccerSynth+DFL. La \hyperref[tab:comparacion-modelos-pipeline]{Tabla~\ref*{tab:comparacion-modelos-pipeline}} resume las métricas más relevantes obtenidas sobre el vídeo de referencia.
+
+\begin{table}[htbp]
+    \centering
+    \scriptsize
+    \begin{tabular}{p{4.6cm}|c|c}
+        \textbf{Métrica} & \textbf{Modelo Roboflow} & \textbf{Modelo secuencial} \\
+        \hline\hline
+        Cobertura media de jugadores & 0.9549 & 0.8577 \\
+        Mediana de cobertura & 0.9640 & 0.8613 \\
+        Fragmentos medios por track & 9.65 & 21.40 \\
+        Longitud media de huecos & 2.8420 & 6.3975 \\
+        Velocidad máxima media & 31.7887 & 39.4651 \\
+        Varianza de color de camiseta & 39.1290 & 419.0345 \\
+        Confianza media & 0.7824 & 0.6922 \\
+        Cobertura del balón & 0.5933 & 0.5827 \\
+        \hline
+    \end{tabular}
+    \caption[Comparación heurística de detectores dentro del pipeline]{
+    Comparación de métricas heurísticas del pipeline visual completo para los dos detectores evaluados sobre el vídeo de referencia.
+    }
+    \label{tab:comparacion-modelos-pipeline}
+\end{table}
+
+Los resultados muestran que el modelo Roboflow, pese a obtener peores métricas en detección aislada, produce un tracking más estable cuando se integra en el sistema completo. Presenta mayor cobertura de jugadores, menos fragmentación, huecos más cortos, menor velocidad máxima media y una variación cromática de camiseta mucho más baja. Estos indicadores apuntan a trayectorias más continuas e identidades más consistentes.
+
+Por este motivo, se decidió utilizar el modelo Roboflow como detector base del pipeline visual final. Aunque su rendimiento como detector independiente era inferior al del modelo secuencial, su comportamiento dentro del sistema integrado resultó más adecuado para las fases posteriores, especialmente para tracking, clasificación de equipos y análisis temporal.
+
+\subsection{Uso de las métricas durante la depuración}
+
+Las métricas heurísticas también se utilizaron para guiar la depuración de los módulos visuales y el ajuste de hiperparámetros. Por ejemplo, velocidades máximas excesivamente altas solían indicar intercambios de identidad entre jugadores alejados, una cobertura baja podía señalar pérdidas frecuentes de detección o \textit{gates} demasiado estrictos, y un número elevado de fragmentos apuntaba a trayectorias poco continuas.
+
+Del mismo modo, cambios frecuentes de equipo o una alta variación del color de camiseta podían revelar errores en la clasificación cromática o en la reasignación de identidades. La inspección visual permitía interpretar el tipo de error y su contexto, mientras que las métricas agregadas facilitaban comparar distintas configuraciones y comprobar si una modificación mejoraba realmente la estabilidad global del pipeline.
+
+
+\subsection{Resultado visual del pipeline}
+
+Para cerrar este capítulo, se muestra en la \hyperref[fig:resultado-pipeline-visual]{Figura~\ref*{fig:resultado-pipeline-visual}} un ejemplo del resultado producido por el pipeline visual sobre un frame del vídeo. La figura resume de forma conjunta varias de las salidas intermedias y finales del sistema: las detecciones activas asociadas a \textit{tracks}, su proyección sobre el mapa 2D del campo, las detecciones que todavía no han sido absorbidas como \textit{tracks} canónicos y, finalmente, la representación de los \textit{tracks} canónicos consolidados.
+
+El vídeo completo correspondiente a esta fase puede consultarse en:
+\url{https://github.com/hectorgarciaa/narrador-futbol/output/tracking/tracking.mp4}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{Imagenes/Propias/tracking_frame.png}
+    \caption[Resultado del pipeline visual sobre un frame]{
+    Resultado del pipeline visual sobre un frame del partido. El panel superior izquierdo muestra las detecciones asociadas a \textit{tracks} en ese instante; el panel superior derecho muestra la proyección de dichos \textit{tracks} sobre el mapa 2D del campo; el panel inferior izquierdo muestra las detecciones que aún no forman parte de los \textit{tracks} canónicos; y el panel inferior derecho muestra los \textit{tracks} canónicos consolidados.
+    }
+    \label{fig:resultado-pipeline-visual}
+\end{figure}

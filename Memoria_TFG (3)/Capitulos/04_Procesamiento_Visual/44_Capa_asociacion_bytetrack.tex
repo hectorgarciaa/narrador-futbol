@@ -1,0 +1,405 @@
+\section{Capa de asociación temporal basada en ByteTrack}
+\label{sec:bytetrack-layer}
+
+El proceso de detección permite identificar que en un frame aparece un elemento de una determinada clase, pero cada frame se procesa de forma independiente. Para que el sistema pueda reconocer a un mismo jugador a lo largo del vídeo, no basta con detectar jugadores, porteros, árbitros y balón en cada imagen: es necesario asociar las detecciones de frames consecutivos y mantener una identidad temporal estable. Este proceso se conoce como \textit{tracking multiobjeto}.
+
+En nuestro caso, el tracking es una fase crítica porque gran parte de la información posterior depende del identificador asignado a cada elemento. Si un jugador recibe un ID distinto cada vez que aparece, no es posible construir su trayectoria, asociarle una posición, vincularlo a una alineación o utilizarlo correctamente en la generación de eventos. Por ello, el objetivo no es únicamente dibujar bounding boxes sobre el vídeo, sino mantener una representación persistente del partido. Idealmente, la salida final debe estar limitada a los elementos reales del juego: 20 jugadores de campo, 2 porteros, 3 árbitros y 1 balón.
+
+Esta fase ha sido una de las más complejas del proyecto. En fútbol aparecen muchos problemas propios del dominio: oclusiones entre jugadores, cruces continuos, jugadores del mismo equipo con apariencia muy parecida, cambios de escala por el zoom, movimientos de cámara, detecciones perdidas durante varios frames y elementos que salen temporalmente del plano. Además, intentar solucionar uno de estos problemas de forma aislada puede empeorar otro. Por ejemplo, permitir reasociaciones muy amplias ayuda a recuperar jugadores tras una oclusión, pero también aumenta el riesgo de intercambiar IDs entre jugadores cercanos. Por ello, el sistema se ha construido como una combinación de varias restricciones complementarias.
+
+La fase de asociación temporal se ha dividido en dos capas. La primera capa, tratada en esta sección, es una adaptación de ByteTrack orientada a producir asociaciones robustas entre detecciones consecutivas. La segunda capa, descrita en la \hyperref[sec:tracking-canonico]{Sección~\ref*{sec:tracking-canonico}}, intenta coser esas asociaciones de ByteTrack para estabilizar las 26 identidades finales del partido. La \hyperref[fig:bytetrack_resumen]{Figura~\ref*{fig:bytetrack_resumen}} resume el flujo general de esta primera capa y las principales restricciones que se aplican durante la asociación.
+
+\begin{figure}[H]
+\centering
+\resizebox{0.96\textwidth}{!}{%
+\begin{tikzpicture}[
+    font=\scriptsize,
+    >=Latex,
+    line cap=round,
+    line join=round,
+    block/.style={
+        rectangle,
+        draw=black,
+        rounded corners=2pt,
+        minimum width=4.55cm,
+        minimum height=0.78cm,
+        align=center,
+        fill=white
+    },
+    phaseblock/.style={
+        rectangle,
+        draw=black,
+        rounded corners=2pt,
+        minimum width=2.85cm,
+        minimum height=0.82cm,
+        align=center,
+        fill=white
+    },
+    gateblock/.style={
+        rectangle,
+        draw=black,
+        rounded corners=2pt,
+        minimum width=3.20cm,
+        minimum height=0.70cm,
+        align=center,
+        fill=white
+    },
+    smallblock/.style={
+        rectangle,
+        draw=black,
+        rounded corners=2pt,
+        minimum width=2.55cm,
+        minimum height=0.72cm,
+        align=center,
+        fill=white
+    },
+    container/.style={
+        rectangle,
+        draw=black!70,
+        dashed,
+        rounded corners=4pt,
+        inner xsep=10pt,
+        inner ysep=11pt,
+        fill=none
+    },
+    boxtitle/.style={
+        font=\scriptsize\bfseries,
+        fill=white,
+        inner sep=2pt
+    },
+    arrow/.style={-{Latex[length=2.1mm]}, very thick},
+    darrow/.style={-{Latex[length=2.1mm]}, thick, dashed}
+]
+
+% -------------------------------------------------
+% Entrada
+% -------------------------------------------------
+\node[block] (input)
+{Detecciones enriquecidas\\
+clase, conf., equipo y campo};
+
+\node[block, below=0.55cm of input] (predict)
+{Predicción de tracks\\
+estado previo + Kalman};
+
+% -------------------------------------------------
+% Matching multietapa
+% -------------------------------------------------
+\node[phaseblock, below=1.25cm of predict, xshift=-2.65cm] (highiou)
+{\texttt{high\_iou}\\
+$T_{AP}$ vs $D_A$};
+
+\node[phaseblock, below=0.42cm of highiou] (lowiou)
+{\texttt{low\_iou}\\
+$T_{AP}$ vs $D_B$};
+
+\node[phaseblock, below=0.42cm of lowiou] (unciou)
+{\texttt{unconfirmed\_iou}\\
+$T_{NC}$ vs $D_R$};
+
+\node[phaseblock, right=0.65cm of highiou] (highbbox)
+{\texttt{high\_bbox}\\
+$T_{AP}^{r}$ vs $D_A$};
+
+\node[phaseblock, below=0.42cm of highbbox] (lowbbox)
+{\texttt{low\_bbox}\\
+$T_{AP}^{r}$ vs $D_B$};
+
+\node[phaseblock, below=0.42cm of lowbbox] (uncbbox)
+{\texttt{unconfirmed\_bbox}\\
+$T_{NC}^{r}$ vs $D_R$};
+
+\node[container, fit=(highiou)(lowiou)(unciou)(highbbox)(lowbbox)(uncbbox)] (matchbox) {};
+\node[boxtitle, anchor=south west] at ($(matchbox.north west)+(0.15,0.02)$)
+{Matching multietapa};
+
+\draw[arrow] (highiou) -- (lowiou);
+\draw[arrow] (lowiou) -- (unciou);
+\draw[arrow] (highbbox) -- (lowbbox);
+\draw[arrow] (lowbbox) -- (uncbbox);
+
+% -------------------------------------------------
+% Compuertas y penalizaciones
+% -------------------------------------------------
+\node[gateblock, right=1.65cm of highbbox, yshift=0.04cm] (classgate)
+{Gate clase};
+
+\node[gateblock, below=0.34cm of classgate] (teamgate)
+{Gate equipo\\
+solo para \texttt{player}};
+
+\node[gateblock, below=0.34cm of teamgate] (fieldgate)
+{Gate campo\\
+\texttt{field\_gate\_m = 8}};
+
+\node[gateblock, below=0.34cm of fieldgate] (sizegate)
+{Gate tamaño bbox\\
+\texttt{height\_ratio\_th}};
+
+\node[container, fit=(classgate)(teamgate)(fieldgate)(sizegate)] (gatebox) {};
+\node[boxtitle, anchor=south west] at ($(gatebox.north west)+(0.15,0.02)$)
+{Compuertas y penalizaciones};
+
+% -------------------------------------------------
+% Flechas superiores
+% -------------------------------------------------
+\draw[arrow] (input) -- (predict);
+\draw[arrow] (predict.south) -- ++(0,-0.28) -| ($(matchbox.north west)!0.52!(matchbox.north east)$);
+
+\draw[darrow]
+    ($(gatebox.west)+(0,0.05)$)
+    to[out=190,in=20]
+    node[pos=0.44, above=6pt, fill=white, inner sep=1pt, align=center]
+    {filtran/ponderan\\costes}
+    ($(matchbox.east)+(0,-0.15)$);
+
+% -------------------------------------------------
+% Salidas del matching
+% -------------------------------------------------
+\coordinate (splitmatch) at ($(matchbox.south)+(0,-1.10cm)$);
+\coordinate (outrow) at ($(splitmatch)+(0,-0.62cm)$);
+
+\node[block, minimum width=4.20cm, anchor=north east] (matched)
+at ($(outrow)+(-0.55cm,0)$)
+{Asociadas\\
+a tracks previos};
+
+\node[block, minimum width=4.20cm, anchor=north west] (unmatched)
+at ($(outrow)+(0.55cm,0)$)
+{Detecciones\\
+no asociadas};
+
+\draw[thick] (matchbox.south) -- (splitmatch);
+\draw[arrow] (splitmatch) -| (matched.north);
+\draw[arrow] (splitmatch) -| (unmatched.north);
+
+% -------------------------------------------------
+% Control de nuevos IDs
+% -------------------------------------------------
+\node[smallblock, below=1.48cm of unmatched, xshift=-2.85cm] (ovact)
+{Supresión\\ vs activos};
+
+\node[smallblock, below=1.48cm of unmatched] (ovunc)
+{Supresión\\ vs no confirmados};
+
+\node[smallblock, below=1.48cm of unmatched, xshift=2.85cm] (ovnew)
+{Supresión\\ entre nuevas};
+
+\node[block, minimum width=5.10cm, below=1.10cm of ovunc] (create)
+{Creación controlada de nuevos tracks\\
+solo si supera umbrales};
+
+\node[container, fit=(ovact)(ovunc)(ovnew)(create)] (newbox) {};
+\node[boxtitle, anchor=south west] at ($(newbox.north west)+(0.15,0.02)$)
+{Control de nuevos IDs};
+
+% Tres ramas desde detecciones no asociadas
+\coordinate (usplit) at ($(unmatched.south)+(0,-0.42cm)$);
+\draw[thick] (unmatched.south) -- (usplit);
+\draw[arrow] (usplit) -| (ovact.north);
+\draw[arrow] (usplit) -- (ovunc.north);
+\draw[arrow] (usplit) -| (ovnew.north);
+
+\draw[arrow] (ovact.south) |- (create.west);
+\draw[arrow] (ovunc.south) -- (create.north);
+\draw[arrow] (ovnew.south) |- (create.east);
+
+% -------------------------------------------------
+% Salida final
+% -------------------------------------------------
+\node[block, minimum width=5.10cm, below=1.05cm of create] (output)
+{Salida intermedia\\
+detecciones + \textit{raw tracker id}};
+
+\coordinate (mergeout) at ($(output.north)+(0,0.38cm)$);
+
+\draw[thick] (create.south) -- (mergeout);
+\draw[thick] (matched.south) |- ($(mergeout)+(-1.45cm,0)$) -- (mergeout);
+\draw[arrow] (mergeout) -- (output.north);
+
+\end{tikzpicture}
+}%
+\caption[Resumen del flujo de asociación en la capa ByteTrack]{Resumen del flujo de la capa de asociación temporal basada en ByteTrack. Se utilizan las siguientes abreviaturas: $T_{AP}$ representa tracks activos y perdidos, $T_{AP}^{r}$ tracks activos y perdidos restantes tras etapas previas, $T_{NC}$ tracks no confirmados, $T_{NC}^{r}$ tracks no confirmados restantes, $D_A$ detecciones de alta confianza, $D_B$ detecciones de baja confianza y $D_R$ detecciones restantes.}
+\label{fig:bytetrack_resumen}
+\end{figure}
+
+En la \hyperref[sec:tracking-tecnologias]{Sección~\ref*{sec:tracking-tecnologias}} se introdujo ByteTrack desde un punto de vista general. En este apartado se describe su integración concreta como primera capa de tracking del pipeline visual y las modificaciones realizadas sobre el algoritmo clásico.
+
+\subsection{Base de la fase}
+
+Sobre la estructura original de ByteTrack se han añadido señales propias del proyecto: clase reajustada, equipo estimado y posición proyectada sobre el campo.
+
+La fase consume las detecciones enriquecidas de identificación y produce una salida intermedia de detecciones asociadas con \textit{raw tracker id}. Esta salida no es todavía la identidad final del jugador, sino una asociación temporal que alimentará la siguiente capa.
+
+\subsection{Asociación multietapa en cada frame}
+
+Manteniendo la lógica general de ByteTrack descrita en la \hyperref[sec:tracking-tecnologias]{Sección~\ref*{sec:tracking-tecnologias}} (asociación progresiva de tracks activos, perdidos y no confirmados), nuestra adaptación desdobla el \textit{matching} en seis subfases, ampliando el esquema base presentado en ese apartado.
+\begin{itemize}
+    \item \texttt{high\_iou}
+    \item \texttt{low\_iou}
+    \item \texttt{unconfirmed\_iou}
+    \item \texttt{high\_bbox}
+    \item \texttt{low\_bbox}
+    \item \texttt{unconfirmed\_bbox}
+\end{itemize}
+
+Mientras que las tres primeras subfases usan el solape entre cajas como función de coste, las tres últimas utilizan la distancia entre los centros de las \textit{bounding boxes} y actúan como mecanismo de rescate cuando el solape no es suficiente, reduciendo fragmentaciones en escenas con zoom, paneos y discontinuidades de detección.
+
+\subsection{Restricciones por clase y equipo}
+
+Otra mejora introducida sobre ByteTrack consiste en utilizar la clase del objeto y el equipo asignado como restricciones de asociación. Si un track corresponde a un jugador, no debería poder reasociarse con una detección de balón o de árbitro. Del mismo modo, si un jugador pertenece a un equipo, no debería heredar la identidad de un jugador del equipo contrario.
+
+Por lo tanto, en nuestra adaptación de ByteTrack se usan la clase de la detección y su equipo asociado como restricciones de asociación duras. Si la clase del track y la clase de la detección candidata no coinciden, la asociación se descarta automáticamente.
+
+Del mismo modo, para \texttt{player}, cuando hay información de equipo tanto en el track como en la detección, se aplica también una restricción dura: si no coinciden, la asociación se descarta.
+
+Estas restricciones reducen los intercambios entre elementos de distinta clase y entre jugadores de equipos diferentes. Sin embargo, todavía puede haber intercambios entre jugadores del mismo equipo, especialmente cuando se cruzan o aparecen muy juntos en la imagen. Para reducir este problema fue necesario incorporar información geométrica del campo.
+
+\subsection{Uso de homografía y restricción espacial en metros}
+
+En nuestra versión de ByteTrack adaptada también se aplica un gate espacial en campo para las clases \texttt{player} y \texttt{goalkeeper}. Si la distancia proyectada entre el track y la detección candidata supera el límite configurado (8 metros), la asociación se descarta. En cambio, si está dentro del rango permitido, la pareja se mantiene como factible y el coste se decide por el criterio de matching de la subfase (IoU o distancia de centros en las fases de rescate).
+
+Durante el desarrollo se evaluó usar la posición de las detecciones proyectada al campo como coste principal de la asociación. En la práctica, esta opción degradaba el rendimiento, ya que esta señal presentaba mucha vibración frame a frame debido a pequeños cambios en la homografía entre frames. Esto provocaba variaciones bruscas en las trayectorias estimadas de las identidades, afectaba especialmente a la predicción del estado con el filtro de Kalman y acababa propagando errores al proceso de \textit{matching}. En la versión final, por tanto, la posición en campo se utiliza como compuerta geométrica de factibilidad y no como término principal de coste.
+
+\subsection{Control de creación de nuevos tracks}
+
+Otro problema relevante es la creación excesiva de nuevos tracks. Esto puede ocurrir cuando el detector produce \textit{bounding boxes} duplicadas o cuando ByteTrack pierde temporalmente una identidad. Para reducir este efecto, se añadieron reglas de supresión por solape de tracks nuevos:
+\begin{itemize}
+    \item contra tracks activos ya consolidados,
+    \item contra tracks tentativos no confirmados,
+    \item y entre candidatos nuevos del mismo frame.
+\end{itemize}
+
+Un candidato a track nuevo se descarta si solapa demasiado con un track activo, si solapa con un track tentativo no consolidado, o si solapa con otro candidato nuevo de mayor confianza. Ante cualquier solape entre dos candidatos nuevos, se conserva únicamente el de mayor confianza. Con esta regla se consigue reducir tracks duplicados sin alterar el seguimiento de tracks ya consolidados.
+
+La configuración completa de la capa se resume en la \hyperref[tab:hiperparametros-bytetrack]{Tabla~\ref*{tab:hiperparametros-bytetrack}}.
+
+
+\begin{table}[htbp]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{
+>{\raggedright\arraybackslash}p{2.7cm}
+>{\raggedright\arraybackslash}p{3.1cm}
+>{\raggedright\arraybackslash}p{1.5cm}
+>{\raggedright\arraybackslash}X
+}
+\toprule
+\textbf{Bloque} & \textbf{Parámetro} & \textbf{Valor} & \textbf{Uso en pipeline} \\
+\midrule
+
+Creación de nuevos tracks &
+\texttt{new\_active\_iou} &
+\texttt{0.20} &
+Evita crear un nuevo ID sobre un track ya consolidado. \\
+
+&
+\texttt{new\_unconfirmed\_iou} &
+\texttt{0.10} &
+Evita duplicados sobre tracks aún no consolidados. \\
+
+&
+\texttt{new\_candidate\_iou} &
+\texttt{0.00} &
+Conserva solo el candidato nuevo de mayor confianza si hay solape. \\
+
+\midrule
+
+Activación y persistencia &
+\texttt{track\_act\_th} &
+\texttt{0.10} &
+Umbral mínimo de confianza para activar un nuevo track. \\
+
+&
+\texttt{low\_conf\_th} &
+\texttt{0.01} &
+Permite usar detecciones de baja confianza en fases posteriores de asociación. \\
+
+&
+\texttt{min\_consec\_frames} &
+\texttt{5} &
+Número mínimo de frames consecutivos para estabilizar una identidad. \\
+
+&
+\texttt{lost\_buffer} &
+\texttt{90} &
+Número de frames durante los que se conserva un track perdido antes de eliminarlo. \\
+
+\midrule
+
+Matching por IoU &
+\texttt{min\_match\_iou} &
+\texttt{0.0} &
+Controla las asociaciones basadas en solape entre cajas. \\
+
+&
+\texttt{second\_iou\_th} &
+\texttt{0.9} &
+Umbral usado en fases secundarias de asociación por IoU. \\
+
+\midrule
+
+Gate espacial en campo &
+\texttt{field\_gate\_m} &
+\texttt{8.0} &
+Descarta asociaciones físicamente incoherentes cuando existe posición proyectada al campo. \\
+
+\midrule
+
+Penalización por track perdido &
+\texttt{lost\_penalty\_w} &
+\texttt{0.10} &
+Penaliza el coste de asociación de tracks que llevan varios frames perdidos. \\
+
+&
+\texttt{lost\_penalty\_max} &
+\texttt{10} &
+Limita el efecto máximo de la penalización temporal. \\
+
+\midrule
+
+Coste de rescate en imagen &
+\texttt{center\_gate} &
+\texttt{3.0} &
+Controla la distancia máxima entre centros de caja en fases de rescate sin IoU suficiente. \\
+
+\midrule
+
+Consenso de clase &
+\texttt{class\_hard\_gate} &
+\texttt{true} &
+Evita asociar detecciones con tracks de clase incompatible. \\
+
+\midrule
+
+Gate de tamaño de caja &
+\texttt{height\_ratio\_th} &
+\texttt{0.45} &
+Descarta asociaciones con cambios bruscos en la altura de la caja. \\
+
+\midrule
+
+Consenso de equipo &
+\texttt{team\_hard\_gate} &
+\texttt{true} &
+Evita asociaciones entre detecciones y tracks con equipos incompatibles. \\
+
+\bottomrule
+\end{tabularx}
+
+\caption[Hiperparámetros de asociación temporal basada en ByteTrack]{
+Hiperparámetros principales de la capa de asociación temporal basada en ByteTrack. Algunos nombres se han abreviado para mejorar la legibilidad: \texttt{act} indica activación, \texttt{th} indica umbral, \texttt{iou} indica solape entre cajas, \texttt{gate} indica restricción dura y \texttt{w} indica peso.
+}
+\label{tab:hiperparametros-bytetrack}
+\end{table}
+
+
+La decisión sobre el valor final de estos hiperparámetros se trata en la \hyperref[sec:evaluacion-heuristica-depuracion]{Sección~\ref*{sec:evaluacion-heuristica-depuracion}}.
+
+\subsection{Resumen de la capa}
+
+En resumen, esta fase no se limita a ejecutar ByteTrack sobre cajas de YOLO, sino que integra restricciones de clase, equipo, geometría en campo y control de creación de tracks para mejorar la asociación temporal en vídeo de fútbol broadcast. La capa siguiente toma estas asociaciones y construye las identidades canónicas estables del partido.
+
+La elección final de los hiperparámetros de esta fase se realizó mediante prueba y error, acumulando muchos experimentos y evaluando su efecto sobre las métricas del sistema; este proceso se describe con más detalle en la \hyperref[sec:evaluacion-heuristica-depuracion]{Sección~\ref*{sec:evaluacion-heuristica-depuracion}}.

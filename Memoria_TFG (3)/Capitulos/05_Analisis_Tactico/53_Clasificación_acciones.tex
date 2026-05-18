@@ -1,0 +1,172 @@
+\section{Clasificación de acciones}
+\label{sec:clasificacion-acciones}
+
+Una vez finalizada la fase de identificación de jugadores (quién), continuamos con la
+fase de identificación de acciones (qué). Mientras que el tracking asigna identidades,
+equipos y posiciones a cada jugador a lo largo del vídeo, la clasificación de acciones
+se encarga de transformar esas trayectorias en eventos semánticos: pases, controles,
+robos, tiros, saques y otras situaciones narrables del partido. Como se anticipó en la \hyperref[sec:pathcrf-tecnologias]{Sección~\ref*{sec:pathcrf-tecnologias}}, para esta tarea se ha integrado PathCRF, un modelo que formula la detección de eventos futbolísticos como una selección secuencial de aristas sobre un grafo dinámico de jugadores. En lugar de trabajar directamente sobre los frames de vídeo, PathCRF opera sobre las trayectorias (x, y) de los jugadores en el campo, lo que lo hace especialmente compatible con la salida del sistema de tracking desarrollado en las fases anteriores. Esta sección describe el proceso completo: desde la adaptación de los tracks al formato requerido por el modelo hasta la generación de eventos listos para ser narrados.
+
+
+\subsection{Adaptación de tracks al formato PathCRF}
+La entrada de esta fase no es el vídeo original, sino la salida estructurada de las fases anteriores: jugadores, porteros y árbitros ya identificados, asociados a equipos y proyectados al sistema de coordenadas del campo. A partir de esta información se construye una representación temporal compatible con PathCRF.
+
+Esta representación adopta la forma de una tabla temporal en la que cada fila corresponde a un frame y cada columna describe el estado de uno de los actores del juego. Para cada jugador se incluyen sus coordenadas sobre el campo y variables de movimiento derivadas, como velocidad y aceleración. 
+
+\subsubsection{Estabilidad de identidades}
+
+Un requisito importante de esta transformación es que cada jugador ocupe un slot coherente a lo largo del tiempo. En la práctica, esta condición no se resuelve de nuevo dentro de la propia fase de acciones, sino que se apoya en la canonización ya realizada previamente por el tracking. Es decir, la fase de clasificación de acciones hereda una estructura de identidades ya estabilizada que se asume como válida y se reutiliza como base para construir la entrada del modelo.
+
+En concreto, la representación se organiza en slots fijos separados por rol y por equipo: \texttt{home\_1} y \texttt{away\_1} para los porteros; \texttt{home\_2} a \texttt{home\_11} para los diez jugadores de campo del equipo local, \texttt{away\_2} a \texttt{away\_11} para los diez jugadores de campo del equipo visitante, y \texttt{referee\_1} a \texttt{referee\_3} para los árbitros.
+
+\subsubsection{Relleno de observaciones ausentes}
+En muchos frames no todos los slots tienen una detección asociada. PathCRF necesita disponer de una posición para cada slot en cada instante, por lo que los huecos deben rellenarse. La estrategia consiste en dos pasos: primero se interpola linealmente entre las posiciones conocidas de cada slot, recortando los valores extrapolados a los límites del terreno de juego (105 m × 68 m). Después, cuando un slot carece por completo de observaciones durante un tramo del vídeo, se utiliza una plantilla de equipo alineada con el centroide de los jugadores visibles en ese instante. Esta plantilla sitúa a los jugadores en una formación de referencia (aproximadamente un 4-2-3-1) que se desplaza y rota para seguir la posición media del equipo.
+
+\subsubsection{Suavizado de trayectorias}
+Antes de lanzar la inferencia, las trayectorias se suavizan para amortiguar pequeñas oscilaciones debidas al ruido acumulado de las fases previas. Aunque el tracking canónico ya proporciona identidades estables y posiciones proyectadas al campo, la localización de cada jugador sigue estando afectada por varios factores: imprecisión del detector, pequeñas variaciones en las \textit{bounding boxes}, errores de la homografía al proyectar desde la imagen broadcast al plano métrico del terreno de juego y desapariciones momentáneas por oclusión o cambio de plano. Como consecuencia, una trayectoria que en realidad debería ser suave puede presentar pequeños saltos laterales o aceleraciones entre frames consecutivos.
+
+Este problema es especialmente importante en esta fase porque PathCRF no solo observa posiciones, sino también relaciones temporales entre jugadores. Si una trayectoria contiene jitter, el modelo puede interpretar incorrectamente que un jugador ha frenado bruscamente o que ha cambiado de dirección de forma repentina.
+
+Para reducir este efecto, se aplica un preprocesado temporal en dos pasadas consecutivas. En cada pasada se detectan y corrigen \textit{outliers} aislados de movimiento: si los saltos \(t-1 \rightarrow t\) y \(t \rightarrow t+1\) superan el desplazamiento máximo permitido, pero el puente directo \(t-1 \rightarrow t+1\) sí es plausible, el punto intermedio \(t\) se sustituye por una interpolación entre sus vecinos. Después se aplica un suavizado mediante mediana móvil con ventana de 9 frames, un filtro Savitzky-Golay (11, orden 2) y un suavizado exponencial (\(\alpha = 0.35\)). Por último, se limita el jitter por paso, acotando el desplazamiento máximo entre frames al 75\% del umbral físico permitido.
+
+Una vez estabilizadas las coordenadas, se recalculan las magnitudes cinemáticas de entrada al modelo (\(v_x\), \(v_y\), velocidad y aceleración) mediante diferencias finitas.
+
+La finalidad de este preprocesado no es alterar el comportamiento global de los jugadores, sino eliminar irregularidades locales que podrían degradar la detección de eventos. En una tarea basada en relaciones temporales, pequeñas vibraciones frame a frame pueden traducirse fácilmente en falsos cambios de estado si no se corrigen previamente.
+
+\subsection{Modelo PathCRF}
+El núcleo de la fase de acciones es PathCRF, un modelo que combina una red de atención espacio-temporal con un campo aleatorio condicional (CRF) dinámico. Aunque esta arquitectura ya se describió en la \hyperref[sec:pathcrf-tecnologias]{Sección~\ref*{sec:pathcrf-tecnologias}}, conviene recordar los puntos clave del diseño.
+
+\subsubsection{Arquitectura}
+PathCRF representa el partido como un grafo completamente conectado que evoluciona en el tiempo . En cada instante \(t\), los nodos representan a los jugadores, junto con nodos externos asociados a salidas del campo (\texttt{out\_left}, \texttt{out\_right}, \texttt{out\_top}, \texttt{out\_bottom}). 
+
+Las aristas dirigidas entre nodos representan posibles estados de la acción: una autoarista (\(i \rightarrow i\)) se interpreta como continuidad de posesión del jugador $i$, mientras que una arista entre nodos distintos (\(i \rightarrow j\)) representa una transferencia de la posesión entre esos dos jugadores. El \textit{backbone} del modelo procesa las trayectorias y sus variables cinemáticas mediante bloques de atención, capturando relaciones espaciales y temporales entre los nodos sin depender del orden de entrada. A partir de las representaciones de los nodos se construyen representaciones de las aristas, que son la base para la inferencia secuencial posterior.
+
+
+\subsection{Inferencia sobre ventana deslizante}
+La clasificación de acciones se ejecuta mediante una estrategia de ventana deslizante. El sistema va acumulando una porción reciente del partido y realiza inferencias periódicas sobre ella de manera asíncrona.
+
+\subsubsection{Ventana de trabajo}
+El sistema mantiene un buffer de los últimos frames procesados por el tracking. La configuración utilizada mantiene una ventana reciente de 750 frames (30 segundos a 25 FPS). Sobre esa ventana, se lanza una nueva inferencia cada 40 frames (1.6 segundos). Además, no se emiten resultados sobre el instante actual, sino sobre una ventana retrasada: 40 frames de emisión (1.6 segundos) con un retardo de 50 frames (2.0 segundos) respecto al frame presente. Es decir, cuando el sistema está en el frame \(N\), la emisión de aristas se refiere aproximadamente al intervalo \([N-89, N-50]\), es decir, entre 3.56 y 2.0 segundos por detrás del presente. Este retardo es intencionado: PathCRF necesita observar suficiente contexto alrededor de una interacción para decidir con mayor estabilidad. Además, el contexto futuro es muy útil para poder estabilizar y suavizar mejor las trayectorias de los tracks en el intervalo de emisión.
+
+
+\subsubsection{Ejecución asíncrona en segundo plano}
+Otro aspecto importante es que esta inferencia no se realiza de forma bloqueante respecto al resto del pipeline. Dado que el cálculo del modelo es costoso, la ejecución se desplaza a un hilo de trabajo independiente. Mientras se procesa una ventana temporal, el bucle principal puede seguir leyendo nuevos frames, ejecutando el tracking y actualizando el estado general del sistema.
+
+Esta separación es clave para que el procesamiento siga siendo fluido. Sin ella, cada llamada al modelo introduciría pausas perceptibles en el pipeline completo. Así, la fase de acciones se integra como un proceso continuo que trabaja con cierto desfase respecto al presente, pero sin interrumpir el resto de módulos.
+
+
+\subsection{Postprocesado de aristas a eventos discretos}
+Como se explicó en la \hyperref[sec:pathcrf-tecnologias]{Sección~\ref*{sec:pathcrf-tecnologias}}, la salida directa de PathCRF es una secuencia temporal de predicciones sobre aristas del grafo. En cada instante, el modelo asigna puntuaciones (\textit{logits} o probabilidades) a las aristas candidatas y selecciona la arista activa más probable para ese frame.
+
+Esta representación es adecuada para modelar la dinámica continua del juego, pero no para alimentar directamente el módulo de comentarios. El sistema de narración necesita unidades semánticas discretas y estables. Por ello, tras la inferencia se aplica un postprocesado temporal que agrupa la secuencia de aristas, filtra oscilaciones y consolida transiciones relevantes en eventos interpretables.
+
+\subsubsection{Consolidación temporal de aristas}
+Por tanto, aunque la inferencia se ejecuta de forma periódica (cada 40 frames), cada ejecución de PathCRF produce una secuencia temporal de aristas activas \((origen,destino)\) a nivel de frame sobre la ventana analizada. En lugar de convertir directamente esa traza densa en eventos, el sistema toma el tramo correspondiente a la ventana de emisión y agrupa las aristas por pareja origen--destino. Para cada grupo se calcula su soporte temporal, es decir, el número de frames dentro de esa ventana de emisión en los que aparece. También se calcula su racha consecutiva máxima y su proporción respecto al total de la ventana.
+
+Solo se consideran candidatas a aquellas aristas que superan simultáneamente los umbrales mínimos de estabilidad temporal, consiguiendo así descartar las aristas de baja influencia dentro de la ventana. Entre las candidatas restantes se prioriza la más consistente dentro de la ventana. De este modo, cada ventana de emisión produce una salida compacta y estable, en lugar de una lista ruidosa de microtransiciones.
+
+\subsubsection{Eventos base}
+A partir de esa arista elegida se pueden crear 3 eventos en función de la arista elegida en la ventana anterior: \texttt{control}, \texttt{pase} y \texttt{robo}. El \texttt{control} representa continuidad de posesión por parte del mismo jugador, es decir, siempre que ; el \texttt{pase} representa una transferencia entre jugadores; y el \texttt{robo} representa un cambio de posesión entre equipos. De forma adicional, las situaciones de salida del juego se mantienen como señal contextual, pero no constituyen el núcleo de la narración futbolística.
+
+Este paso permite pasar de una salida probabilística de bajo nivel (aristas por frame) a una secuencia compacta de eventos con significado futbolístico, que es el formato que consume el módulo LLM para generar comentarios coherentes.
+
+\subsubsection{Eventos base}
+
+Una vez seleccionada la arista dominante del bloque, se traduce a un evento discreto base. En esta primera etapa todavía no se intenta interpretar toda la semántica futbolística, sino obtener una señal compacta y estable a partir de la salida de PathCRF:
+
+\begin{itemize}
+    \item \texttt{control}: cuando \(origen = destino\), indicando continuidad de posesión en el mismo jugador.
+    \item \texttt{kick}: cuando \(origen \neq destino\) y ambos extremos corresponden a jugadores, indicando una transferencia potencial de balón.
+    \item \texttt{out}: cuando el origen o el destino corresponde a un nodo externo de salida del campo.
+\end{itemize}
+
+El evento \texttt{kick} se mantiene deliberadamente como una etiqueta intermedia. En una retransmisión, una transferencia entre dos jugadores puede ser un pase normal, un robo, un despeje o incluso un tiro dependiendo del contexto espacial y de la posesión previa. Por este motivo, después del postprocesado temporal se aplica una segunda capa de postprocesado semántico.
+
+\subsubsection{Postprocesado semántico online}
+
+El postprocesado semántico se aplica sobre los eventos ya consolidados por bloque. Su función es enriquecer los eventos base con información de tracking: equipo del jugador que inicia la acción, equipo del receptor, posición en metros sobre el campo, dirección estimada de ataque y estado previo de la posesión.
+
+Para ello, el sistema mantiene dos estados internos:
+
+\begin{itemize}
+    \item una estimación de la dirección de ataque de cada equipo;
+    \item un poseedor lógico del balón, actualizado con cada evento aceptado.
+\end{itemize}
+
+La dirección de ataque se estima observando los desplazamientos horizontales de los eventos \texttt{kick}. Si un equipo acumula desplazamientos positivos en el eje \(x\), se asume que ataca hacia la derecha; si acumula desplazamientos negativos, se asume que ataca hacia la izquierda. Esta estimación se calcula de forma online, utilizando una memoria corta de las últimas acciones, por lo que puede adaptarse al equipo que esté atacando en cada tramo.
+
+A partir de esta información, cada evento base conserva dos etiquetas:
+
+\begin{itemize}
+    \item \texttt{event\_type\_raw}, que guarda la salida original del postprocesado temporal;
+    \item \texttt{event\_type\_semantic}, que guarda la interpretación final usada por el sistema de comentarios.
+\end{itemize}
+
+Esta separación permite mantener trazabilidad. Por ejemplo, un evento puede nacer como \texttt{kick} y acabar convertido en \texttt{shot} o \texttt{robo}, sin perder la información de que originalmente procedía de una transferencia detectada por PathCRF.
+
+\subsubsection{Detección de tiros}
+
+La detección de tiros se implementa como una promoción semántica de algunos eventos \texttt{kick}. No todos los golpeos se narran como pases: si el jugador está en zona de finalización y la trayectoria del balón apunta hacia portería, el evento se reinterpreta como \texttt{shot}, que posteriormente el módulo de comentarios verbaliza como \texttt{tiro}.
+
+Para decidirlo se calcula una puntuación heurística basada en varios factores:
+
+\begin{itemize}
+    \item distancia del jugador a la portería rival;
+    \item pertenencia a la zona ofensiva del campo;
+    \item avance real hacia portería;
+    \item similitud entre la dirección del golpeo y la dirección hacia el centro de la portería;
+    \item si el receptor estimado es el portero rival o un jugador contrario;
+    \item si la acción ocurre en una zona central de remate.
+\end{itemize}
+
+En la configuración actual, solo se considera tiro un \texttt{kick} iniciado a menos de 42 metros de portería y dentro de la zona ofensiva. Además, la dirección del movimiento debe ser compatible con la portería rival. La puntuación aumenta cuando el golpeo se produce más cerca del área, progresa claramente hacia portería, tiene una alta similitud direccional con el vector a portería o termina cerca del portero contrario.
+
+Cuando la puntuación supera el umbral definido, el evento se marca como:
+
+\begin{itemize}
+    \item \texttt{event\_type\_raw = kick};
+    \item \texttt{event\_type\_semantic = shot};
+    \item \texttt{semantic\_source = online\_shot\_rule}.
+\end{itemize}
+
+De esta forma, la salida final ya no es simplemente una transferencia de balón, sino una acción futbolística narrable como tiro.
+
+\subsubsection{Detección de robos}
+
+El robo se introduce como una corrección semántica de la posesión. El sistema evita narrar como pase una acción en la que el supuesto receptor pertenece al equipo contrario. En ese caso, no tendría sentido decir que un jugador ha pasado el balón a un rival; futbolísticamente es más coherente interpretarlo como una recuperación o robo del receptor.
+
+El postprocesado contempla dos casos principales:
+
+\begin{itemize}
+    \item Si un evento \texttt{kick} termina en un jugador del equipo contrario, se convierte en \texttt{robo}. El actor principal deja de ser el jugador que golpeó el balón y pasa a ser el receptor rival, es decir, el jugador que recupera la posesión.
+    \item Si un evento \texttt{control} aparece en un jugador de un equipo distinto al último poseedor lógico, también se interpreta como \texttt{robo}. Esto cubre situaciones en las que la recuperación no aparece como una transferencia clara, sino como una nueva posesión estabilizada.
+\end{itemize}
+
+En ambos casos, el evento final se marca como:
+
+\begin{itemize}
+    \item \texttt{event\_type\_semantic = robo};
+    \item \texttt{semantic\_source = online\_possession\_rule}.
+\end{itemize}
+
+Además, cuando el robo procede de un \texttt{kick} hacia un rival, el sistema intercambia los papeles de los jugadores: el receptor rival pasa a ser el protagonista del evento y el jugador que perdió el balón queda como referencia secundaria. Esto permite que el comentario generado sea del tipo ``recupera el balón'' o ``roba la posesión'', en lugar de producir un pase imposible entre jugadores de equipos distintos.
+
+\subsubsection{Actualización de la posesión}
+
+Después de interpretar cada evento, el estado interno de posesión se actualiza. Si el evento es \texttt{out}, la posesión se reinicia. Si es \texttt{kick} o \texttt{shot}, la posesión se desplaza al receptor estimado cuando existe; si no, se mantiene en el jugador que ejecuta la acción. En eventos \texttt{control} y \texttt{robo}, la posesión pasa al actor principal del evento.
+
+Este estado de posesión es importante porque permite detectar recuperaciones posteriores y evita que el sistema trate cada bloque de forma aislada. La clasificación de acciones no depende solo de una arista concreta, sino también de la secuencia reciente de eventos.
+
+\subsubsection{Eventos consumidos por el módulo de comentarios}
+
+Tras este proceso, el módulo de comentarios ya no recibe únicamente las etiquetas base de PathCRF, sino eventos semánticos listos para narración:
+
+\begin{itemize}
+    \item \texttt{control}, para continuidad de posesión;
+    \item \texttt{kick}, que se verbaliza como pase cuando no ha sido reinterpretado;
+    \item \texttt{shot}, que se verbaliza como tiro;
+    \item \texttt{robo}, para recuperaciones de posesión;
+    \item \texttt{out}, que puede omitirse o utilizarse como contexto.
+\end{itemize}
+
+Este paso permite pasar de una salida probabilística de bajo nivel, basada en aristas por frame, a una secuencia estable de acciones futbolísticas con significado narrativo. La incorporación de \texttt{shot} y \texttt{robo} mejora especialmente la coherencia de los comentarios, ya que evita describir como pases situaciones que realmente son recuperaciones y permite destacar acciones ofensivas cercanas a portería.

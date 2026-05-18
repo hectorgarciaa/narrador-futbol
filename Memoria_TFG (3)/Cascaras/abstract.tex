@@ -1,0 +1,28 @@
+\chapter*{\textbf{Abstract}}
+\vspace{-2cm}
+
+\begingroup
+\setlength{\parskip}{0.8em}
+\setlength{\parindent}{0pt}
+
+This work presents the implementation of an automatic football match narration system based on broadcast video. The system is structured as a pipeline that combines computer vision, multi-object tracking, geometric analysis, event detection, and the generation of commentary in both text and audio. Its objective is to extract enough information to identify what action is taking place during the match, which player is involved, and the footballing context in which it occurs.
+
+The main innovation of this work lies not only in each individual module, but in their integration into a complete pipeline capable of transforming a football video into an automatic narration. To the best of our knowledge, this is a novel approach that has not been implemented in previous work.
+
+The first stage of the system focuses on the sequential processing of the video frame by frame. At this stage, the relevant elements of the game are detected and tracked, mainly players, referees, and the ball. To this end, a YOLO-based detector is used together with a tracking module that combines ByteTrack with a canonical tracking layer, allowing consistent identities to be maintained throughout the video. In addition, team identification is performed based on shirt color, player position on the pitch is estimated through homography supported by PnLCalib, and positional classification is carried out using a Set Transformer model specifically trained to approximate player roles such as full-back, central midfielder, or forward.
+
+Based on the generated trajectories and states, a second asynchronous processing stage begins, aimed at analyzing the spatial and temporal evolution of the players and the ball. In this stage, football actions such as passes, controls, or shots are inferred using an action detector based on PathCRF. The detected events are then used as input for a linguistic generation module based on a quantized LLM, which is responsible for producing commentary adapted to the context of the match.
+
+Finally, the generated commentary is converted into audio through speech synthesis, using systems such as XTTS or ElevenLabs. In order to produce a more natural and dynamic narration, the system considers two Spanish-speaking voices, one male and one female, and combines commentary on match actions with contextual information such as competition data.
+
+The pipeline has been developed with a clear focus on local GPU execution, since latency is a fundamental requirement for approximating a real-time narration scenario. Therefore, the different stages of the system seek to balance accuracy in game analysis, narrative quality, and computational cost, using as a reference an environment equipped with an RTX 3080 GPU with 10 GB of VRAM.
+
+The pipeline is exposed through two modes of use: a command-line tool (track.py) aimed at batch processing and experimentation, and a web interface that allows users to upload videos, configure lineups, and obtain the narrated video with integrated audio, facilitating an interactive demonstration of the system.
+
+The results show that the integration of detection, tracking, geometric analysis, and language generation makes it possible to build an automatic and satisfactory narration system, considering the existing limitations.
+
+\section*{Keywords}
+
+\noindent Automatic narration, computer vision, football, detection, multi-object tracking, homography, action classification, Set Transformer, YOLO, commentary generation, speech synthesis.
+
+\endgroup

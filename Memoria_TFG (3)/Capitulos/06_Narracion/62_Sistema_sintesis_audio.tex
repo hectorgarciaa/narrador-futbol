@@ -1,0 +1,303 @@
+\section{Sistema de síntesis de audio}
+\label{sec:sintesis-voz-pipeline}
+
+Esta sección describe el sistema de síntesis de voz del proyecto a partir del momento en que el comentario textual ya ha sido generado, se realizarán pruebas con distintos enfoques y distintos modelos de sintesis de voz
+
+\subsection{Objetivo}
+
+El objetivo es transformar el texto en una locución natural, con una voz adecuada para una retransmisión deportiva y con una latencia lo suficientemente baja como para que el resultado pueda utilizarse en una demostración interactiva
+
+Durante el desarrollo se evaluaron varias alternativas de síntesis. Primero se trabajó con XTTS clonando muestras de voz propias, ya que era una solución local y rápida. Después se exploró Qwen TTS, porque su módulo de VoiceDesign generaba voces de locutor con una calidad subjetiva superior. Sin embargo, el modelo de generación de audio de Qwen resultó demasiado lento para utilizarlo directamente. A partir de esa observación se adoptó un enfoque mixto: utilizar Qwen VoiceDesign para crear una voz de referencia y después sintetizar los comentarios con XTTS. Finalmente, se incorporó ElevenLabs como última alternativa probada, orientada a demos con voces comerciales creadas mediante Voice Design y consumidas a través de API.
+
+\subsection{Entrada del sistema de audio}
+
+La entrada del sistema de audio es siempre un comentario completo en texto. La síntesis no comienza mientras se genera la frase palabra por palabra, sino cuando el comentario ya está cerrado y puede enviarse a un backend de voz.
+
+A partir de ese texto, el sistema realiza tres operaciones principales:
+
+\begin{enumerate}
+    \item Selecciona el backend de síntesis configurado.
+    \item Selecciona la voz del comentarista.
+    \item Genera el audio correspondiente.
+\end{enumerate}
+
+Esta separación permite comparar diferentes motores de voz manteniendo constante la entrada textual. De este modo, el mismo comentario puede sintetizarse con XTTS, con Qwen, con una combinación Qwen VoiceDesign + XTTS o con ElevenLabs. Estas comparaciones, junto con los resutlados obtenidos, se describen a continuación.
+
+\subsection{Primeras pruebas con XTTS y clonación de voz}
+
+La primera solución utilizada fue XTTS. Se eligió porque permite síntesis local, no depende de servicios externos y ofrece una latencia baja una vez cargado el modelo. XTTS, cuya arquitectura se detalla en la \hyperref[sec:síntesis-voz]{Sección~\ref*{sec:síntesis-voz}} funciona mediante clonación de voz: recibe una muestra de referencia y genera nuevos audios intentando conservar una identidad vocal similar.
+
+En las primeras pruebas se utilizó XTTS clonando muestras propias. Esta vía era funcional y rápida, pero el resultado sonoro no alcanzaba todavía la expresividad esperada para una narración deportiva. La voz era suficiente para validar el pipeline, pero no tenía una sensación clara de locutor profesional.
+
+Por este motivo se comenzó a buscar una referencia vocal mejor. La pregunta que guió la siguiente fase fue si se podía obtener una voz más radiofónica sin renunciar a la baja latencia de XTTS.
+
+\subsection{Qwen TTS}
+
+La siguiente línea de trabajo fue Qwen TTS. Esta prueba se planteó porque Qwen ofrecía un módulo específico de diseño de voz capaz de generar una referencia vocal más convincente para un narrador deportivo. La idea inicial no era únicamente sintetizar audio, sino comprobar si se podía obtener una voz con más presencia radiofónica que las primeras referencias utilizadas con XTTS.
+
+La ruta evaluada estaba compuesta por dos partes:
+
+\begin{itemize}
+    \item \texttt{Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign}, utilizado para diseñar la voz de locutor.
+    \item \texttt{Qwen/Qwen3-TTS-12Hz-0.6B-Base} o \texttt{Qwen/Qwen3-TTS-12Hz-1.7B-Base}, utilizados para reutilizar esa identidad vocal y sintetizar nuevos comentarios.
+\end{itemize}
+
+La primera integración funcional confirmó que la calidad potencial de la voz era buena, pero también mostró que la latencia era demasiado elevada para utilizar Qwen como sintetizador principal. Aunque el flujo funcionaba, el tiempo de síntesis hacía inviable esta ruta para una demo interactiva. A partir de ese punto se realizaron varias pruebas para intentar reducir la latencia.
+
+\subsection{Optimización de Qwen}
+
+Tras comprobar que Qwen ofrecía una voz más convincente que las primeras referencias usadas con XTTS, se realizaron varias pruebas para reducir su latencia. La arquitectura evaluada estaba formada por dos modelos: \texttt{Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign}, encargado de diseñar la voz de locutor, y un modelo Base encargado de reutilizar esa identidad vocal para sintetizar nuevos comentarios.
+
+Se compararon dos modelos Base, \texttt{Qwen/Qwen3-TTS-12Hz-1.7B-Base} y \texttt{Qwen/Qwen3-TTS-12Hz-0.6B-Base}, con y sin FlashAttention. Como se observa en la \hyperref[tab:parametros-FlashAttention]{Tabla~\ref*{tab:parametros-FlashAttention}}, todas las filas pertenecen al mismo benchmark controlado, por lo que los valores sí son comparables entre sí.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Configuración & Carga voz & Carga modelo & Primera petición & Media caliente \\
+\midrule
+1.7B sin FlashAttention & 3.442 s & 4.565 s & 15.998 s & 18.370 s \\
+1.7B con FlashAttention & 3.368 s & 4.499 s & 15.860 s & 20.589 s \\
+0.6B sin FlashAttention & 3.447 s & 4.366 s & 13.235 s & 16.938 s \\
+0.6B con FlashAttention & 3.372 s & 4.383 s & 14.274 s & 19.194 s \\
+\bottomrule
+\end{tabular}
+\caption{Comparativa controlada de Qwen Base reutilizando una voz diseñada previamente con Qwen VoiceDesign.}
+\label{tab:parametros-FlashAttention}
+\end{table}
+
+La configuración más razonable fue \texttt{Qwen/Qwen3-TTS-12Hz-0.6B-Base} sin FlashAttention. El modelo 0.6B reducía el coste general frente al 1.7B y, en esta máquina, FlashAttention no produjo una mejora real. De hecho, las variantes con FlashAttention fueron peores en la media de peticiones posteriores.
+
+Es importante aclarar que la columna ``Primera petición'' no representa la primera ejecución absoluta del sistema, sino la primera petición dentro de ese benchmark una vez cargados la voz y el modelo. La columna ``Media caliente'' mide peticiones posteriores con el proceso vivo, pero no siempre tiene por qué ser menor, ya que las frases evaluadas no tienen exactamente la misma longitud ni complejidad. Por tanto, esta tabla sirve para comparar configuraciones entre sí, no para afirmar que toda primera llamada sea necesariamente más lenta que cualquier llamada posterior.
+
+Aun así, en un sistema real sí es habitual que la primera ejecución completa tarde más que las siguientes. La primera llamada puede incluir inicialización de CUDA, reserva de memoria, carga de pesos, preparación de cachés internas, inicialización del vocoder y calentamiento de kernels.
+
+Incluso después de estas optimizaciones, Qwen seguía quedando lejos de XTTS. La mejora de calidad vocal era clara, pero la latencia seguía siendo demasiado alta para utilizar Qwen como sintetizador principal en la demo.
+
+\subsection{Evaluación de qwen3-tts.cpp}
+
+Como la ruta de Qwen con Python seguía siendo lenta, se probó una implementación experimental basada en \texttt{qwen3-tts.cpp}. Esta vía utilizaba modelos cuantizados en formato GGUF, reutilización de \textit{speaker embedding} y un runtime persistente.
+
+La primera prueba funcionó, pero se ejecutaba principalmente en CPU. Como se muestra en la \hyperref[tab:qwen-cpp-cpu]{Tabla~\ref*{tab:qwen-cpp-cpu}}, esta ruta todavía no aprovechaba la GPU y la síntesis seguía siendo demasiado lenta para una demo interactiva.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Ruta & LLM / preparación & Síntesis & Total \\
+\midrule
+qwen3-tts.cpp en CPU & 4.672 s & 24.461 s & 29.133 s \\
+\bottomrule
+\end{tabular}
+\caption{Prueba inicial de qwen3-tts.cpp ejecutándose principalmente en CPU.}
+\label{tab:qwen-cpp-cpu}
+\end{table}
+
+Los resultados en CPU quedaban por encima de los tiempos esperados para una demo interactiva, por lo que el siguiente paso fue reconstruir la librería con soporte CUDA real.
+
+Después de activar CUDA, tanto el transformer TTS como el decodificador de audio pasaron a ejecutarse en GPU. Como puede verse en la \hyperref[tab:qwen-cpp-cuda]{Tabla~\ref*{tab:qwen-cpp-cuda}}, en este caso sí hubo una mejora clara frente a la ruta C++ en CPU.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Ruta & LLM / preparación & Síntesis & Total \\
+\midrule
+qwen3-tts.cpp con CUDA & 4.378 s & 12.582 s & 16.959 s \\
+\bottomrule
+\end{tabular}
+\caption{Mejora obtenida al activar CUDA en qwen3-tts.cpp.}
+\label{tab:qwen-cpp-cuda}
+\end{table}
+
+También se ajustó el número de hilos del runtime. Esta prueba medía el tiempo medio de síntesis de \texttt{qwen3-tts.cpp} con CUDA, no el pipeline completo con LLM ni preparación. Por eso estos valores, recogidos en la \hyperref[tab:qwen-cpp-hilos]{Tabla~\ref*{tab:qwen-cpp-hilos}}, no son directamente comparables con los totales de las tablas anteriores.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lc}
+\toprule
+Hilos & Tiempo medio de síntesis \\
+\midrule
+4 & 9.744 s \\
+6 & 9.333 s \\
+8 & 10.709 s \\
+10 & 9.726 s \\
+12 & 10.573 s \\
+\bottomrule
+\end{tabular}
+\caption{Ajuste de hilos en qwen3-tts.cpp con CUDA. La métrica corresponde a síntesis del runtime, no al pipeline completo.}
+\label{tab:qwen-cpp-hilos}
+\end{table}
+
+La configuración más estable fue de 6 hilos. Aun así, la mejora no cambiaba la conclusión principal: \texttt{qwen3-tts.cpp} con CUDA era bastante más rápido que su versión en CPU, pero seguía siendo más lento que XTTS en caliente.
+
+Para cerrar la comparación se evaluaron XTTS y \texttt{qwen3-tts.cpp} sobre el mismo comentario corto. Como se resume en la \hyperref[tab:xtts-qwen-cpp]{Tabla~\ref*{tab:xtts-qwen-cpp}}, esta medición sí es una comparación directa entre sistemas para el caso de uso del proyecto.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Sistema & Síntesis caliente & Duración del audio & Fin de escucha \\
+\midrule
+XTTS con referencia local & 1.581 s & 3.243 s & 4.824 s \\
+qwen3-tts.cpp con CUDA & 14.188 s & 3.657 s & 17.844 s \\
+\bottomrule
+\end{tabular}
+\caption{Comparativa caliente entre XTTS y qwen3-tts.cpp con CUDA sobre el mismo comentario.}
+\label{tab:xtts-qwen-cpp}
+\end{table}
+
+Como comparación auditiva directa entre ambos sintetizadores, se incluyen las dos muestras generadas sobre el mismo comentario:
+
+\begin{center}
+\audiolink{Escuchar XTTS}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/compare_xtts.wav}
+\qquad
+\audiolink{Escuchar Qwen C++}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/compare_qwen_cpp.wav}
+\end{center}
+
+La conclusión final fue que Qwen no resultaba adecuado como sintetizador principal para el modo en directo. Su calidad vocal era prometedora, pero la latencia seguía siendo demasiado alta. Sin embargo, Qwen sí aportó valor como herramienta de diseño de voz: la solución más práctica fue utilizar \texttt{Qwen VoiceDesign} para generar una referencia vocal de locutor y después sintetizar los comentarios finales con XTTS. De esta forma se aprovechaba el mejor timbre de Qwen sin renunciar a la baja latencia de XTTS.
+
+\subsection{Enfoque mixto: Qwen VoiceDesign + XTTS}
+
+El resultado más importante de las pruebas con Qwen fue comprobar que el diseño de voz era útil, aunque el sintetizador completo no fuese lo bastante rápido. La voz creada por \texttt{Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign} sonaba más adecuada para una narración deportiva que las primeras referencias propias usadas con XTTS.
+
+Por ello se adoptó un enfoque mixto:
+
+\begin{enumerate}
+    \item Usar Qwen VoiceDesign para generar una voz de locutor deportivo.
+    \item Guardar esa voz como muestra de referencia.
+    \item Usar XTTS para sintetizar los comentarios finales clonando esa referencia.
+\end{enumerate}
+
+La idea no era sustituir XTTS por Qwen, sino aprovechar la mejor parte de cada sistema: Qwen para diseñar la identidad vocal y XTTS para generar los audios con baja latencia. Como se observa en la \hyperref[tab:qwen-voicedesign-xtts]{Tabla~\ref*{tab:qwen-voicedesign-xtts}}, la penalización temporal de este enfoque fue muy reducida.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lc}
+\toprule
+Caso & Tiempo de síntesis \\
+\midrule
+XTTS con voz diseñada por Qwen, primera pasada & 3.790 s \\
+XTTS con voz diseñada por Qwen, ejecución caliente 1 & 1.276 s \\
+XTTS con voz diseñada por Qwen, ejecución caliente 2 & 0.939 s \\
+XTTS con referencia habitual & 0.880 s \\
+\bottomrule
+\end{tabular}
+\caption{Uso de una voz diseñada con Qwen VoiceDesign como referencia para XTTS.}
+\label{tab:qwen-voicedesign-xtts}
+\end{table}
+
+La penalización de latencia fue mínima, mientras que la mejora subjetiva del timbre fue apreciable. Esta fue la solución local más equilibrada: no dependía de una API externa, mantenía tiempos cercanos a XTTS y producía una voz más convincente.
+
+Para apreciar la diferencia entre la voz diseñada por Qwen y el resultado final sintetizado con XTTS, se incluyen las siguientes muestras:
+
+\begin{center}
+\audiolink{Escuchar voz diseñada por Qwen}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/qwen_voice_design_reference.wav}
+\qquad
+\audiolink{Escuchar Qwen VoiceDesign + XTTS}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/xtts_from_qwen_voice_design.wav}
+\end{center}
+
+\subsection{Pruebas por tipo de comentario con el enfoque mixto}
+
+Una vez validado el enfoque Qwen VoiceDesign + XTTS, se generó una tanda de comentarios con varios tipos de acción, cuyos tiempos de síntesis se reflejan en la \hyperref[tab:comparacion_tiempo_acciones]{Tabla~\ref*{tab:comparacion_tiempo_acciones}}. El objetivo era comprobar cómo afectaba la longitud del texto a la síntesis y al tiempo total de escucha.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Acción & Preparación & Síntesis & Duración audio & Fin de escucha \\
+\midrule
+Pase largo & 0.397 s & 1.043 s & 3.574 s & 5.014 s \\
+Tiro & 0.385 s & 0.713 s & 2.497 s & 3.595 s \\
+Control & 0.359 s & 1.624 s & 5.430 s & 7.413 s \\
+Corner & 0.354 s & 0.967 s & 3.339 s & 4.660 s \\
+Robo & 0.374 s & 0.894 s & 3.105 s & 4.373 s \\
+\bottomrule
+\end{tabular}
+\caption{Medición por tipo de acción usando XTTS con voz diseñada previamente mediante Qwen VoiceDesign.}
+\label{tab:comparacion_tiempo_acciones}
+\end{table}
+
+A continuación se incluyen las muestras generadas para cada tipo de acción evaluado:
+
+\begin{center}
+\begin{tabular}{ll}
+Gol & \audiolink{Escuchar gol}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/01_gol.wav} \\[0.35cm]
+Pase largo & \audiolink{Escuchar pase largo}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/02_pase_largo.wav} \\[0.35cm]
+Tiro & \audiolink{Escuchar tiro}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/03_tiro.wav} \\[0.35cm]
+Control & \audiolink{Escuchar control}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/04_control.wav} \\[0.35cm]
+Corner & \audiolink{Escuchar corner}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/05_corner.wav} \\[0.35cm]
+Robo & \audiolink{Escuchar robo}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/06_robo.wav} \\
+\end{tabular}
+\end{center}
+
+Estas pruebas muestran que la duración del comentario es uno de los factores dominantes. Las acciones breves, como tiros, robos o corners, son mucho más adecuadas para baja latencia. Los goles, al ser comentarios más expresivos y largos, aumentan de forma natural el tiempo hasta finalizar la escucha.
+
+\subsection{Alternancia entre dos comentaristas}
+
+Una vez resuelta la síntesis, se mantuvo la idea de utilizar dos voces: una masculina y una femenina. El objetivo es que la narración se parezca más a una retransmisión real, con un comentarista principal y una voz de apoyo.
+
+La alternancia no sigue un patrón fijo, sino una selección aleatoria controlada. El sistema evita que una misma voz intervenga demasiadas veces seguidas. Esta lógica es independiente del backend de síntesis: puede utilizarse con XTTS y referencias locales, con XTTS usando voces diseñadas por Qwen, o con voces de ElevenLabs.
+
+\subsection{ElevenLabs como última alternativa evaluada}
+
+Después de las pruebas locales con XTTS, Qwen y el enfoque mixto, se evaluó ElevenLabs. Esta fue la última alternativa probada. La motivación fue comprobar si una voz comercial creada mediante Voice Design podía ofrecer una calidad superior para una demostración final.
+
+A diferencia de XTTS y Qwen, ElevenLabs no genera el audio localmente. El sistema envía el texto completo del comentario a la API y recibe la locución generada. Esta integración mantiene la arquitectura existente, pero cambia el origen del audio: en lugar de sintetizarse en local, se obtiene desde un servicio externo.
+
+ElevenLabs permite además streaming de audio. En este proyecto, esto significa que el texto completo se envía al servicio y la API empieza a devolver fragmentos de audio mientras termina la síntesis. No se trata de ir pronunciando palabras a medida que se genera el texto, porque el comentario textual ya llega completo.
+
+\subsection{Evaluación de modelos de ElevenLabs}
+
+Para comparar ElevenLabs se utilizó un comentario breve de apertura. Se midió el tiempo hasta recibir el primer fragmento de audio, el tiempo hasta completar el stream, el instante estimado de la primera palabra y el instante estimado de la última palabra, como se puede observar en la Tabla~\ref{tab:comparacion_11labs}.
+
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\toprule
+Modelo & \makecell{Primer\\fragmento} & \makecell{Stream\\completo} & \makecell{Primera\\palabra} & \makecell{Última\\palabra} \\
+\midrule
+\texttt{eleven\_flash\_v2\_5}     & 0.867 s & 0.936 s & 0.983 s & 5.349 s \\
+\texttt{eleven\_multilingual\_v2} & 0.998 s & 1.022 s & 1.056 s & 5.398 s \\
+\texttt{eleven\_v3}               & 1.866 s & 2.735 s & 1.946 s & 6.806 s \\
+\bottomrule
+\end{tabular}
+\caption{Latencias medidas con distintos modelos de ElevenLabs.}
+\label{tab:comparacion_11labs}
+\end{table}
+
+Para comparar también la calidad percibida de cada modelo, se incluyen las tres muestras generadas con el mismo comentario de introducción:
+
+\begin{center}
+\begin{tabular}{ll}
+Flash v2.5 & \audiolink{Escuchar Flash v2.5}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/intro_flash_v2_5.wav} \\[0.4cm]
+Multilingual v2 & \audiolink{Escuchar Multilingual v2}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/intro_multilingual_v2.wav} \\[0.4cm]
+Eleven v3 & \audiolink{Escuchar Eleven v3}{https://raw.githubusercontent.com/hectorgarciaa/narrador-futbol/final/audios/intro_v3.wav} \\
+\end{tabular}
+\end{center}
+
+El modelo \texttt{eleven\_flash\_v2\_5} fue el más rápido, pero con menor calidad percibida. \texttt{eleven\_v3} ofreció una voz más expresiva, aunque con una latencia claramente superior. Finalmente se seleccionó \texttt{eleven\_multilingual\_v2}, porque ofrecía el mejor equilibrio entre calidad, coste y tiempo de respuesta.
+
+\subsection{Decisión final}
+
+La evaluación dejó una conclusión clara: Qwen generaba una voz de referencia muy interesante, pero no era suficientemente rápido como sintetizador completo. XTTS era mucho más rápido, pero las primeras referencias propias no tenían la calidad vocal deseada. Esto queda reflejado en la Tabla~\ref{tab:soluciones-sintesis}. El enfoque mixto Qwen VoiceDesign + XTTS resolvió ese conflicto: Qwen se usa para diseñar la voz y XTTS para sintetizar los comentarios.
+
+\begin{table}[ht]
+\centering
+\begin{tabular}{lll}
+\toprule
+Sistema & Ventaja principal & Uso recomendado \\
+\midrule
+XTTS con referencia propia & Baja latencia local & Validación inicial y baseline \\
+Qwen completo & Voz prometedora, latencia alta & Investigación y comparación \\
+Qwen VoiceDesign + XTTS & Buen timbre con baja latencia & Solución local más equilibrada \\
+ElevenLabs Multilingual v2 & Mayor naturalidad comercial & Demo final de alta calidad \\
+\bottomrule
+\end{tabular}
+\caption{Resumen de las soluciones de síntesis evaluadas.}
+\label{tab:soluciones-sintesis}
+\end{table}
+
+ElevenLabs se mantiene como alternativa externa para demos donde la calidad de voz sea prioritaria. XTTS sigue siendo la base local por su baja latencia, y Qwen queda como herramienta útil de diseño de voz y como línea experimental para futuras optimizaciones.

@@ -1,0 +1,20 @@
+\section{Analisis de color mediante CIE LAB y KMeans}
+\subsection{Espacios de color y color dominante}
+El análisis de color es una técnica utilizada en visión por computador para describir, comparar y agrupar regiones de una imagen a partir de su apariencia cromática. Este tipo de información puede resultar útil cuando se desea distinguir elementos visualmente similares en forma o tamaño, pero diferenciados por su color dominante.
+
+Desde el punto de vista clásico, una estrategia sencilla y eficiente consiste en extraer el color dominante de una región de interés obtenida a partir de una detección. El uso directo del espacio RGB puede ser problemático, porque mezcla información cromática y luminancia, de modo que cambios de iluminación, sombras o balance de blancos alteran de forma significativa las distancias entre colores. Por ello, resulta habitual transformar la imagen a espacios más adecuados para comparación perceptual, como CIE L*a*b*, donde el canal L* representa la luminosidad y los canales a* y b* codifican los ejes cromáticos \citep{cie1976lab}. Esta separación permite que las diferencias de color sean más estables que en RGB cuando varían las condiciones de captura.
+
+Sobre este espacio de color puede aplicarse \textit{k-means}, un algoritmo de agrupamiento no supervisado que divide un conjunto de muestras en $K$ grupos minimizando la suma de distancias cuadráticas a sus centroides \citep{macqueen1967kmeans,lloyd1982least}:
+
+\[
+\min_{\mu_1,\dots,\mu_K} \sum_{i=1}^{n} \min_{k \in \{1,\dots,K\}} \|x_i - \mu_k\|_2^2
+\]
+
+Aplicado al análisis de imagen, cada muestra puede corresponder a un píxel o a una representación cromática extraída de una región. El resultado del agrupamiento permite identificar colores dominantes y separar componentes visuales con apariencia distinta. Esta técnica tiene la ventaja de no requerir entrenamiento supervisado y de poder adaptarse a cada imagen o secuencia de entrada. Sin embargo, su rendimiento puede verse afectado cuando los colores son muy parecidos, cuando la región analizada contiene demasiado fondo o cuando existen cambios fuertes de iluminación.
+
+\subsection{Papel del análisis de color dentro del pipeline}
+En el contexto de este proyecto, el análisis de color se utiliza para apoyar la identificación automática de equipos a partir del color de camiseta de los jugadores. Una vez detectado un jugador, el recorte asociado a su \textit{bounding box} contiene información visual que puede emplearse para estimar el color dominante de la camiseta y compararlo con el de otros jugadores.
+
+Esta idea puede aplicarse en dos niveles. En primer lugar, dentro del recorte de cada jugador, para separar la camiseta de otros píxeles pertenecientes al fondo, al césped, a la piel o al pantalón. En segundo lugar, sobre los colores dominantes estimados para varios jugadores, para agruparlos en los dos equipos principales. De esta forma, la información cromática se convierte en una señal adicional que puede utilizarse en etapas posteriores del sistema, especialmente en el tracking multiobjeto y en la generación de una representación estructurada del partido.
+
+Frente a un clasificador supervisado de camisetas, esta solución tiene la ventaja de no requerir un conjunto de entrenamiento específico para cada partido y de poder adaptarse al inicio de cada vídeo. Su principal limitación aparece cuando ambos equipos usan colores parecidos, cuando el recorte incluye demasiado fondo o cuando la cámara introduce cambios fuertes de exposición.

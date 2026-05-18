@@ -1,0 +1,22 @@
+\section{Generación de lenguaje con modelos locales}
+
+La generación de lenguaje permite transformar información estructurada en texto natural. En este proyecto, esta capacidad se utiliza para convertir eventos futbolísticos detectados por el sistema en comentarios narrativos adaptados al contexto del partido.
+
+
+\subsection{Modelos de lenguaje locales y cuantización}
+
+Los modelos Transformer \citep{vaswani2017attention} son la base de gran parte de los modelos de lenguaje modernos. Estos modelos utilizan mecanismos de atención para relacionar los distintos tokens de una secuencia y generar texto condicionado por el contexto de entrada. En aplicaciones donde se necesita controlar la latencia, el coste o la privacidad, resulta especialmente interesante ejecutar modelos de lenguaje en local en lugar de depender de servicios externos.
+
+En el caso de sistemas locales, familias abiertas como Gemma \citep{gemma2024} permiten ejecutar modelos relativamente ligeros en hardware propio, manteniendo control sobre latencia, coste y privacidad. Para poder desplegar estos modelos, a veces se utilizan técnicas de cuantización que reducen la precisión de los pesos y, por tanto, el consumo de memoria. Esta reducción permite ejecutar modelos de mayor tamaño o disminuir los requisitos de hardware, aunque puede afectar ligeramente a la calidad de la generación.
+
+\subsection{Ejecución mediante herramientas locales}
+Herramientas como \texttt{llama.cpp} y servidores locales como Ollama facilitan la ejecución de modelos cuantizados y su exposición mediante APIs locales \citep{llamacpp,ollamaDocs}. De este modo, otros módulos del sistema pueden enviar una entrada textual estructurada y recibir como salida una respuesta generada por el modelo, sin necesidad de abandonar el entorno local de ejecución.
+
+
+\subsection{Papel del modelo de lenguaje dentro del pipeline}
+
+En el contexto de este proyecto, el modelo de lenguaje actúa como el módulo encargado de convertir los eventos estructurados generados por las fases anteriores en comentarios en lenguaje natural. Cada evento puede incluir información como la acción detectada, el jugador implicado, el equipo, la zona del campo o el minuto de partido. Esta información se organiza como una entrada textual controlada a partir de la cual el modelo genera el comentario correspondiente.
+
+El uso de un modelo de lenguaje permite producir narraciones más variadas y naturales que un sistema basado únicamente en plantillas fijas. No obstante, para evitar respuestas demasiado largas, incoherentes o no respaldadas por la información visual, la generación se condiciona mediante eventos estructurados y reglas de estilo. De esta forma, se busca combinar flexibilidad lingüística con control semántico, reduciendo el riesgo de que el modelo introduzca información no observada por el sistema.
+
+La implementación concreta de este módulo, incluyendo el formato de entrada enviado al modelo, las reglas de generación, la selección del modelo local y su integración con el sistema de narración, se describe posteriormente en la \hyperref[sec:generacion-comentarios]{Sección~\ref*{sec:generacion-comentarios}}.

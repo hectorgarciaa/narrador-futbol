@@ -1,0 +1,65 @@
+\section{Detección de eventos: PathCRF}
+\label{sec:pathcrf-tecnologias}
+La detección de eventos consiste en transformar observaciones temporales del juego en acciones semánticas interpretables. En fútbol, estas acciones pueden corresponder, por ejemplo, a controles, pases o salidas del balón. En lugar de abordar esta tarea directamente sobre frames RGB, PathCRF \citep{KimPathCRF2026} propone detectarlas a partir de trayectorias de jugadores, formulando el problema como una inferencia temporal sobre la posesión del balón.
+
+Una característica especialmente interesante de PathCRF es que intenta inferir la evolución de la posesión sin utilizar explícitamente la trayectoria del balón. En su lugar, el modelo aprovecha únicamente la disposición y el movimiento de los jugadores para deducir qué jugador controla el balón y hacia quién se desplaza..
+
+\subsection{Entrada y salida del modelo}
+La entrada de PathCRF es una secuencia temporal de posiciones de jugadores. Para cada instante se dispone de la posición de los jugadores sobre el campo. A partir de estas trayectorias, el modelo construye una representación basada en grafos, descrita en la \hyperref[subsec:repr-grafo-pathcrf]{Sección~\ref*{subsec:repr-grafo-pathcrf}}, sobre la que infiere una secuencia de estados que describe cómo progresa la posesión a lo largo del tiempo.
+
+La salida intermedia del modelo no es directamente una etiqueta de evento por frame, sino una secuencia de aristas denominada camino de posesión. Cada arista seleccionada indica el estado de la posesión en un instante concreto. Una autoarista, que conecta un jugador consigo mismo, representa que ese jugador mantiene el control del balón. Una arista dirigida entre dos jugadores representa un envío o pase desde el jugador origen hacia el jugador destino. Además, el modelo puede incluir nodos externos para representar situaciones en las que el balón sale del terreno de juego.
+
+A partir de esta secuencia de aristas se extraen los eventos. La idea es que un evento ocurre cuando cambia el estado seleccionado entre dos instantes consecutivos. Por ejemplo, una transición desde una autoarista de un jugador hacia una arista dirigida a otro jugador puede interpretarse como el inicio de un pase.
+
+\subsection{Representación de trayectorias como grafo}
+\label{subsec:repr-grafo-pathcrf}
+
+PathCRF representa cada instante del partido como un grafo dirigido y completamente conectado. Los nodos corresponden a los jugadores y a ciertos nodos externos asociados a salidas del campo. Las aristas representan las posibles relaciones de posesión o transmisión del balón entre esos nodos.
+
+Esta formulación permite convertir la detección de eventos en un problema de selección secuencial de aristas. En cada instante, el modelo debe escoger una única arista que represente el estado más probable de la posesión. 
+
+\subsection{Backbone de atención y representación de nodos y aristas}
+
+Para asignar una puntuación a cada posible arista, PathCRF utiliza primero un \textit{backbone} neuronal basado en atención espacio-temporal. Este módulo procesa las trayectorias de los jugadores y obtiene representaciones contextuales de cada nodo, teniendo en cuenta tanto su evolución temporal como su relación con el resto de jugadores.
+
+El uso de atención resulta adecuado en este contexto porque los jugadores forman un conjunto de elementos relacionados entre sí. La interpretación de una acción no depende únicamente de la posición de un jugador aislado, sino también de su relación espacial y temporal con compañeros y rivales.
+
+A partir de las representaciones de los nodos, PathCRF construye una representación para cada arista candidata concatenando el embedding del nodo origen y el embedding del nodo destino, y aplicando después un perceptrón multicapa, o MLP (MultiLayer Perceptron) \citep{goodfellow2016deep}. Esta representación de arista se transforma posteriormente en un score de emisión, que mide la compatibilidad local de esa arista con el estado de posesión en un instante concreto.
+
+Sin embargo, este score local no determina por sí solo la arista final seleccionada. Como se explica en la \hyperref[subsec:crf-dinamico]{Sección~\ref*{subsec:crf-dinamico}}, PathCRF combina estos scores de emisión con scores de transición entre aristas consecutivas para obtener una secuencia de posesión temporalmente coherente.
+
+\subsection{CRF dinámico y decodificación de eventos}
+\label{subsec:crf-dinamico}
+
+Una vez calculados los scores de emisión de las aristas candidatas, PathCRF no selecciona la mejor arista de cada instante de forma independiente. Un clasificador frame a frame podría asignar una alta puntuación a una arista concreta en un instante aislado, pero producir una secuencia global incoherente, por ejemplo saltos bruscos de posesión entre jugadores alejados o cambios incompatibles con la dinámica del juego.
+
+Para evitar este problema, PathCRF utiliza un \textit{Conditional Random Field} (CRF) dinámico. El objetivo del CRF es encontrar la secuencia completa de aristas que mejor explica las observaciones temporales. Para ello, combina dos tipos de información: los scores de emisión, que miden la compatibilidad local de una arista con las observaciones en un instante concreto, y los scores de transición, que miden la coherencia entre dos aristas consecutivas.
+
+Los scores de transición se calculan a partir de las representaciones de las aristas implicadas. Para evaluar el paso desde una arista seleccionada en el instante anterior hasta una arista candidata en el instante actual, PathCRF concatena los embeddings de ambas aristas y los introduce en un MLP compartido. De esta forma, el modelo aprende no solo qué aristas son plausibles de forma local, sino también qué cambios entre estados de posesión son coherentes con la dinámica observada del juego.
+
+El score total de una secuencia puede expresarse como:
+
+\[
+s(y,x_{1:T}) =
+\sum_{t=1}^{T} e_t(y_t,x_{1:T}) +
+\sum_{t=2}^{T} a_t(y_{t-1},y_t,x_{1:T})
+\]
+
+donde $x_{1:T}$ representa la secuencia completa de observaciones de entrada, $y$ es la secuencia de aristas seleccionadas, $y_t$ es la arista seleccionada en el instante $t$, $e_t$ es el score de emisión asociado a dicha arista y $a_t$ es el score de transición entre la arista anterior $y_{t-1}$ y la arista actual $y_t$.
+
+El CRF es dinámico porque las puntuaciones de emisión y transición no son constantes, sino que se calculan a partir de las observaciones del partido. Así, una misma transición entre dos aristas puede ser viable y probable en un contexto e improbable en otro, dependiendo de la disposición y el movimiento de los jugadores.
+
+Además, el CRF está enmascarado porque no todas las aristas ni todas las transiciones entre aristas se consideran válidas. El modelo puede bloquear cambios físicamente incoherentes asignándoles una puntuación imposible, de forma que no puedan ser seleccionados durante la decodificación. Esto permite restringir la búsqueda a caminos de posesión compatibles con la dinámica básica del juego.
+
+Durante la inferencia, se busca la secuencia de aristas con mayor score total. Esta secuencia se obtiene mediante decodificación de Viterbi \citep{Viterbi1967}, un algoritmo clásico para encontrar la secuencia óptima en modelos secuenciales. Una vez obtenido el camino de posesión, los eventos se extraen observando los cambios entre aristas consecutivas: por ejemplo, el paso de una autoarista a una arista dirigida puede indicar el inicio de un pase, mientras que otros cambios pueden corresponder a controles, recepciones o salidas del balón.
+
+\subsection{Papel de PathCRF dentro del pipeline}
+
+En el contexto de este proyecto, PathCRF resulta especialmente interesante porque el sistema ya genera tracks, identidades y posiciones de jugadores como salida de las fases anteriores. Por tanto, en lugar de entrenar desde cero una red de vídeo para detectar acciones directamente a partir de frames RGB, se aprovecha una representación estructurada del partido y se adapta al formato requerido por PathCRF.
+
+Esta elección reduce la dependencia de grandes datasets de vídeo anotado y conecta de forma natural la fase de tracking con la generación posterior de eventos narrables. Las trayectorias estructuradas permiten transformar información geométrica y temporal en acciones semánticas, como pases, controles, tiros o saques, que posteriormente pueden utilizarse como entrada para el módulo de generación de comentarios.
+
+No obstante, esta aproximación también introduce una limitación importante: PathCRF fue entrenado con tracking profesional y datos posicionales oficiales de alta calidad. Al aplicarlo sobre trayectorias generadas automáticamente desde vídeo broadcast, pueden aparecer errores derivados de detecciones perdidas, identidades inestables o proyecciones geométricas imperfectas. Por ello, la calidad de los eventos detectados depende directamente de la estabilidad de las fases previas del pipeline.
+
+La integración concreta de PathCRF en el sistema desarrollado, incluyendo la adaptación de tracks, la inferencia por ventanas y el postprocesado para convertir edges en eventos narrables, se describe posteriormente en la \hyperref[sec:clasificacion-acciones]{Sección~\ref*{sec:clasificacion-acciones}}.
+ 
