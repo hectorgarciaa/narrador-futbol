@@ -51,6 +51,7 @@ data/partidoPrueba/AD Ferroviaria-Canillejas CF_clip_2-10.mp4
 # Model assets not suitable for git normal
 models/gguf/
 models/pnlcalib/
+models/reference_points/
 models/qwen_voices/
 *.gguf
 

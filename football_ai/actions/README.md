@@ -46,7 +46,7 @@ Wrapper de inferencia para reutilizar el repo clonado de `PathCRF` desde este pr
 
 ### Qué hace
 
-- carga el checkpoint desde `football_ai/actions/repo/pathcrf/saved/<trial>/model/`;
+- carga el checkpoint desde `external/pathcrf/saved/<trial>/model/`;
 - lee el parquet ancho ya convertido o convierte primero un `tracks.json`;
 - ejecuta `PathCRF` sobre ese tracking y exporta:
   - secuencia de aristas activa por frame (`*_edge_sequence.parquet`);

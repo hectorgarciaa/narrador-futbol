@@ -1,0 +1,36 @@
+{
+  "preset": "best-run",
+  "source": "experiments/positions/grid_search_outputs/20260426_155024/runs/best_run/config.json",
+  "search_strategy": "Reentrena una única configuración con los hiperparámetros del mejor modelo encontrado en el grid ampliado.",
+  "fixed": {
+    "seed": 42,
+    "epochs": 40,
+    "batch_size": 512,
+    "learning_rate": 0.0005,
+    "weight_decay": 0.0001,
+    "dropout": 0.1,
+    "teammate_embed_dim": 256,
+    "objective_hidden_dim": 384,
+    "objective_num_layers": 2,
+    "set_hidden_dim": 256,
+    "fusion_hidden_dim": 384,
+    "num_heads": 4,
+    "num_set_blocks": 3,
+    "ff_expansion": 4,
+    "patience": 3,
+    "overfit_patience": 3,
+    "max_teammates": 10,
+    "train_size_per_group_split": 0.75,
+    "val_size_per_group_split": 0.125,
+    "test_size_per_group_split": 0.125,
+    "num_workers": 0
+  },
+  "num_runs": 1,
+  "label_mapping": {
+    "enabled": true,
+    "map": {
+      "CI": "LI",
+      "CD": "LD"
+    }
+  }
+}

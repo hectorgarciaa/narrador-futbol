@@ -895,7 +895,7 @@ python scripts/actions/run_pathcrf.py output/tracks_json/tracker/partido_corto_t
 El script:
 - resuelve la salida de `track.py` desde el shortcut o desde la ruta que le pases;
 - convierte el `tracks.json` a `*_tracking.parquet` si hace falta;
-- carga el checkpoint de PathCRF del repo clonado en `football_ai/actions/repo/pathcrf/` (por defecto `trial=120`, `state_dict_best_acc.pt`);
+- carga el checkpoint de PathCRF del repo clonado en `external/pathcrf/` (por defecto `trial=120`, `state_dict_best_acc.pt`);
 - exporta `*_edge_sequence.parquet`, `*_events.parquet`, `*_events_semantic.parquet`, `*_macro_prev.parquet`, `*_macro_next.parquet` y `*_summary.json` en `output/actions/pathcrf/<video>/`;
 - si también dispone de `tracks.json`, genera además `*_commentary_events.json` con:
   - el mapeo invertido `pathcrf_id -> track_id`;

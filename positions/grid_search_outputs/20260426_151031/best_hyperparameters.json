@@ -1,0 +1,18 @@
+{
+  "run_dir": "/home/cmantill/narrador-futbol/experiments/positions/grid_search_outputs/20260426_151031/runs/run_008_obj1_ff2_blocks4_drop0p15",
+  "checkpoint_path": "/home/cmantill/narrador-futbol/experiments/positions/grid_search_outputs/20260426_151031/runs/run_008_obj1_ff2_blocks4_drop0p15/best_model.pt",
+  "objective_num_layers": 1,
+  "ff_expansion": 2,
+  "num_set_blocks": 4,
+  "dropout": 0.15,
+  "best_epoch": 2,
+  "stop_reason": "early_stopping_val_loss_overfit_patience_3",
+  "val_accuracy": 0.36888921561420274,
+  "val_macro_f1": 0.3001656012333899,
+  "val_weighted_f1": 0.3566468800048799,
+  "test_accuracy": 0.40959837610555316,
+  "test_macro_f1": 0.3908386479321418,
+  "test_weighted_f1": 0.39531316819094203,
+  "best_val_loss": 4.410532430366233,
+  "best_val_macro_f1_during_training": 0.3001656012333899
+}
