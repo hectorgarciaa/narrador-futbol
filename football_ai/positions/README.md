@@ -37,6 +37,10 @@ La asignación online ya no congela roles ni usa snapshots de estabilización. E
 3. Cada track acumula esos votos dentro de su segmento activo. Si aparece una señal fuerte de relink o un salto estructural claro, se abre un segmento nuevo vacío antes de seguir votando. Los cambios tácticos temporales de rol no rompen por sí solos el segmento.
 4. `Tier 2`: para pintar el rol definitivo del frame, se toma la mayoría acumulada de cada segmento activo y se vuelve a ejecutar Húngaro contra los slots esperados del equipo. La resolución final se reaplica por segmento real `(track_id, segment_id)` para que varios jugadores del mismo equipo no se pisen aunque compartan el mismo contador local de segmento.
 
+Nota de contrato actual:
+- el slot estable final se publica en `display_role_slot` (fuente de verdad única).
+- `predicted_role_frame` mantiene solo la decisión instantánea por frame (Tier 1).
+
 ## `pipeline/lineup_spec.py`
 
 Este módulo define las formaciones soportadas por la interfaz (`4-3-3`, `5-3-2`, `4-4-2`) y separa dos niveles:

@@ -250,7 +250,7 @@ class CommentaryPhase(Phase):
 
     @staticmethod
     def _normalize_position(payload: dict) -> str | None:
-        for key in ("lineup_slot", "predicted_role", "predicted_role_frame"):
+        for key in ("lineup_slot", "display_role_slot", "predicted_role_frame"):
             value = str(payload.get(key) or "").strip()
             if value:
                 return value
@@ -263,8 +263,9 @@ class CommentaryPhase(Phase):
         clean_packet: dict,
         slot_mappings: dict,
     ) -> dict | None:
-        raw_type = str(event.get("event_type") or "").strip()
-        commentary_action = COMMENTARY_ACTION_MAP.get(raw_type)
+        semantic_type = str(event.get("event_type_semantic") or event.get("event_type") or "").strip()
+        raw_type = str(event.get("event_type_raw") or semantic_type).strip()
+        commentary_action = COMMENTARY_ACTION_MAP.get(semantic_type)
         if not commentary_action or commentary_action in self.config.skip_event_types:
             return None
 
@@ -307,7 +308,9 @@ class CommentaryPhase(Phase):
 
         field_position_m = self._field_position_from_event(event, clean_packet, player_track_id)
         pathcrf_team_id = team_id_from_player_id(canonical_src)
-        attacks_right = team_attacks_right(event.get("period_id"), pathcrf_team_id, None)
+        attacks_right = event.get("attack_direction_right")
+        if attacks_right is None:
+            attacks_right = team_attacks_right(event.get("period_id"), pathcrf_team_id, None)
         zone_key = _field_zone_key(field_position_m, attacks_right=bool(attacks_right))
         field_zone = FIELD_ZONE_LABELS.get(zone_key) if zone_key else None
 
@@ -337,6 +340,9 @@ class CommentaryPhase(Phase):
             "player_track_id": player_track_id,
             "receiver_track_id": receiver_track_id,
             "event_type_raw": raw_type,
+            "event_type_semantic": semantic_type,
+            "semantic_source": event.get("semantic_source"),
+            "semantic_confidence": event.get("semantic_confidence"),
             "field_position_m": (
                 [float(field_position_m[0]), float(field_position_m[1])]
                 if field_position_m is not None

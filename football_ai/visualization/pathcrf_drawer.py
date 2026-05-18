@@ -36,6 +36,7 @@ class PathCRFDrawer:
         self.text_color = (245, 245, 245)
         self.node_border_color = (20, 20, 20)
         self.ball_border_color = (20, 20, 20)
+        self.max_bbox_fill_gap_frames = 12
 
     @staticmethod
     def _can_show_gui() -> bool:
@@ -175,10 +176,10 @@ class PathCRFDrawer:
     ) -> None:
         if role == "home":
             fill_color = self.home_color
-            radius = 18
+            radius = 16
         elif role == "away":
             fill_color = self.away_color
-            radius = 18
+            radius = 16
         elif role == "referee":
             fill_color = self.referee_color
             radius = 12
@@ -291,6 +292,73 @@ class PathCRFDrawer:
             if isinstance(frames, list):
                 normalized[class_name] = frames
         return normalized
+
+    def _interpolate_tracks_payload_bboxes(
+        self,
+        tracks_payload: Mapping[str, list[dict[str, Any]]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        interpolated: dict[str, list[dict[str, Any]]] = {}
+        max_gap = max(0, int(self.max_bbox_fill_gap_frames))
+
+        for class_name in ("player", "goalkeeper", "referee", "ball"):
+            frames = tracks_payload.get(class_name, [])
+            if not isinstance(frames, list) or not frames:
+                interpolated[class_name] = frames if isinstance(frames, list) else []
+                continue
+
+            n_frames = len(frames)
+            out_frames: list[dict[str, Any]] = []
+            for frame_map in frames:
+                if isinstance(frame_map, Mapping):
+                    out_frames.append(dict(frame_map))
+                else:
+                    out_frames.append({})
+
+            raw_ids: set[str] = set()
+            for frame_map in out_frames:
+                raw_ids.update(str(raw_id) for raw_id in frame_map.keys())
+
+            for raw_id in raw_ids:
+                coords = np.full((n_frames, 4), np.nan, dtype=np.float32)
+                payload_refs: list[Mapping[str, Any] | None] = [None] * n_frames
+
+                for frame_id in range(n_frames):
+                    payload = out_frames[frame_id].get(raw_id)
+                    if isinstance(payload, Mapping):
+                        payload_refs[frame_id] = payload
+                        bbox = self._safe_bbox(payload.get("bbox"))
+                        if bbox is not None:
+                            coords[frame_id] = np.asarray(bbox, dtype=np.float32)
+
+                valid_mask = np.isfinite(coords).all(axis=1)
+                if not valid_mask.any():
+                    continue
+
+                coord_df = pd.DataFrame(coords, columns=["x1", "y1", "x2", "y2"])
+                coord_df = coord_df.interpolate(method="linear", limit_area="inside")
+                coord_df = coord_df.ffill(limit=max_gap).bfill(limit=max_gap)
+                filled = coord_df.to_numpy(dtype=np.float32)
+                filled_mask = np.isfinite(filled).all(axis=1)
+
+                for frame_id in range(n_frames):
+                    if valid_mask[frame_id] or not filled_mask[frame_id]:
+                        continue
+                    x1, y1, x2, y2 = [int(round(float(v))) for v in filled[frame_id]]
+                    anchor = payload_refs[frame_id]
+                    if anchor is None:
+                        prev = next((payload_refs[idx] for idx in range(frame_id - 1, -1, -1) if payload_refs[idx] is not None), None)
+                        nxt = next((payload_refs[idx] for idx in range(frame_id + 1, n_frames) if payload_refs[idx] is not None), None)
+                        anchor = prev or nxt
+                    if not isinstance(anchor, Mapping):
+                        continue
+                    patched = dict(anchor)
+                    patched["bbox"] = [x1, y1, x2, y2]
+                    patched["bbox_interpolated"] = True
+                    out_frames[frame_id][raw_id] = patched
+
+            interpolated[class_name] = out_frames
+
+        return interpolated
 
     @staticmethod
     def _segment_role_label(payload: Mapping[str, Any]) -> str | None:
@@ -503,6 +571,7 @@ class PathCRFDrawer:
             event_row=event_row,
             frame_size=frame_size,
             node_label_overrides=node_label_overrides,
+            show_overlay=False,
         )
 
     def _blend_inset(
@@ -530,7 +599,22 @@ class PathCRFDrawer:
         edge_src: str | None,
         edge_dst: str | None,
         event_row: pd.Series | None,
+        raw_to_slot: Mapping[str, str] | None = None,
     ) -> None:
+        slot_lookup = raw_to_slot or {}
+
+        def _to_slot_label(value: Any) -> str:
+            if value is None:
+                return ""
+            token = str(value).strip()
+            if not token:
+                return ""
+            if token in OUTSIDE_NODE_POINTS:
+                return token
+            if token.startswith(("home_", "away_", "referee_")):
+                return token
+            return str(slot_lookup.get(token) or token)
+
         frame_id = int(tracking_row.name) if tracking_row.name is not None else int(tracking_row.get("frame_id", 0))
         timestamp = self._safe_float(tracking_row.get("timestamp")) or 0.0
         self._draw_text_box(frame, f"frame {frame_id} | t={timestamp:0.2f}s", (24, 32))
@@ -541,8 +625,8 @@ class PathCRFDrawer:
 
         if event_row is not None and not event_row.empty:
             event_type = str(event_row.get("event_type") or "").strip() or "evento"
-            player_id = str(event_row.get("player_id") or "").strip()
-            receiver_id = str(event_row.get("receiver_id") or "").strip()
+            player_id = _to_slot_label(event_row.get("player_id"))
+            receiver_id = _to_slot_label(event_row.get("receiver_id"))
             support = event_row.get("support_frames")
             ratio = event_row.get("support_ratio")
             run_len = event_row.get("longest_consecutive_run")
@@ -563,7 +647,7 @@ class PathCRFDrawer:
             self._draw_text_box(
                 frame,
                 event_label,
-                (24, frame.shape[0] - 22),
+                (24, 100),
                 bg_color=(52, 73, 94),
             )
 
@@ -574,6 +658,8 @@ class PathCRFDrawer:
         event_row: pd.Series | None,
         frame_size: tuple[int, int],
         node_label_overrides: dict[str, str] | None = None,
+        show_overlay: bool = True,
+        raw_to_slot: Mapping[str, str] | None = None,
     ) -> np.ndarray:
         frame_w, frame_h = frame_size
         canvas = np.zeros((frame_h, frame_w, 3), dtype=np.uint8)
@@ -631,7 +717,8 @@ class PathCRFDrawer:
             self._draw_node(canvas, center, node_id, "outside", node_id == edge_src, node_id == edge_dst)
 
         self._draw_ball(canvas, tracking_row, frame_w, frame_h)
-        self._draw_overlay(canvas, tracking_row, edge_src, edge_dst, event_row)
+        if show_overlay:
+            self._draw_overlay(canvas, tracking_row, edge_src, edge_dst, event_row, raw_to_slot=raw_to_slot)
         return canvas
 
     def render_tracking_and_edges(
@@ -666,6 +753,7 @@ class PathCRFDrawer:
             if tracks_path.exists():
                 with tracks_path.open("r", encoding="utf-8") as f:
                     tracks_payload = self._normalize_tracks_payload(json.load(f))
+                tracks_payload = self._interpolate_tracks_payload_bboxes(tracks_payload)
         raw_to_slot, slot_to_raw = self._resolve_slot_lookup(conversion_summary)
 
         video_cap = None
@@ -725,10 +813,10 @@ class PathCRFDrawer:
                         edge_row=edge_row,
                         event_row=event_row,
                         frame_size=(inset_w, inset_h),
-                        node_label_overrides=node_label_overrides,
+                        node_label_overrides=None,
                     )
                     self._blend_inset(frame, inset_frame, opacity=0.8, margin_px=18)
-                    self._draw_overlay(frame, tracking_row, edge_src, edge_dst, event_row)
+                    self._draw_overlay(frame, tracking_row, edge_src, edge_dst, event_row, raw_to_slot=raw_to_slot)
                 else:
                     frame = self._draw_frame(
                         tracking_row=tracking_row,
@@ -736,6 +824,7 @@ class PathCRFDrawer:
                         event_row=event_row,
                         frame_size=effective_frame_size,
                         node_label_overrides=node_label_overrides,
+                        raw_to_slot=raw_to_slot,
                     )
                 writer.write(frame)
                 if show_window:

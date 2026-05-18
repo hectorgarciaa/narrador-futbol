@@ -67,6 +67,18 @@ class OnlineSpecialSeedRoleAssigner:
         self.segment_duplicate_lateral_tiebreak_delta = float(
             positions_cfg.get("segment_duplicate_lateral_tiebreak_delta", 0.06)
         )
+        self.segment_temporal_continuity_enabled = bool(
+            positions_cfg.get("segment_temporal_continuity_enabled", True)
+        )
+        self.segment_temporal_same_line_penalty = float(
+            positions_cfg.get("segment_temporal_same_line_penalty", 0.35)
+        )
+        self.segment_temporal_cross_line_penalty = float(
+            positions_cfg.get("segment_temporal_cross_line_penalty", 1.25)
+        )
+        self.segment_temporal_same_base_penalty = float(
+            positions_cfg.get("segment_temporal_same_base_penalty", 0.15)
+        )
         self.segment_switch_distance_m = float(positions_cfg.get("role_segment_switch_distance_m", positions_cfg.get("role_swap_position_jump_m", 14.0)))
         self.segment_min_observations = max(2, int(positions_cfg.get("role_segment_min_observations", positions_cfg.get("role_swap_min_recent_samples", 6))))
         self.recent_window = max(3, int(positions_cfg.get("role_segment_recent_window", 10)))
@@ -150,7 +162,6 @@ class OnlineSpecialSeedRoleAssigner:
             "sum_x_norm": 0.0,
             "sum_y_norm": 0.0,
             "display_role_slot": None,
-            "expected_role_slot": None,
             "lineup_slot": None,
             "player_name": None,
             "majority_role": None,
@@ -330,7 +341,36 @@ class OnlineSpecialSeedRoleAssigner:
             x_mean = float(state.get("sum_x_norm", 0.0)) / float(observations)
             y_mean = float(state.get("sum_y_norm", 0.0)) / float(observations)
             cost += SEGMENT_POSITION_WEIGHT * math.sqrt(((x_mean - float(anchor[0])) ** 2) + ((y_mean - float(anchor[1])) ** 2))
+        cost += self._temporal_continuity_penalty(state, slot_name)
         return float(cost)
+
+    @staticmethod
+    def _slot_line_family(slot_name):
+        slot_name = normalize_slot_token(slot_name)
+        if slot_name == "POR":
+            return "goalkeeper"
+        if slot_name in {"LI", "LD", "DFC_IZQ", "DFC_CENT", "DFC_DER"}:
+            return "defense"
+        if slot_name in {"MC", "MC_IZQ", "MC_DCHO", "MI", "MD"}:
+            return "midfield"
+        if slot_name in {"DC", "DC_IZQ", "DC_DCHO", "EI", "ED"}:
+            return "attack"
+        return None
+
+    def _temporal_continuity_penalty(self, state, slot_name):
+        if not self.segment_temporal_continuity_enabled:
+            return 0.0
+        previous_slot = normalize_slot_token(state.get("display_role_slot"))
+        candidate_slot = normalize_slot_token(slot_name)
+        if not previous_slot or not candidate_slot or previous_slot == candidate_slot:
+            return 0.0
+        if base_role_token(previous_slot) == base_role_token(candidate_slot):
+            return float(self.segment_temporal_same_base_penalty)
+        previous_line = self._slot_line_family(previous_slot)
+        candidate_line = self._slot_line_family(candidate_slot)
+        if previous_line and previous_line == candidate_line:
+            return float(self.segment_temporal_same_line_penalty)
+        return float(self.segment_temporal_cross_line_penalty)
 
     def _apply_duplicate_lateral_tiebreak(self, team_id, state_pairs, assigned_by_key):
         if not self.segment_duplicate_lateral_tiebreak_enabled:
@@ -412,10 +452,8 @@ class OnlineSpecialSeedRoleAssigner:
             frame_conf = 0.0
         track_data.update(
             {
-                "predicted_role": str(slot_name),
                 "predicted_role_confidence": float(frame_conf),
                 "display_role_slot": str(slot_name),
-                "expected_role_slot": str(slot_name),
                 "assignment_method": "hungarian_segment",
                 "assignment_cost": float(assignment_cost),
                 "stable_role_assignment_method": "hungarian_segment",
@@ -434,7 +472,6 @@ class OnlineSpecialSeedRoleAssigner:
             }
         )
         state["display_role_slot"] = str(slot_name)
-        state["expected_role_slot"] = str(slot_name)
         resolved_slot, player_name = self._resolve_lineup_assignment(track_data.get("team"), state)
         if resolved_slot and player_name:
             track_data["lineup_slot"] = str(resolved_slot)
@@ -553,10 +590,8 @@ class OnlineSpecialSeedRoleAssigner:
                             {
                                 "predicted_role_frame": "POR",
                                 "predicted_role_frame_confidence": 1.0,
-                                "predicted_role": "POR",
                                 "predicted_role_confidence": 1.0,
                                 "display_role_slot": "POR",
-                                "expected_role_slot": "POR",
                                 "assignment_method": "manual_special_goalkeeper",
                                 "stable_role_assignment_method": "manual_special_goalkeeper",
                                 "role_stabilized": True,
@@ -666,9 +701,7 @@ class OnlineSpecialSeedRoleAssigner:
                     "first_frame_id": int(state.get("start_frame", 0)),
                     "last_frame_id": int(state.get("end_frame", 0)),
                     "frames_seen": int(state.get("observations", 0)),
-                    "predicted_role": state.get("display_role_slot"),
                     "display_role_slot": state.get("display_role_slot"),
-                    "expected_role_slot": state.get("expected_role_slot"),
                     "segment_majority_role": state.get("majority_role"),
                     "segment_recent_majority_role": state.get("recent_majority_role"),
                     "segment_majority_expected_role_slot": state.get("majority_expected_role_slot"),
