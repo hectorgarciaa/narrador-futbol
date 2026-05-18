@@ -947,8 +947,8 @@ def run_tracking_pipeline(args, *, execution_mode_override=None):
             copy_output_artifact(role_frame_csv_path, role_frame_csv_path_legacy, logger, "Frame role predictions CSV")
             save_dataframe_csv(role_player_df, role_player_csv_path, logger, "Player role summary CSV")
             copy_output_artifact(role_player_csv_path, role_player_csv_path_legacy, logger, "Player role summary CSV")
-            save_dataframe_csv(role_greedy_df, role_greedy_csv_path, logger, "Role assignment diagnostics CSV")
-            copy_output_artifact(role_greedy_csv_path, role_greedy_csv_path_legacy, logger, "Role assignment diagnostics CSV")
+            save_dataframe_csv(role_greedy_df, role_greedy_csv_path, logger, "Greedy role diagnostics CSV")
+            copy_output_artifact(role_greedy_csv_path, role_greedy_csv_path_legacy, logger, "Greedy role diagnostics CSV")
         save_summary(summary, summary_path, logger)
         if not bool(getattr(args, "skip_metrics_dataset", False)):
             upsert_tracking_metrics_dataset(

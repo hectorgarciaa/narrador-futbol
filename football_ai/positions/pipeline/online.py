@@ -11,9 +11,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..assignment import (
-    simulate_ratio_priority_snapshot_for_team,
-)
 try:
     from scipy.optimize import linear_sum_assignment as _scipy_linear_sum_assignment
 except Exception:  # pragma: no cover
@@ -25,11 +22,7 @@ from .config import (
     SEGMENT_CONFIDENCE_WEIGHT,
     SEGMENT_POSITION_WEIGHT,
     normalize_expected_roles_mapping,
-    resolve_frame_expected_roles_assignment_method,
-    resolve_frame_ratio_priority_thresholds,
     resolve_expected_roles_by_team_from_config,
-    resolve_segment_expected_roles_assignment_method,
-    resolve_segment_ratio_priority_thresholds,
 )
 from .helpers import (
     first_existing_track_payload,
@@ -68,10 +61,6 @@ class OnlineSpecialSeedRoleAssigner:
         self.lineup_matcher = lineup_matcher if isinstance(lineup_matcher, LineupSlotMatcher) else None
         self.segment_expected_slots_by_team = self._build_segment_expected_slots_by_team()
         self.pitch_layout_by_team = self._build_pitch_layout_by_team()
-        self.frame_expected_roles_assignment_method = resolve_frame_expected_roles_assignment_method(positions_cfg)
-        self.frame_ratio_priority_cfg = resolve_frame_ratio_priority_thresholds(positions_cfg)
-        self.segment_expected_roles_assignment_method = resolve_segment_expected_roles_assignment_method(positions_cfg)
-        self.segment_ratio_priority_cfg = resolve_segment_ratio_priority_thresholds(positions_cfg)
         self.segment_switch_distance_m = float(positions_cfg.get("role_segment_switch_distance_m", positions_cfg.get("role_swap_position_jump_m", 14.0)))
         self.segment_min_observations = max(2, int(positions_cfg.get("role_segment_min_observations", positions_cfg.get("role_swap_min_recent_samples", 6))))
         self.recent_window = max(3, int(positions_cfg.get("role_segment_recent_window", 10)))
@@ -100,7 +89,6 @@ class OnlineSpecialSeedRoleAssigner:
         self.closed_segment_states = []
         self.raw_frame_prediction_rows = []
         self.segment_assignment_rows = []
-        self.assignment_diagnostic_rows = []
         self.stats = {
             "processed_frames": 0,
             "frames_with_role_predictions": 0,
@@ -151,15 +139,10 @@ class OnlineSpecialSeedRoleAssigner:
             "frame_vote_counts": Counter(),
             "frame_vote_confidence_sums": {},
             "model_role_counts": Counter(),
-            "model_role_confidence_sums": {},
-            "model_prob_sums": {},
             "recent_positions_m": deque(maxlen=self.recent_window),
             "recent_votes": deque(maxlen=self.recent_window),
             "sum_x_norm": 0.0,
             "sum_y_norm": 0.0,
-            "sum_left_sideline": 0.0,
-            "sum_right_sideline": 0.0,
-            "lateral_observations": 0,
             "display_role_slot": None,
             "expected_role_slot": None,
             "lineup_slot": None,
@@ -188,8 +171,6 @@ class OnlineSpecialSeedRoleAssigner:
             "frame_vote_counts": Counter(state.get("frame_vote_counts", Counter())),
             "frame_vote_confidence_sums": dict(state.get("frame_vote_confidence_sums", {})),
             "model_role_counts": Counter(state.get("model_role_counts", Counter())),
-            "model_role_confidence_sums": dict(state.get("model_role_confidence_sums", {})),
-            "model_prob_sums": dict(state.get("model_prob_sums", {})),
             "recent_positions_m": deque(state.get("recent_positions_m", ()), maxlen=self.recent_window),
             "recent_votes": deque(state.get("recent_votes", ()), maxlen=self.recent_window),
         }
@@ -314,40 +295,15 @@ class OnlineSpecialSeedRoleAssigner:
             getattr(row, "predicted_role_unconstrained", None) or getattr(row, "matched_model_role", None) or getattr(row, "predicted_role", None) or frame_slot
         )
         state["model_role_counts"][model_role] += 1
-        model_confidence = float(
-            pd.to_numeric(
-                getattr(row, "predicted_role_confidence_unconstrained", None)
-                or getattr(row, "predicted_role_confidence", frame_confidence),
-                errors="coerce",
-            )
-        )
-        if not np.isfinite(model_confidence):
-            model_confidence = float(frame_confidence)
-        state["model_role_confidence_sums"][model_role] = float(
-            state["model_role_confidence_sums"].get(model_role, 0.0)
-        ) + float(model_confidence)
         x_norm = pd.to_numeric(getattr(row, "x", np.nan), errors="coerce")
         y_norm = pd.to_numeric(getattr(row, "y", np.nan), errors="coerce")
         if pd.notna(x_norm) and pd.notna(y_norm):
             state["sum_x_norm"] += float(x_norm)
             state["sum_y_norm"] += float(y_norm)
-            state["sum_left_sideline"] += float(y_norm)
-            state["sum_right_sideline"] += float(1.0 - float(y_norm))
-            state["lateral_observations"] += 1
         if current_position_m is not None:
             state["last_position_m"] = current_position_m
             state["recent_positions_m"].append(current_position_m)
         state["recent_votes"].append(slot_key)
-        for field_name in getattr(row, "_fields", ()):
-            if not str(field_name).startswith("prob_"):
-                continue
-            role_label = normalize_slot_token(str(field_name)[5:])
-            if not role_label:
-                continue
-            prob_value = pd.to_numeric(getattr(row, field_name, np.nan), errors="coerce")
-            if pd.isna(prob_value):
-                continue
-            state["model_prob_sums"][role_label] = float(state["model_prob_sums"].get(role_label, 0.0)) + float(prob_value)
         state["majority_role"] = max(state["model_role_counts"].items(), key=lambda item: (int(item[1]), str(item[0])))[0]
         state["majority_expected_role_slot"], _ = self._segment_majority(state)
         state["recent_majority_role"], _, _ = self._recent_majority(state.get("recent_votes"))
@@ -380,70 +336,6 @@ class OnlineSpecialSeedRoleAssigner:
         row_ind, col_ind = solve_assignment(cost_matrix, _scipy_linear_sum_assignment)
         return [{"state": segment_states[row_idx], "slot": normalize_slot_token(expected_slots[col_idx]), "cost": float(cost_matrix[row_idx, col_idx])} for row_idx, col_idx in zip(row_ind.tolist(), col_ind.tolist())]
 
-    def _build_ratio_priority_state_from_segment(self, state):
-        return {
-            "team_id": str(state.get("team_id")),
-            "player_id": int(state.get("track_id", -1)),
-            "observations": int(state.get("observations", 0)),
-            "role_counts": dict(state.get("model_role_counts", {})),
-            "confidence_sums": dict(state.get("model_role_confidence_sums", {})),
-            "prob_sums": dict(state.get("model_prob_sums", {})),
-        }
-
-    def _assign_segments_for_team_ratio_priority(self, team_id, segment_states, expected_slots):
-        if not segment_states or not expected_slots:
-            return []
-        states_by_track_id = {
-            int(state.get("track_id")): self._build_ratio_priority_state_from_segment(state)
-            for state in segment_states
-        }
-        steps, unresolved, remaining_roles = simulate_ratio_priority_snapshot_for_team(
-            team_id=team_id,
-            states=states_by_track_id,
-            expected_roles=expected_slots,
-            min_count=int(self.segment_ratio_priority_cfg["min_count"]),
-            min_cumulative_ratio=float(self.segment_ratio_priority_cfg["min_cumulative_ratio"]),
-            min_final_ratio=float(self.segment_ratio_priority_cfg["min_final_ratio"]),
-        )
-        for step in steps:
-            self.assignment_diagnostic_rows.append(
-                {
-                    "pass_name": "segment",
-                    "team_id": str(team_id),
-                    **dict(step),
-                }
-            )
-        for unresolved_item in unresolved:
-            self.assignment_diagnostic_rows.append(
-                {
-                    "pass_name": "segment",
-                    "team_id": str(team_id),
-                    "phase": "unresolved",
-                    **dict(unresolved_item),
-                    "remaining_roles": "|".join(str(role) for role in remaining_roles),
-                }
-            )
-        state_by_track_id = {}
-        for state in segment_states:
-            state_by_track_id.setdefault(int(state.get("track_id", -1)), state)
-        assignments = []
-        for step in steps:
-            state = state_by_track_id.get(int(step["player_id"]))
-            if state is None:
-                continue
-            assignments.append(
-                {
-                    "state": state,
-                    "slot": normalize_slot_token(step["slot"]),
-                    "cost": float(1.0 - float(step.get("effective_ratio", 0.0))),
-                    "phase": str(step.get("phase", "threshold")),
-                    "effective_ratio": float(step.get("effective_ratio", 0.0)),
-                    "final_ratio": float(step.get("final_ratio", 0.0)),
-                    "transferred_ratio": float(step.get("transferred_ratio", 0.0)),
-                }
-            )
-        return assignments
-
     @staticmethod
     def _segment_assignment_key(state):
         return (
@@ -456,7 +348,7 @@ class OnlineSpecialSeedRoleAssigner:
             return None, None
         return self.lineup_matcher.resolve_player_name(team_id, state.get("display_role_slot"), state.get("majority_expected_role_slot"), state.get("majority_role"))
 
-    def _apply_segment_assignment_to_track(self, track_data, state, slot_name, frame_id, assignment_cost, assignment_method):
+    def _apply_segment_assignment_to_track(self, track_data, state, slot_name, frame_id, assignment_cost):
         base_slot = base_role_token(slot_name)
         frame_conf = float(state.get("frame_vote_confidence_sums", {}).get(base_slot, 0.0)) / max(1, int(state.get("frame_vote_counts", {}).get(base_slot, 0)))
         if not np.isfinite(frame_conf):
@@ -467,9 +359,9 @@ class OnlineSpecialSeedRoleAssigner:
                 "predicted_role_confidence": float(frame_conf),
                 "display_role_slot": str(slot_name),
                 "expected_role_slot": str(slot_name),
-                "assignment_method": str(assignment_method),
+                "assignment_method": "hungarian_segment",
                 "assignment_cost": float(assignment_cost),
-                "stable_role_assignment_method": str(assignment_method),
+                "stable_role_assignment_method": "hungarian_segment",
                 "role_stabilized": True,
                 "role_stabilized_at_frame": int(frame_id),
                 "role_stabilization_observations": int(state.get("observations", 0)),
@@ -493,86 +385,17 @@ class OnlineSpecialSeedRoleAssigner:
             state["lineup_slot"] = str(resolved_slot)
             state["player_name"] = str(player_name)
 
-    def _resolve_ratio_priority_duplicate_lateral_slots(self, team_id, state_pairs):
-        expected_slots = self.segment_expected_slots_by_team.get(
-            str(team_id),
-            self.expected_roles_by_team.get(str(team_id), []),
-        )
-        role_counts = Counter(base_role_token(role) for role in (expected_slots or []))
-        active_duplicate_bases = [
-            base_role
-            for base_role in ("MC", "DC")
-            if int(role_counts.get(base_role, 0)) >= 2
-        ]
-        if not active_duplicate_bases:
-            return
-        for base_role in active_duplicate_bases:
-            candidates = []
-            for state, track_data in state_pairs:
-                slot_label = state.get("expected_role_slot")
-                if slot_label is None or base_role_token(slot_label) != str(base_role):
-                    continue
-                observations = max(1, int(state.get("lateral_observations", 0)))
-                mean_left = float(state.get("sum_left_sideline", 0.0)) / float(observations)
-                mean_right = float(state.get("sum_right_sideline", 0.0)) / float(observations)
-                candidates.append(
-                    (
-                        mean_left,
-                        mean_right,
-                        int(state.get("segment_id", 0)),
-                        state,
-                        track_data,
-                    )
-                )
-            if len(candidates) < 2:
-                continue
-            candidates.sort(
-                key=lambda item: (
-                    float(item[0]),
-                    -float(item[1]),
-                    int(item[2]),
-                )
-            )
-            left_state, left_track = candidates[0][3], candidates[0][4]
-            right_state, right_track = candidates[-1][3], candidates[-1][4]
-            left_state["display_role_slot"] = f"{base_role}_IZQ"
-            right_state["display_role_slot"] = f"{base_role}_DCHO"
-            left_track["display_role_slot"] = left_state["display_role_slot"]
-            right_track["display_role_slot"] = right_state["display_role_slot"]
-            left_track["predicted_role"] = left_state["display_role_slot"]
-            right_track["predicted_role"] = right_state["display_role_slot"]
-            for _, _, _, state, track_data in candidates[1:-1]:
-                state["display_role_slot"] = str(base_role)
-                track_data["display_role_slot"] = str(base_role)
-                track_data["predicted_role"] = str(base_role)
-            for _, _, _, state, track_data in candidates:
-                resolved_slot, player_name = self._resolve_lineup_assignment(team_id, state)
-                if resolved_slot and player_name:
-                    track_data["lineup_slot"] = str(resolved_slot)
-                    track_data["player_name"] = str(player_name)
-                    state["lineup_slot"] = str(resolved_slot)
-                    state["player_name"] = str(player_name)
-
     def _apply_active_segment_assignments(self, active_segments_by_team, frame_id):
         for team_id, state_pairs in active_segments_by_team.items():
             expected_slots = self.segment_expected_slots_by_team.get(
                 str(team_id),
                 self.expected_roles_by_team.get(str(team_id), []),
             )
-            if self.segment_expected_roles_assignment_method == "ratio_priority":
-                assignments = self._assign_segments_for_team_ratio_priority(
-                    str(team_id),
-                    [state for state, _ in state_pairs],
-                    expected_slots,
-                )
-                stable_assignment_method = "ratio_priority_segment"
-            else:
-                assignments = self._assign_segments_for_team(
-                    str(team_id),
-                    [state for state, _ in state_pairs],
-                    expected_slots,
-                )
-                stable_assignment_method = "hungarian_segment"
+            assignments = self._assign_segments_for_team(
+                str(team_id),
+                [state for state, _ in state_pairs],
+                expected_slots,
+            )
             assigned_by_key = {
                 self._segment_assignment_key(item["state"]): item
                 for item in assignments
@@ -585,17 +408,7 @@ class OnlineSpecialSeedRoleAssigner:
                     else state.get("majority_expected_role_slot") or state.get("majority_role")
                 )
                 assignment_cost = float(assigned["cost"]) if assigned is not None else math.nan
-                assignment_method = stable_assignment_method
-                if assigned is not None and self.segment_expected_roles_assignment_method == "ratio_priority":
-                    assignment_method = f"ratio_priority_segment_{assigned.get('phase', 'threshold')}"
-                self._apply_segment_assignment_to_track(
-                    track_data,
-                    state,
-                    final_slot,
-                    frame_id,
-                    assignment_cost,
-                    assignment_method,
-                )
+                self._apply_segment_assignment_to_track(track_data, state, final_slot, frame_id, assignment_cost)
                 self.stats["segment_level_assignments"] += 1
                 self.segment_assignment_rows.append(
                     {
@@ -613,25 +426,8 @@ class OnlineSpecialSeedRoleAssigner:
                         "lineup_slot": state.get("lineup_slot"),
                         "reset_reason": state.get("reset_reason"),
                         "reset_position_jump_m": state.get("reset_position_jump_m"),
-                        "assignment_method": assignment_method,
                     }
                 )
-            if self.segment_expected_roles_assignment_method == "ratio_priority":
-                self._resolve_ratio_priority_duplicate_lateral_slots(team_id, state_pairs)
-                recent_rows = self.segment_assignment_rows[-len(state_pairs):] if state_pairs else []
-                state_by_segment_key = {
-                    self._segment_assignment_key(state): state
-                    for state, _ in state_pairs
-                }
-                for row in recent_rows:
-                    state = state_by_segment_key.get(
-                        (int(row.get("player_id", -1)), int(row.get("identity_segment_id", -1)))
-                    )
-                    if state is None:
-                        continue
-                    row["display_role_slot"] = state.get("display_role_slot")
-                    row["player_name"] = state.get("player_name")
-                    row["lineup_slot"] = state.get("lineup_slot")
 
     def _assign_special_seed_frame_teams(self, tracks_frame, visible_player_df):
         defender_candidates = []
@@ -730,16 +526,7 @@ class OnlineSpecialSeedRoleAssigner:
         if observations_df.empty:
             self._annotate_special_goalkeepers(tracks_frame, frame_id)
             return {"frame_predictions": 0, "player_predictions": 0, "roles_applied": False}
-        role_result = self.role_session.predict_frame(
-            observations_df,
-            expected_roles_by_team=self.expected_roles_by_team,
-            expected_roles_assignment_method=self.frame_expected_roles_assignment_method,
-            expected_roles_ratio_priority_min_count=int(self.frame_ratio_priority_cfg["min_count"]),
-            expected_roles_ratio_priority_min_cumulative_ratio=float(self.frame_ratio_priority_cfg["min_cumulative_ratio"]),
-            expected_roles_ratio_priority_min_final_ratio=float(self.frame_ratio_priority_cfg["min_final_ratio"]),
-            assignment_diagnostics=self.assignment_diagnostic_rows,
-            include_all_targets=True,
-        )
+        role_result = self.role_session.predict_frame(observations_df, expected_roles_by_team=self.expected_roles_by_team, include_all_targets=True)
         frame_predictions_df = role_result.get("frame_predictions_df", pd.DataFrame())
         player_predictions_df = role_result.get("player_predictions_df", pd.DataFrame())
         if frame_predictions_df.empty or player_predictions_df.empty:
@@ -771,11 +558,7 @@ class OnlineSpecialSeedRoleAssigner:
                 if hasattr(row, attr) and pd.notna(getattr(row, attr)):
                     value = getattr(row, attr)
                     track_data[attr] = float(value) if "confidence" in attr or attr == "assignment_cost" else str(value)
-            track_data["assignment_method"] = (
-                "ratio_priority_frame"
-                if self.frame_expected_roles_assignment_method == "ratio_priority"
-                else "hungarian_frame"
-            )
+            track_data["assignment_method"] = "hungarian_frame"
             state = self._update_segment(track_id, frame_id, team_id, frame_slot, frame_conf, row, track_data)
             active_segments_by_team.setdefault(team_id, []).append((state, track_data))
             roles_applied = True
@@ -791,8 +574,6 @@ class OnlineSpecialSeedRoleAssigner:
                     "predicted_role_unconstrained": track_data.get("predicted_role_unconstrained"),
                     "predicted_role_confidence_unconstrained": track_data.get("predicted_role_confidence_unconstrained"),
                     "matched_model_role": track_data.get("matched_model_role"),
-                    "assignment_method": track_data.get("assignment_method"),
-                    "expected_role_slot": track_data.get("expected_role_slot"),
                     "x_m": float(pd.to_numeric(getattr(row, "x_m", np.nan), errors="coerce")),
                     "y_m": float(pd.to_numeric(getattr(row, "y_m", np.nan), errors="coerce")),
                     "x": float(pd.to_numeric(getattr(row, "x", np.nan), errors="coerce")),
@@ -843,17 +624,9 @@ class OnlineSpecialSeedRoleAssigner:
         )
         if not player_df.empty:
             player_df = player_df.sort_values(["team_id", "player_id", "identity_segment_id"]).reset_index(drop=True)
-        diagnostic_rows = list(self.assignment_diagnostic_rows)
-        diagnostic_rows.extend(self.segment_assignment_rows)
-        segment_df = pd.DataFrame(diagnostic_rows)
+        segment_df = pd.DataFrame(self.segment_assignment_rows)
         if not segment_df.empty:
-            sort_cols = [
-                col
-                for col in ("pass_name", "frame_id", "team_id", "player_id", "step_idx")
-                if col in segment_df.columns
-            ]
-            if sort_cols:
-                segment_df = segment_df.sort_values(sort_cols).reset_index(drop=True)
+            segment_df = segment_df.sort_values(["frame_id", "team_id", "player_id"]).reset_index(drop=True)
         return frame_df, player_df, segment_df
 
     def on_frame(self, tracks, frame_id):

@@ -1,22 +1,12 @@
 from __future__ import annotations
 
 import math
-import itertools
-from typing import Any, Mapping, MutableSequence, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import linear_sum_assignment
 
-try:
-    from scipy.optimize import linear_sum_assignment as _scipy_linear_sum_assignment
-except Exception:  # pragma: no cover
-    _scipy_linear_sum_assignment = None
-
-from ..assignment import (
-    build_state_from_player_prediction_row,
-    normalize_expected_roles_assignment_method,
-    simulate_ratio_priority_snapshot_for_team,
-)
 from .config import ExpectedRoleSlot
 
 
@@ -66,40 +56,10 @@ SLOT_LABEL_COMPAT_WEIGHT = 1.10
 ANCHOR_DY_WEIGHT = 1.20
 
 
-def _solve_cost_matrix(cost_matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    if _scipy_linear_sum_assignment is not None:
-        return _scipy_linear_sum_assignment(cost_matrix)
-
-    num_rows, num_cols = cost_matrix.shape
-    best_cost = None
-    best_pairs = None
-    for chosen_cols in itertools.permutations(range(num_cols), min(num_rows, num_cols)):
-        total_cost = 0.0
-        pairs = []
-        for row_idx, col_idx in enumerate(chosen_cols):
-            total_cost += float(cost_matrix[row_idx, col_idx])
-            pairs.append((row_idx, col_idx))
-        if best_cost is None or total_cost < best_cost:
-            best_cost = total_cost
-            best_pairs = pairs
-    if not best_pairs:
-        return np.asarray([], dtype=np.int64), np.asarray([], dtype=np.int64)
-    return (
-        np.asarray([pair[0] for pair in best_pairs], dtype=np.int64),
-        np.asarray([pair[1] for pair in best_pairs], dtype=np.int64),
-    )
-
-
 def constrain_player_predictions_with_expected_roles(
     player_predictions_df: pd.DataFrame,
     label_names: Sequence[str],
     expected_roles_by_team: Mapping[str, Sequence[str]] | None,
-    *,
-    expected_roles_assignment_method: str = "hungarian",
-    ratio_priority_min_count: int = 1,
-    ratio_priority_min_cumulative_ratio: float = 0.40,
-    ratio_priority_min_final_ratio: float | None = None,
-    diagnostics_collector: MutableSequence[dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
     constrained = player_predictions_df.copy()
     constrained["predicted_role_unconstrained"] = constrained["predicted_role"].astype(str)
@@ -114,15 +74,6 @@ def constrain_player_predictions_with_expected_roles(
     if not expected_roles_by_team:
         return constrained
 
-    assignment_method = normalize_expected_roles_assignment_method(
-        expected_roles_assignment_method,
-        default="hungarian",
-    )
-    final_ratio = (
-        float(ratio_priority_min_final_ratio)
-        if ratio_priority_min_final_ratio is not None
-        else float(ratio_priority_min_cumulative_ratio)
-    )
     available_team_ids = set(constrained["team_id"].astype(str).unique().tolist())
     epsilon = 1e-9
     prob_cols = [f"prob_{label}" for label in label_names]
@@ -135,20 +86,7 @@ def constrain_player_predictions_with_expected_roles(
         goalkeeper_slots = [slot for slot in slots if "POR" in slot.allowed_labels]
         field_slots = [slot for slot in slots if "POR" not in slot.allowed_labels]
         _assign_goalkeepers(constrained, team_df, goalkeeper_slots)
-        if assignment_method == "ratio_priority":
-            _assign_field_players_ratio_priority(
-                constrained,
-                team_id=team_id,
-                team_df=team_df,
-                field_slots=field_slots,
-                label_names=label_names,
-                min_count=int(ratio_priority_min_count),
-                min_cumulative_ratio=float(ratio_priority_min_cumulative_ratio),
-                min_final_ratio=float(final_ratio),
-                diagnostics_collector=diagnostics_collector,
-            )
-        else:
-            _assign_field_players(constrained, team_df, field_slots, epsilon)
+        _assign_field_players(constrained, team_df, field_slots, epsilon)
 
     keep_cols = [
         "team_id",
@@ -207,7 +145,7 @@ def _assign_field_players(
             row_pairs.append((best_label, best_prob))
             cost_matrix[row_pos, col_pos] = float(total_cost)
         best_labels_per_pair.append(row_pairs)
-    row_ind, col_ind = _solve_cost_matrix(cost_matrix)
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
     assigned_row_positions = set(row_ind.tolist())
     for row_pos, col_pos in zip(row_ind.tolist(), col_ind.tolist()):
         row_idx = field_indices[row_pos]
@@ -225,81 +163,6 @@ def _assign_field_players(
         if row_pos in assigned_row_positions:
             continue
         _assign_fallback(constrained, field_df.loc[row_idx], row_idx, fallback_options, epsilon)
-
-
-def _assign_field_players_ratio_priority(
-    constrained: pd.DataFrame,
-    *,
-    team_id: str,
-    team_df: pd.DataFrame,
-    field_slots: list[ExpectedRoleSlot],
-    label_names: Sequence[str],
-    min_count: int,
-    min_cumulative_ratio: float,
-    min_final_ratio: float,
-    diagnostics_collector: MutableSequence[dict[str, Any]] | None,
-) -> None:
-    if not field_slots:
-        return
-    field_df = team_df[team_df["class_name"].astype(str) != "goalkeeper"].copy()
-    if field_df.empty:
-        return
-
-    states_by_player_id = {
-        int(row.player_id): build_state_from_player_prediction_row(row._asdict(), label_names)
-        for row in field_df.itertuples(index=False)
-    }
-    expected_roles = [slot.slot_label for slot in field_slots]
-    steps, unresolved, remaining_roles = simulate_ratio_priority_snapshot_for_team(
-        team_id=team_id,
-        states=states_by_player_id,
-        expected_roles=expected_roles,
-        min_count=int(min_count),
-        min_cumulative_ratio=float(min_cumulative_ratio),
-        min_final_ratio=float(min_final_ratio),
-    )
-
-    if diagnostics_collector is not None:
-        for step in steps:
-            diagnostics_collector.append(
-                {
-                    "pass_name": "frame",
-                    "team_id": str(team_id),
-                    **dict(step),
-                }
-            )
-        for unresolved_item in unresolved:
-            diagnostics_collector.append(
-                {
-                    "pass_name": "frame",
-                    "team_id": str(team_id),
-                    "phase": "unresolved",
-                    **dict(unresolved_item),
-                    "remaining_roles": "|".join(str(role) for role in remaining_roles),
-                }
-            )
-
-    if not steps:
-        return
-
-    field_rows_by_player_id = {
-        int(row.player_id): row
-        for row in field_df.itertuples(index=True)
-    }
-    for assignment in steps:
-        player_id = int(assignment["player_id"])
-        row = field_rows_by_player_id.get(player_id)
-        if row is None:
-            continue
-        normalized_role = str(assignment["slot_normalized"])
-        raw_role = str(assignment["slot"])
-        prob_value = float(getattr(row, f"prob_{normalized_role}", 0.0))
-        constrained.at[row.Index, "predicted_role"] = raw_role
-        constrained.at[row.Index, "predicted_role_confidence"] = float(prob_value)
-        constrained.at[row.Index, "expected_role_slot"] = raw_role
-        constrained.at[row.Index, "assignment_method"] = f"ratio_priority_frame_{assignment.get('phase', 'threshold')}"
-        constrained.at[row.Index, "assignment_cost"] = float(1.0 - float(assignment.get("effective_ratio", 0.0)))
-        constrained.at[row.Index, "matched_model_role"] = normalized_role
 
 
 def _fallback_options(field_slots: list[ExpectedRoleSlot]) -> list[tuple[str, str]]:

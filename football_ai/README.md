@@ -31,7 +31,7 @@ football_ai/
 | [`actions`](actions/README.md) | Utilidades históricas/offline de PathCRF conservadas para referencia | `PathCRFTracksAdapter` |
 | [`actions_incremental`](actions_incremental/README.md) | Flujo activo de acciones online con representación materializada por slot y ejecución causal de PathCRF | `ActionsDetector`, `ActionsRuntime`, `ActionsDetectorPhase` |
 | [`detection`](detection/README.md) | Inferencia YOLO sobre frames de video | `Detector`, `DetectR8` |
-| [`positions`](positions/README.md) | Dataset, modelo Set Transformer e inferencia online de roles con doble pasada configurable (`hungarian` o `ratio_priority`) | `PositionInferingPhase`, `OnlineSpecialSeedRoleAssigner` |
+| [`positions`](positions/README.md) | Dataset, modelo Set Transformer e inferencia online de roles con doble Húngaro | `PositionInferingPhase`, `OnlineSpecialSeedRoleAssigner` |
 | [`report`](report/README.md) | Informes tecnicos, benchmarkings y decisiones documentadas | Documentacion Markdown |
 | [`reference_points`](reference_points/) | Calibración del campo y proyección de detecciones a coordenadas métricas | `PnLCalibFieldProjector` |
 | [`bytetrack`](bytetrack/README.md) | Asociación multi-objeto desacoplada: `IDENTIFICATION.clean` → `BYTETRACK` | `ByteTrackPhase`, `ByteTrack` |
