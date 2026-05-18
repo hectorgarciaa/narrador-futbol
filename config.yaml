@@ -274,7 +274,7 @@ commentary:
   tts_backend: "xtts"
   speaker_wavs: []
   female_speaker_wavs: []
-  alternate_voices: false
+  alternate_voices: False
   max_workers: 2
   drop_policy: "latest"
   max_queue_size: 8
