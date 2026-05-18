@@ -173,6 +173,9 @@ class OnlineSemanticPostprocessor:
         receiver_team_id = event.get("_receiver_team_id")
         if start_x is None or start_y is None or end_x is None or end_y is None or team_id not in {"home", "away"}:
             return 0.0
+        # Hard veto: never treat a pass to a teammate as a shot.
+        if receiver_team_id in {"home", "away"} and receiver_team_id == team_id:
+            return 0.0
 
         goal_x = PITCH_LENGTH_M if attack_direction_right else 0.0
         goal_y = PITCH_CENTER_Y

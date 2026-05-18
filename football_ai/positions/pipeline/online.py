@@ -26,6 +26,7 @@ from .config import (
 )
 from .helpers import (
     first_existing_track_payload,
+    orient_normalized_point,
     safe_field_position_m,
     segment_anchor_for_slot,
     solve_assignment,
@@ -107,6 +108,7 @@ class OnlineSpecialSeedRoleAssigner:
         self.closed_segment_states = []
         self.raw_frame_prediction_rows = []
         self.segment_assignment_rows = []
+        self.attack_direction_by_team = {}
         self.stats = {
             "processed_frames": 0,
             "frames_with_role_predictions": 0,
@@ -304,6 +306,7 @@ class OnlineSpecialSeedRoleAssigner:
             state = self._start_new_segment(track_id, frame_id, team_id=team_id, reason=reason, position_jump_m=position_jump_m)
         slot_key = normalize_slot_token(frame_slot)
         state["team_id"] = str(team_id)
+        state["attack_direction"] = int(self.attack_direction_by_team.get(str(team_id), +1))
         state["end_frame"] = int(frame_id)
         state["observations"] += 1
         state["frame_vote_counts"][slot_key] += 1
@@ -336,11 +339,15 @@ class OnlineSpecialSeedRoleAssigner:
         majority_slot = normalize_slot_token(state.get("majority_expected_role_slot"))
         if majority_slot and majority_slot != slot_name and base_role_token(majority_slot) != base_slot:
             cost += 1.0
-        anchor = segment_anchor_for_slot(self.pitch_layout_by_team, team_id, slot_name)
+        attack_direction = int(state.get("attack_direction", self.attack_direction_by_team.get(str(team_id), +1)))
+        anchor = segment_anchor_for_slot(self.pitch_layout_by_team, team_id, slot_name, attack_direction=attack_direction)
         if anchor is not None and observations > 0:
             x_mean = float(state.get("sum_x_norm", 0.0)) / float(observations)
             y_mean = float(state.get("sum_y_norm", 0.0)) / float(observations)
-            cost += SEGMENT_POSITION_WEIGHT * math.sqrt(((x_mean - float(anchor[0])) ** 2) + ((y_mean - float(anchor[1])) ** 2))
+            x_mean_ori, y_mean_ori = orient_normalized_point(x_mean, y_mean, attack_direction)
+            cost += SEGMENT_POSITION_WEIGHT * math.sqrt(
+                ((x_mean_ori - float(anchor[0])) ** 2) + ((y_mean_ori - float(anchor[1])) ** 2)
+            )
         cost += self._temporal_continuity_penalty(state, slot_name)
         return float(cost)
 
@@ -397,20 +404,23 @@ class OnlineSpecialSeedRoleAssigner:
                 if base_role_token(slot_name) != base_role:
                     continue
                 observations = max(1, int(state.get("observations", 0)))
+                attack_direction = int(state.get("attack_direction", self.attack_direction_by_team.get(str(team_id), +1)))
                 mean_x = float(state.get("sum_x_norm", 0.0)) / float(observations)
+                mean_y = float(state.get("sum_y_norm", 0.0)) / float(observations)
+                _, lateral_coord = orient_normalized_point(mean_x, mean_y, attack_direction)
                 cost = float(assigned.get("cost", math.nan))
                 candidates.append(
                     {
                         "key": key,
                         "state": state,
                         "track_data": track_data,
-                        "mean_x": mean_x,
+                        "lateral_coord": lateral_coord,
                         "cost": cost,
                     }
                 )
             if len(candidates) < 2:
                 continue
-            candidates = sorted(candidates, key=lambda item: (float(item["cost"]), float(item["mean_x"])))
+            candidates = sorted(candidates, key=lambda item: (float(item["cost"]), float(item["lateral_coord"])))
             best_two = candidates[:2]
             cost_0 = float(best_two[0]["cost"])
             cost_1 = float(best_two[1]["cost"])
@@ -418,7 +428,7 @@ class OnlineSpecialSeedRoleAssigner:
                 continue
             if abs(cost_0 - cost_1) > float(self.segment_duplicate_lateral_tiebreak_delta):
                 continue
-            ordered = sorted(best_two, key=lambda item: float(item["mean_x"]))
+            ordered = sorted(best_two, key=lambda item: float(item["lateral_coord"]))
             left_item, right_item = ordered[0], ordered[-1]
             assigned_by_key[left_item["key"]]["slot"] = left_slot
             assigned_by_key[right_item["key"]]["slot"] = right_slot
@@ -622,6 +632,11 @@ class OnlineSpecialSeedRoleAssigner:
         role_result = self.role_session.predict_frame(observations_df, expected_roles_by_team=self.expected_roles_by_team, include_all_targets=True)
         frame_predictions_df = role_result.get("frame_predictions_df", pd.DataFrame())
         player_predictions_df = role_result.get("player_predictions_df", pd.DataFrame())
+        role_attack_direction_by_team = role_result.get("attack_direction_by_team") or {}
+        self.attack_direction_by_team = {
+            str(team_id): int(direction)
+            for team_id, direction in role_attack_direction_by_team.items()
+        }
         if frame_predictions_df.empty or player_predictions_df.empty:
             self._annotate_special_goalkeepers(tracks_frame, frame_id)
             return {"frame_predictions": 0, "player_predictions": 0, "roles_applied": False}
