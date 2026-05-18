@@ -257,7 +257,7 @@ class PathCRFTracksAdapter:
                             frame_id=frame_id,
                             class_name=class_name,
                             team_name=self._normalize_team_name(payload.get("team")),
-                            predicted_role=self._normalize_role(payload.get("predicted_role") or payload.get("predicted_role_frame")),
+                            predicted_role=self._normalize_role(payload.get("display_role_slot") or payload.get("predicted_role_frame")),
                             bbox=self._safe_bbox(payload.get("bbox")),
                             field_position_m=self._safe_field_position(payload.get("field_position_m")),
                         )
@@ -543,7 +543,7 @@ class PathCRFTracksAdapter:
                             "raw_id": str(raw_id),
                             "class_name": class_name,
                             "role": self._normalize_role(
-                                payload.get("predicted_role") or payload.get("predicted_role_frame")
+                                payload.get("display_role_slot") or payload.get("predicted_role_frame")
                             ),
                             "xy": field_position,
                         }

@@ -5,6 +5,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from football_ai.pathcrf_slot_mapping import canonical_id_to_person_slot
+
 
 PITCH_LENGTH_M = 105.0
 PITCH_WIDTH_M = 68.0
@@ -29,6 +31,9 @@ def safe_float(value: Any) -> float | None:
 
 def team_id_from_player_id(player_id: Any) -> str | None:
     text = str(player_id or "").strip()
+    canonical_slot = canonical_id_to_person_slot(text)
+    if canonical_slot:
+        text = canonical_slot
     if text.startswith("home_"):
         return "home"
     if text.startswith("away_"):
@@ -38,6 +43,9 @@ def team_id_from_player_id(player_id: Any) -> str | None:
 
 def is_player_slot(player_id: Any) -> bool:
     text = str(player_id or "").strip()
+    canonical_slot = canonical_id_to_person_slot(text)
+    if canonical_slot:
+        text = canonical_slot
     return text.startswith(PLAYER_PREFIXES)
 
 

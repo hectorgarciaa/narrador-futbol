@@ -67,7 +67,7 @@ def _best_value(counter: Counter[str]) -> str | None:
 
 
 def _normalize_position(payload: dict[str, Any]) -> str | None:
-    for key in ("lineup_slot", "predicted_role", "predicted_role_frame"):
+    for key in ("lineup_slot", "display_role_slot", "predicted_role_frame"):
         value = _clean_text(payload.get(key))
         if value:
             return value
