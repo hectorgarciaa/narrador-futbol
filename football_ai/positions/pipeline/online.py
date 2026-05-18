@@ -61,6 +61,12 @@ class OnlineSpecialSeedRoleAssigner:
         self.lineup_matcher = lineup_matcher if isinstance(lineup_matcher, LineupSlotMatcher) else None
         self.segment_expected_slots_by_team = self._build_segment_expected_slots_by_team()
         self.pitch_layout_by_team = self._build_pitch_layout_by_team()
+        self.segment_duplicate_lateral_tiebreak_enabled = bool(
+            positions_cfg.get("segment_duplicate_lateral_tiebreak_enabled", False)
+        )
+        self.segment_duplicate_lateral_tiebreak_delta = float(
+            positions_cfg.get("segment_duplicate_lateral_tiebreak_delta", 0.06)
+        )
         self.segment_switch_distance_m = float(positions_cfg.get("role_segment_switch_distance_m", positions_cfg.get("role_swap_position_jump_m", 14.0)))
         self.segment_min_observations = max(2, int(positions_cfg.get("role_segment_min_observations", positions_cfg.get("role_swap_min_recent_samples", 6))))
         self.recent_window = max(3, int(positions_cfg.get("role_segment_recent_window", 10)))
@@ -326,6 +332,57 @@ class OnlineSpecialSeedRoleAssigner:
             cost += SEGMENT_POSITION_WEIGHT * math.sqrt(((x_mean - float(anchor[0])) ** 2) + ((y_mean - float(anchor[1])) ** 2))
         return float(cost)
 
+    def _apply_duplicate_lateral_tiebreak(self, team_id, state_pairs, assigned_by_key):
+        if not self.segment_duplicate_lateral_tiebreak_enabled:
+            return
+        expected_slots = [
+            normalize_slot_token(slot)
+            for slot in self.segment_expected_slots_by_team.get(
+                str(team_id),
+                self.expected_roles_by_team.get(str(team_id), []),
+            )
+        ]
+        for base_role in ("MC", "DC"):
+            left_slot = f"{base_role}_IZQ"
+            right_slot = f"{base_role}_DCHO"
+            if left_slot not in expected_slots or right_slot not in expected_slots:
+                continue
+            candidates = []
+            for state, track_data in state_pairs:
+                key = self._segment_assignment_key(state)
+                assigned = assigned_by_key.get(key)
+                if assigned is None:
+                    continue
+                slot_name = normalize_slot_token(assigned.get("slot"))
+                if base_role_token(slot_name) != base_role:
+                    continue
+                observations = max(1, int(state.get("observations", 0)))
+                mean_x = float(state.get("sum_x_norm", 0.0)) / float(observations)
+                cost = float(assigned.get("cost", math.nan))
+                candidates.append(
+                    {
+                        "key": key,
+                        "state": state,
+                        "track_data": track_data,
+                        "mean_x": mean_x,
+                        "cost": cost,
+                    }
+                )
+            if len(candidates) < 2:
+                continue
+            candidates = sorted(candidates, key=lambda item: (float(item["cost"]), float(item["mean_x"])))
+            best_two = candidates[:2]
+            cost_0 = float(best_two[0]["cost"])
+            cost_1 = float(best_two[1]["cost"])
+            if not (np.isfinite(cost_0) and np.isfinite(cost_1)):
+                continue
+            if abs(cost_0 - cost_1) > float(self.segment_duplicate_lateral_tiebreak_delta):
+                continue
+            ordered = sorted(best_two, key=lambda item: float(item["mean_x"]))
+            left_item, right_item = ordered[0], ordered[-1]
+            assigned_by_key[left_item["key"]]["slot"] = left_slot
+            assigned_by_key[right_item["key"]]["slot"] = right_slot
+
     def _assign_segments_for_team(self, team_id, segment_states, expected_slots):
         if not segment_states or not expected_slots:
             return []
@@ -400,6 +457,7 @@ class OnlineSpecialSeedRoleAssigner:
                 self._segment_assignment_key(item["state"]): item
                 for item in assignments
             }
+            self._apply_duplicate_lateral_tiebreak(str(team_id), state_pairs, assigned_by_key)
             for state, track_data in state_pairs:
                 assigned = assigned_by_key.get(self._segment_assignment_key(state))
                 final_slot = (

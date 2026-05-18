@@ -105,65 +105,65 @@ tracking:
   execution_mode: runtime
   lineup_spec:
     teams:
-      - formation: "4-3-3"
+      - formation: "5-3-2"
         pitch_layout:
-          DC: {x: 50, y: 14}
-          DFC_DER: {x: 62, y: 72}
-          DFC_IZQ: {x: 38, y: 72}
-          ED: {x: 80, y: 20}
-          EI: {x: 20, y: 20}
-          LD: {x: 82, y: 72}
-          LI: {x: 18, y: 72}
-          MC: {x: 50, y: 44}
-          MD: {x: 72, y: 48}
-          MI: {x: 28, y: 48}
+          DC_DCHO: {x: 60, y: 18}
+          DC_IZQ: {x: 40, y: 18}
+          DFC_CENT: {x: 50, y: 76}
+          DFC_DER: {x: 68, y: 74}
+          DFC_IZQ: {x: 32, y: 74}
+          LD: {x: 86, y: 66}
+          LI: {x: 14, y: 66}
+          MC: {x: 50, y: 46}
+          MD: {x: 66, y: 44}
+          MI: {x: 34, y: 44}
           POR: {x: 50, y: 90}
         players_by_slot:
-          DC: "Benzema"
+          DC_DCHO: "Benzema"
+          DC_IZQ: "Vinicius"
+          DFC_CENT: "Rudiger"
           DFC_DER: "Alaba"
           DFC_IZQ: "Militao"
-          ED: "Valverde"
-          EI: "Vini"
           LD: "Carvajal"
           LI: "Mendy"
           MC: "Casemiro"
-          MD: "Modric"
-          MI: "Kross"
+          MD: "Valverde"
+          MI: "Bellingham"
           POR: "Courtois"
         team_color: "#ffffff"
         team_name: "Real Madrid"
-        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
-        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
-      - formation: "4-3-3"
+        tracking_slots: ["POR", "DFC_IZQ", "DFC_CENT", "DFC_DER", "LI", "LD", "MC", "MI", "MD", "DC", "DC"]
+        ui_slots: ["POR", "DFC_IZQ", "DFC_CENT", "DFC_DER", "LI", "LD", "MC", "MI", "MD", "DC_IZQ", "DC_DCHO"]
+      - formation: "4-4-2"
         pitch_layout:
-          DC: {x: 50, y: 14}
+          DC_DCHO: {x: 60, y: 18}
+          DC_IZQ: {x: 40, y: 18}
           DFC_DER: {x: 62, y: 72}
           DFC_IZQ: {x: 38, y: 72}
-          ED: {x: 80, y: 20}
-          EI: {x: 20, y: 20}
+          MD: {x: 86, y: 42}
+          MI: {x: 14, y: 42}
           LD: {x: 82, y: 72}
           LI: {x: 18, y: 72}
-          MC: {x: 50, y: 44}
-          MD: {x: 72, y: 48}
-          MI: {x: 28, y: 48}
+          MC_DCHO: {x: 62, y: 46}
+          MC_IZQ: {x: 38, y: 46}
           POR: {x: 50, y: 90}
         players_by_slot:
-          DC: "Mane"
+          DC_DCHO: "Jonas Wind"
+          DC_IZQ: "Lukas Nmecha"
           DFC_DER: "Konate"
           DFC_IZQ: "Virgil"
-          ED: "Salah"
-          EI: "Luis Diaz"
+          MD: "Mattias Svanberg"
+          MI: "Kevin Paredes"
           LD: "Arnold"
           LI: "Robertson"
-          MC: "Fabinho"
-          MD: "Henderson"
-          MI: "Thiago"
-          POR: "Victor Valdes"
-        team_color: "#FF0000"
-        team_name: "Liverpool"
-        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
-        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
-    video_source: "video_prueba_medio"
+          MC_DCHO: "Max Arnold"
+          MC_IZQ: "Aster Vranckx"
+          POR: "Casteels"
+        team_color: "#A5FF6E"
+        team_name: "Wolfsburgo"
+        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
+        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC_IZQ", "MC_DCHO", "MI", "MD", "DC_IZQ", "DC_DCHO"]
+    video_source: "video_prueba"
   print_runtime_devices: true
 
 projector:
@@ -320,10 +320,12 @@ positions:
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   expected_roles_by_team:
-    Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
-    Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Real Madrid: ["POR", "DFC_IZQ", "DFC_CENT", "DFC_DER", "LI", "LD", "MC", "MI", "MD", "DC", "DC"]
+    Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
   role_swap_min_recent_samples: 8
   role_swap_position_jump_m: 14.0
+  segment_duplicate_lateral_tiebreak_enabled: true
+  segment_duplicate_lateral_tiebreak_delta: 0.06
 
 # Configuracion de equipos
 teams:
