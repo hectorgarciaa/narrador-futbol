@@ -311,7 +311,15 @@ Parámetros en `config.yaml`:
 - `special_seed_role_model_path` (checkpoint del Set Transformer usado por el tracking principal)
 - `special_seed_canonical_ids` (IDs canónicos tratados con esa lógica especial; por defecto `[1, 2]`)
 - `special_seed_defender_roles` (roles que cuentan como defensas al buscar el más cercano)
-- `expected_roles_by_team` (once esperado por equipo para restringir la inferencia posicional online con Hungarian)
+- `expected_roles_by_team` (once esperado por equipo para restringir la inferencia posicional online)
+- `frame_expected_roles_assignment_method` (`hungarian` o `ratio_priority` para la pasada frame)
+- `frame_ratio_priority_min_count`
+- `frame_ratio_priority_min_cumulative_ratio`
+- `frame_ratio_priority_min_final_ratio`
+- `segment_expected_roles_assignment_method` (`hungarian` o `ratio_priority` para la pasada por segmento)
+- `segment_ratio_priority_min_count`
+- `segment_ratio_priority_min_cumulative_ratio`
+- `segment_ratio_priority_min_final_ratio`
 - `role_swap_min_recent_samples` (mínimo de muestras visibles antes de permitir corte por swap)
 - `role_swap_position_jump_m` (salto espacial mínimo para sospechar swap sin señal estructural de relink)
 - `reassign_motion_growth_cap_frames` (tope de frames perdidos que se usan para extrapolar el salto permitido solo en clases sin homografía)
@@ -319,7 +327,7 @@ Parámetros en `config.yaml`:
 - `forced_absorption_player_min_consistent_frames` (frames consecutivos mínimos del `raw_tracker_id` huérfano con misma clase/equipo; por defecto `10`)
 - `output/tracker/<video>_role_artifacts/<video>_frame_role_predictions.csv` (predicción cruda frame a frame antes del congelado estable)
 - `output/tracker/<video>_role_artifacts/<video>_player_role_summary.csv` (resumen estable por track al terminar el vídeo)
-- `output/tracker/<video>_role_artifacts/<video>_greedy_role_diagnostics.csv` (traza paso a paso de las métricas usadas por el greedy al congelar slots estables)
+- `output/tracker/<video>_role_artifacts/<video>_greedy_role_diagnostics.csv` (nombre legacy; ahora guarda el diagnóstico de asignación para `hungarian` o `ratio_priority`)
 - `output/tracker/<video>_role_artifacts/<video>_role_assignment_vs_detected_pre<frame>.png` (comparativa por jugador entre distribución detectada hasta el frame de corte y posición final)
 - `output/tracker/<video>_role_artifacts/<video>_<equipo>_ratio_priority_step_by_step.png` (solo en `ratio_priority`: simulación paso a paso de la asignación snapshot por equipo)
 

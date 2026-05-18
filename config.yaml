@@ -319,6 +319,14 @@ positions:
   special_seed_role_model_path: "models/positions/20260427_002133/best_model.pt"
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
+  frame_expected_roles_assignment_method: "hungarian"
+  frame_ratio_priority_min_count: 1
+  frame_ratio_priority_min_cumulative_ratio: 0.40
+  frame_ratio_priority_min_final_ratio: 0.40
+  segment_expected_roles_assignment_method: "hungarian"
+  segment_ratio_priority_min_count: 200
+  segment_ratio_priority_min_cumulative_ratio: 0.40
+  segment_ratio_priority_min_final_ratio: 0.40
   expected_roles_by_team:
     Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
     Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]

@@ -5,7 +5,7 @@ Submódulo que agrupa toda la lógica de posiciones/roles que antes vivía mezcl
 Incluye:
 
 - inferencia online de roles posicionales durante el tracking
-- asignación dinámica por equipo con doble pasada de Húngaro
+- asignación dinámica por equipo con doble pasada configurable (`hungarian` o `ratio_priority`)
 - asignación especial de equipo para los IDs reservados de portero
 - exportación de CSV de roles y artefactos de tracking
 - catálogo de formaciones para la interfaz web
@@ -33,9 +33,24 @@ El punto de entrada principal dentro del pipeline de tracking es `PositionInferi
 La asignación online ya no congela roles ni usa snapshots de estabilización. El flujo actual es:
 
 1. El modelo predice probabilidades para los tracks activos.
-2. `Tier 1`: se aplica Húngaro a nivel frame contra los slots esperados del equipo y eso genera un voto limpio por track en ese frame.
+2. `Tier 1`: contra los slots esperados del equipo se puede aplicar `hungarian` o `ratio_priority` a nivel frame, generando un voto limpio por track en ese frame.
 3. Cada track acumula esos votos dentro de su segmento activo. Si aparece una señal fuerte de relink o un salto estructural claro, se abre un segmento nuevo vacío antes de seguir votando. Los cambios tácticos temporales de rol no rompen por sí solos el segmento.
-4. `Tier 2`: para pintar el rol definitivo del frame, se toma la mayoría acumulada de cada segmento activo y se vuelve a ejecutar Húngaro contra los slots esperados del equipo. La resolución final se reaplica por segmento real `(track_id, segment_id)` para que varios jugadores del mismo equipo no se pisen aunque compartan el mismo contador local de segmento.
+4. `Tier 2`: para pintar el rol definitivo del frame, se toma la mayoría acumulada de cada segmento activo y se resuelve otra vez contra los slots esperados del equipo usando `hungarian` o `ratio_priority`. La resolución final se reaplica por segmento real `(track_id, segment_id)` para que varios jugadores del mismo equipo no se pisen aunque compartan el mismo contador local de segmento.
+
+## Configuración de asignación
+
+Dentro de `positions` en `config.yaml`:
+
+- `frame_expected_roles_assignment_method`: `hungarian` o `ratio_priority`
+- `frame_ratio_priority_min_count`
+- `frame_ratio_priority_min_cumulative_ratio`
+- `frame_ratio_priority_min_final_ratio`
+- `segment_expected_roles_assignment_method`: `hungarian` o `ratio_priority`
+- `segment_ratio_priority_min_count`
+- `segment_ratio_priority_min_cumulative_ratio`
+- `segment_ratio_priority_min_final_ratio`
+
+La implementación de `ratio_priority` reutiliza la lógica histórica de prioridad por ratios acumulados. En la pasada de segmento, además mantiene una resolución geométrica lateral para desambiguar duplicados `MC/DC` cuando el lineup usa slots tipo `*_IZQ` y `*_DCHO`.
 
 ## `pipeline/lineup_spec.py`
 

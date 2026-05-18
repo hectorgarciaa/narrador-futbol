@@ -73,6 +73,11 @@ class OnlineRoleInferenceSession:
         self,
         observations: pd.DataFrame,
         expected_roles_by_team: Mapping[str, Sequence[str]] | None = None,
+        expected_roles_assignment_method: str = "hungarian",
+        expected_roles_ratio_priority_min_count: int = 1,
+        expected_roles_ratio_priority_min_cumulative_ratio: float = 0.40,
+        expected_roles_ratio_priority_min_final_ratio: float | None = None,
+        assignment_diagnostics: list[dict[str, Any]] | None = None,
         batch_size: int | None = None,
         include_all_targets: bool = False,
     ) -> dict[str, Any]:
@@ -147,6 +152,11 @@ class OnlineRoleInferenceSession:
                 player_predictions_df=player_predictions_df,
                 label_names=self.label_names,
                 expected_roles_by_team=expected_roles_by_team,
+                expected_roles_assignment_method=expected_roles_assignment_method,
+                ratio_priority_min_count=int(expected_roles_ratio_priority_min_count),
+                ratio_priority_min_cumulative_ratio=float(expected_roles_ratio_priority_min_cumulative_ratio),
+                ratio_priority_min_final_ratio=expected_roles_ratio_priority_min_final_ratio,
+                diagnostics_collector=assignment_diagnostics,
             )
         merge_cols = [
             "team_id",
