@@ -52,7 +52,7 @@ Para la accion especial `intro`, no hace falta pasar `player_name` ni `player_po
 - `team_name`: equipo del jugador. Obligatorio en `gol`.
 - `opponent_team_name`: equipo que encaja el gol. Obligatorio en `gol`.
 - `team_in_favor`: obligatorio en `corner`, `fuera de banda` y `saque de puerta`.
-- `field_zone`: zona del campo donde ocurre la accion.
+- `field_zone`: zona del campo usada como senal interna; el prompt no debe verbalizarla.
 - `action_target`: destinatario o objetivo del gesto tecnico.
 - `play_context`: contexto corto de la jugada.
 - `match_score`: marcador si algun dia quieres que el LLM lo tenga en cuenta.
@@ -207,7 +207,7 @@ El prompt esta pensado para:
 - tratar las acciones de pase como acciones del jugador que da el pase, no del que lo recibe;
 - reservar la mencion del equipo contrario para `gol`;
 - dejar clarisimo que en `gol` el jugador marca para un equipo y se lo hace al otro;
-- integrar la zona del campo si existe;
+- usar la zona del campo solo como senal interna para prioridad/contexto, sin mencionarla en el comentario;
 - obligar a mencionar el equipo a favor en `corner`, `fuera de banda` y `saque de puerta`;
 - evitar alucinaciones sobre marcador, gol, parada o resultado si esos datos no estan en la entrada.
 

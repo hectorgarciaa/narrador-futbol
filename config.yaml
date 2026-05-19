@@ -271,10 +271,10 @@ commentary:
   llm_model: "gemma4-q4ks-text"
   llm_base_url: null
   llm_temperature: 0.7
-  tts_backend: "xtts"
+  tts_backend: "elevenlabs"
   speaker_wavs: []
   female_speaker_wavs: []
-  alternate_voices: False
+  alternate_voices: true
   max_workers: 2
   drop_policy: "latest"
   max_queue_size: 8
