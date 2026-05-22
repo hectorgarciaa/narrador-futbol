@@ -12,6 +12,7 @@ import pandas as pd
 
 from .adapter import PathCRFAdapterConfig, PathCRFTracksAdapter
 from .inference import PathCRFInferenceConfig, run_pathcrf_inference
+from .online_semantics import OnlineSemanticPostprocessor
 from .postprocess import (
     RealtimeCheckpoint,
     _classify_event,
@@ -112,6 +113,7 @@ class RollingActionsPhase(Phase):
         self._snapshot_cache: dict[str, Any] | None = None
         self._snapshot_frame_index: int | None = None
         self._last_checkpoint_result: dict[str, Any] | None = None
+        self._semantic_postprocessor = OnlineSemanticPostprocessor(fps=float(self.config.fps))
 
         if self.config.async_enabled:
             self._executor = ThreadPoolExecutor(max_workers=max(1, int(self.config.max_workers)))
@@ -143,6 +145,7 @@ class RollingActionsPhase(Phase):
         self._snapshot_cache = None
         self._snapshot_frame_index = None
         self._last_checkpoint_result = None
+        self._semantic_postprocessor.reset()
         reset_postprocess_state()
 
     def execute(self, position_packet: dict, *, execution_mode="runtime") -> dict:
@@ -446,6 +449,10 @@ class RollingActionsPhase(Phase):
                     ev["player_track_id"] = match.get("player_track_id")
                     ev["receiver_track_id"] = match.get("receiver_track_id")
 
+            consolidated = self._semantic_postprocessor.process_events(
+                consolidated,
+                track_lookup=self._lookup_track_payload,
+            )
             self._postprocessed_actions.extend(consolidated)
 
             self._checkpoints.append(RealtimeCheckpoint(
@@ -460,6 +467,17 @@ class RollingActionsPhase(Phase):
             # Populate checkpoint result for the enriched packet
             latest_event = consolidated[0] if consolidated else None
             latest_edge_emitted = emit_block_edges[-1] if emit_block_edges else None
+            if confirmed_action_for_frame is not None:
+                matching_event = next(
+                    (
+                        ev
+                        for ev in consolidated
+                        if _coerce_int(ev.get("start_frame")) == fi or _coerce_int(ev.get("frame_id")) == fi
+                    ),
+                    None,
+                )
+                if matching_event is not None:
+                    confirmed_action_for_frame = dict(matching_event)
             self._last_checkpoint_result = {
                 "checkpoint_completed": True,
                 "checkpoint_frame": int(fi),
@@ -568,3 +586,22 @@ class RollingActionsPhase(Phase):
                 }, f, ensure_ascii=False, indent=2)
 
         return result
+
+    def _lookup_track_payload(self, frame_id: int | None, track_id: str | None) -> dict[str, Any] | None:
+        if frame_id is None or track_id is None:
+            return None
+        for class_name in ("player", "goalkeeper", "referee", "ball"):
+            frames = self._buffer.get(class_name, [])
+            if frame_id < 0 or frame_id >= len(frames):
+                continue
+            frame_map = frames[frame_id]
+            if not isinstance(frame_map, dict):
+                continue
+            for candidate_track_id, payload in frame_map.items():
+                if str(candidate_track_id) != str(track_id) or not isinstance(payload, dict):
+                    continue
+                result = dict(payload)
+                result["_class_name"] = class_name
+                result["_track_id"] = str(candidate_track_id)
+                return result
+        return None

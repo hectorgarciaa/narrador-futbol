@@ -277,8 +277,6 @@ class CommentaryPromptBuilder:
                 rules.append(
                     f"El partido es {event.team_name} contra {event.opponent_team_name}."
                 )
-            if event.field_zone:
-                rules.append(f"La jugada esta en {event.field_zone}, zona de bajo riesgo.")
             if event.play_context:
                 rules.append(f"Datos disponibles: {event.play_context}.")
             if event.match_score:
@@ -294,13 +292,11 @@ class CommentaryPromptBuilder:
                 "Si mencionas gol o una exclamacion, escribelos de forma normal, sin estirar letras.",
                 "No inventes que decide el partido, que es el mejor gol del ano, ni la respuesta del rival.",
                 "No inventes asistencia, remate concreto, jugada previa ni consecuencias si no vienen en el evento.",
-                "Usa solo los datos del evento: autor, equipo que marca, equipo que encaja, minuto y zona si existe.",
+                "Usa solo los datos del evento: autor, equipo que marca, equipo que encaja y minuto.",
                 "No uses emojis.",
             ]
             if event.team_name and event.opponent_team_name:
                 rules.append(f"{event.team_name} marca y {event.opponent_team_name} encaja.")
-            if event.field_zone:
-                rules.append(f"Si ayuda, menciona {event.field_zone}.")
             if event.play_context:
                 rules.append(f"Si ayuda, menciona {event.play_context}.")
             if event.action_target:
@@ -329,8 +325,6 @@ class CommentaryPromptBuilder:
 
             if event.action in SPECIAL_TEAM_FAVOR_ACTIONS and event.team_in_favor:
                 rules.append(f"La accion es a favor de {event.team_in_favor}.")
-            if event.field_zone:
-                rules.append(f"Si encaja, menciona {event.field_zone}.")
             if event.action_target:
                 rules.append(f"Si ayuda, menciona {event.action_target}.")
             if event.play_context:
@@ -341,6 +335,9 @@ class CommentaryPromptBuilder:
                     "y pasa inmediatamente a la accion peligrosa."
                 )
 
+        if not event.is_intro:
+            rules.append("No menciones la zona del campo.")
+
         avoid_text = _clean_text(avoid_commentary)
         if avoid_text is not None and not event.is_intro:
             rules.append(
@@ -349,8 +346,10 @@ class CommentaryPromptBuilder:
                 "ni la misma estructura; conserva solo los datos del evento."
             )
 
+        prompt_payload = event.to_prompt_payload()
+        prompt_payload.pop("field_zone", None)
         payload_json = json.dumps(
-            event.to_prompt_payload(),
+            prompt_payload,
             ensure_ascii=False,
             indent=2,
             sort_keys=True,

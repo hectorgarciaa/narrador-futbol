@@ -87,6 +87,19 @@ APP_RUN_DIR_ENV = "NARRADOR_APP_RUN_DIR"
 APP_RUN_ID_ENV = "NARRADOR_APP_RUN_ID"
 
 
+def _coerce_bool(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().casefold()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -260,6 +273,7 @@ class CommentaryConfig:
         temperature=DEFAULT_COMMENTARY_TEMPERATURE,
         base_url=None,
         tts_backend=DEFAULT_TTS_BACKEND,
+        alternate_voices=False,
         elevenlabs_api_key=None,
         elevenlabs_voice_id=None,
         elevenlabs_female_voice_id=None,
@@ -279,6 +293,7 @@ class CommentaryConfig:
         self.temperature = float(temperature)
         self.base_url = str(base_url).strip() if base_url else None
         self.tts_backend = str(tts_backend or DEFAULT_TTS_BACKEND).strip().lower()
+        self.alternate_voices = _coerce_bool(alternate_voices, default=False)
         self.elevenlabs_api_key = str(elevenlabs_api_key).strip() if elevenlabs_api_key else None
         self.elevenlabs_voice_id = str(elevenlabs_voice_id).strip() if elevenlabs_voice_id else None
         self.elevenlabs_female_voice_id = str(elevenlabs_female_voice_id).strip() if elevenlabs_female_voice_id else None
@@ -305,10 +320,12 @@ class CommentaryConfig:
             base_url=self._llm_base_url(),
         )
 
-    def build_voice_synthesizer(self, *, alternate_voices=True):
+    def build_voice_synthesizer(self, *, alternate_voices=None):
+        if alternate_voices is None:
+            alternate_voices = self.alternate_voices
         return build_voice_synthesizer(
             tts_backend=self.tts_backend,
-            alternate_voices=bool(alternate_voices),
+            alternate_voices=_coerce_bool(alternate_voices, default=False),
             elevenlabs_api_key=self.elevenlabs_api_key,
             elevenlabs_voice_id=self.elevenlabs_voice_id,
             elevenlabs_female_voice_id=self.elevenlabs_female_voice_id,
@@ -336,12 +353,14 @@ class CommentaryConfig:
 
 def commentary_config_from_args(args):
     commentary_runtime = resolve_commentary_runtime_settings(args)
+    project_commentary_cfg = dict(get_config().commentary or {})
     config = CommentaryConfig(
         backend=commentary_runtime["backend"],
         model=commentary_runtime["model"],
         temperature=args.commentary_temperature,
         base_url=commentary_runtime["base_url"],
         tts_backend=args.commentary_tts_backend,
+        alternate_voices=project_commentary_cfg.get("alternate_voices", False),
         elevenlabs_api_key=args.elevenlabs_api_key,
         elevenlabs_voice_id=args.elevenlabs_voice_id,
         elevenlabs_female_voice_id=args.elevenlabs_female_voice_id,
@@ -433,9 +452,7 @@ def generate_intro_commentary_locally(event, audio_path, commentary_cfg):
     event = dict(event or {})
     audio_path = Path(audio_path)
     generator = commentary_cfg.build_commentary_generator()
-    voice_synthesizer = commentary_cfg.build_voice_synthesizer(
-        alternate_voices=True,
-    )
+    voice_synthesizer = commentary_cfg.build_voice_synthesizer()
     voice_synthesizer.prepare()
     pipeline = CommentaryAudioPipeline(
         commentary_generator=generator,

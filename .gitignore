@@ -67,3 +67,6 @@ output/**
 !output/.gitkeep
 runs/
 pruebaTracker
+
+experimients/positions/grid_search/
+data/posiciones_etiquetadas/common/tracking_metrics.csv

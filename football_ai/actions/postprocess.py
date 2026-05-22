@@ -296,10 +296,10 @@ def postprocess_emit_block(
             "source": "postprocess_emit_block",
         })
 
-        if not allow_multiple:
-            break
-
         _last_emitted_key = key
         _last_emitted_frames = g.support_frames
+
+        if not allow_multiple:
+            break
 
     return actions

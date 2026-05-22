@@ -1,6 +1,7 @@
 """Actions module — rolling (live) and offline PathCRF inference."""
 
 from .rolling import RollingActionsConfig, RollingActionsPhase
+from .online_semantics import OnlineSemanticPostprocessor
 from .postprocess import (
     EdgeGroupStats,
     postprocess_emit_block,
@@ -28,6 +29,7 @@ from .pathcrf_shot import apply_shot_heuristic
 __all__ = [
     "ConversionSummary",
     "EdgeGroupStats",
+    "OnlineSemanticPostprocessor",
     "PathCRFAdapterConfig",
     "PathCRFInferenceConfig",
     "PathCRFPipelineResult",

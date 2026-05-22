@@ -26,6 +26,7 @@ from .config import (
 )
 from .helpers import (
     first_existing_track_payload,
+    orient_normalized_point,
     safe_field_position_m,
     segment_anchor_for_slot,
     solve_assignment,
@@ -61,6 +62,24 @@ class OnlineSpecialSeedRoleAssigner:
         self.lineup_matcher = lineup_matcher if isinstance(lineup_matcher, LineupSlotMatcher) else None
         self.segment_expected_slots_by_team = self._build_segment_expected_slots_by_team()
         self.pitch_layout_by_team = self._build_pitch_layout_by_team()
+        self.segment_duplicate_lateral_tiebreak_enabled = bool(
+            positions_cfg.get("segment_duplicate_lateral_tiebreak_enabled", False)
+        )
+        self.segment_duplicate_lateral_tiebreak_delta = float(
+            positions_cfg.get("segment_duplicate_lateral_tiebreak_delta", 0.06)
+        )
+        self.segment_temporal_continuity_enabled = bool(
+            positions_cfg.get("segment_temporal_continuity_enabled", True)
+        )
+        self.segment_temporal_same_line_penalty = float(
+            positions_cfg.get("segment_temporal_same_line_penalty", 0.35)
+        )
+        self.segment_temporal_cross_line_penalty = float(
+            positions_cfg.get("segment_temporal_cross_line_penalty", 1.25)
+        )
+        self.segment_temporal_same_base_penalty = float(
+            positions_cfg.get("segment_temporal_same_base_penalty", 0.15)
+        )
         self.segment_switch_distance_m = float(positions_cfg.get("role_segment_switch_distance_m", positions_cfg.get("role_swap_position_jump_m", 14.0)))
         self.segment_min_observations = max(2, int(positions_cfg.get("role_segment_min_observations", positions_cfg.get("role_swap_min_recent_samples", 6))))
         self.recent_window = max(3, int(positions_cfg.get("role_segment_recent_window", 10)))
@@ -89,6 +108,7 @@ class OnlineSpecialSeedRoleAssigner:
         self.closed_segment_states = []
         self.raw_frame_prediction_rows = []
         self.segment_assignment_rows = []
+        self.attack_direction_by_team = {}
         self.stats = {
             "processed_frames": 0,
             "frames_with_role_predictions": 0,
@@ -144,7 +164,6 @@ class OnlineSpecialSeedRoleAssigner:
             "sum_x_norm": 0.0,
             "sum_y_norm": 0.0,
             "display_role_slot": None,
-            "expected_role_slot": None,
             "lineup_slot": None,
             "player_name": None,
             "majority_role": None,
@@ -287,6 +306,7 @@ class OnlineSpecialSeedRoleAssigner:
             state = self._start_new_segment(track_id, frame_id, team_id=team_id, reason=reason, position_jump_m=position_jump_m)
         slot_key = normalize_slot_token(frame_slot)
         state["team_id"] = str(team_id)
+        state["attack_direction"] = int(self.attack_direction_by_team.get(str(team_id), +1))
         state["end_frame"] = int(frame_id)
         state["observations"] += 1
         state["frame_vote_counts"][slot_key] += 1
@@ -319,12 +339,99 @@ class OnlineSpecialSeedRoleAssigner:
         majority_slot = normalize_slot_token(state.get("majority_expected_role_slot"))
         if majority_slot and majority_slot != slot_name and base_role_token(majority_slot) != base_slot:
             cost += 1.0
-        anchor = segment_anchor_for_slot(self.pitch_layout_by_team, team_id, slot_name)
+        attack_direction = int(state.get("attack_direction", self.attack_direction_by_team.get(str(team_id), +1)))
+        anchor = segment_anchor_for_slot(self.pitch_layout_by_team, team_id, slot_name, attack_direction=attack_direction)
         if anchor is not None and observations > 0:
             x_mean = float(state.get("sum_x_norm", 0.0)) / float(observations)
             y_mean = float(state.get("sum_y_norm", 0.0)) / float(observations)
-            cost += SEGMENT_POSITION_WEIGHT * math.sqrt(((x_mean - float(anchor[0])) ** 2) + ((y_mean - float(anchor[1])) ** 2))
+            x_mean_ori, y_mean_ori = orient_normalized_point(x_mean, y_mean, attack_direction)
+            cost += SEGMENT_POSITION_WEIGHT * math.sqrt(
+                ((x_mean_ori - float(anchor[0])) ** 2) + ((y_mean_ori - float(anchor[1])) ** 2)
+            )
+        cost += self._temporal_continuity_penalty(state, slot_name)
         return float(cost)
+
+    @staticmethod
+    def _slot_line_family(slot_name):
+        slot_name = normalize_slot_token(slot_name)
+        if slot_name == "POR":
+            return "goalkeeper"
+        if slot_name in {"LI", "LD", "DFC_IZQ", "DFC_CENT", "DFC_DER"}:
+            return "defense"
+        if slot_name in {"MC", "MC_IZQ", "MC_DCHO", "MI", "MD"}:
+            return "midfield"
+        if slot_name in {"DC", "DC_IZQ", "DC_DCHO", "EI", "ED"}:
+            return "attack"
+        return None
+
+    def _temporal_continuity_penalty(self, state, slot_name):
+        if not self.segment_temporal_continuity_enabled:
+            return 0.0
+        previous_slot = normalize_slot_token(state.get("display_role_slot"))
+        candidate_slot = normalize_slot_token(slot_name)
+        if not previous_slot or not candidate_slot or previous_slot == candidate_slot:
+            return 0.0
+        if base_role_token(previous_slot) == base_role_token(candidate_slot):
+            return float(self.segment_temporal_same_base_penalty)
+        previous_line = self._slot_line_family(previous_slot)
+        candidate_line = self._slot_line_family(candidate_slot)
+        if previous_line and previous_line == candidate_line:
+            return float(self.segment_temporal_same_line_penalty)
+        return float(self.segment_temporal_cross_line_penalty)
+
+    def _apply_duplicate_lateral_tiebreak(self, team_id, state_pairs, assigned_by_key):
+        if not self.segment_duplicate_lateral_tiebreak_enabled:
+            return
+        expected_slots = [
+            normalize_slot_token(slot)
+            for slot in self.segment_expected_slots_by_team.get(
+                str(team_id),
+                self.expected_roles_by_team.get(str(team_id), []),
+            )
+        ]
+        for base_role in ("MC", "DC"):
+            left_slot = f"{base_role}_IZQ"
+            right_slot = f"{base_role}_DCHO"
+            if left_slot not in expected_slots or right_slot not in expected_slots:
+                continue
+            candidates = []
+            for state, track_data in state_pairs:
+                key = self._segment_assignment_key(state)
+                assigned = assigned_by_key.get(key)
+                if assigned is None:
+                    continue
+                slot_name = normalize_slot_token(assigned.get("slot"))
+                if base_role_token(slot_name) != base_role:
+                    continue
+                observations = max(1, int(state.get("observations", 0)))
+                attack_direction = int(state.get("attack_direction", self.attack_direction_by_team.get(str(team_id), +1)))
+                mean_x = float(state.get("sum_x_norm", 0.0)) / float(observations)
+                mean_y = float(state.get("sum_y_norm", 0.0)) / float(observations)
+                _, lateral_coord = orient_normalized_point(mean_x, mean_y, attack_direction)
+                cost = float(assigned.get("cost", math.nan))
+                candidates.append(
+                    {
+                        "key": key,
+                        "state": state,
+                        "track_data": track_data,
+                        "lateral_coord": lateral_coord,
+                        "cost": cost,
+                    }
+                )
+            if len(candidates) < 2:
+                continue
+            candidates = sorted(candidates, key=lambda item: (float(item["cost"]), float(item["lateral_coord"])))
+            best_two = candidates[:2]
+            cost_0 = float(best_two[0]["cost"])
+            cost_1 = float(best_two[1]["cost"])
+            if not (np.isfinite(cost_0) and np.isfinite(cost_1)):
+                continue
+            if abs(cost_0 - cost_1) > float(self.segment_duplicate_lateral_tiebreak_delta):
+                continue
+            ordered = sorted(best_two, key=lambda item: float(item["lateral_coord"]))
+            left_item, right_item = ordered[0], ordered[-1]
+            assigned_by_key[left_item["key"]]["slot"] = left_slot
+            assigned_by_key[right_item["key"]]["slot"] = right_slot
 
     def _assign_segments_for_team(self, team_id, segment_states, expected_slots):
         if not segment_states or not expected_slots:
@@ -355,10 +462,8 @@ class OnlineSpecialSeedRoleAssigner:
             frame_conf = 0.0
         track_data.update(
             {
-                "predicted_role": str(slot_name),
                 "predicted_role_confidence": float(frame_conf),
                 "display_role_slot": str(slot_name),
-                "expected_role_slot": str(slot_name),
                 "assignment_method": "hungarian_segment",
                 "assignment_cost": float(assignment_cost),
                 "stable_role_assignment_method": "hungarian_segment",
@@ -377,7 +482,6 @@ class OnlineSpecialSeedRoleAssigner:
             }
         )
         state["display_role_slot"] = str(slot_name)
-        state["expected_role_slot"] = str(slot_name)
         resolved_slot, player_name = self._resolve_lineup_assignment(track_data.get("team"), state)
         if resolved_slot and player_name:
             track_data["lineup_slot"] = str(resolved_slot)
@@ -400,6 +504,7 @@ class OnlineSpecialSeedRoleAssigner:
                 self._segment_assignment_key(item["state"]): item
                 for item in assignments
             }
+            self._apply_duplicate_lateral_tiebreak(str(team_id), state_pairs, assigned_by_key)
             for state, track_data in state_pairs:
                 assigned = assigned_by_key.get(self._segment_assignment_key(state))
                 final_slot = (
@@ -495,10 +600,8 @@ class OnlineSpecialSeedRoleAssigner:
                             {
                                 "predicted_role_frame": "POR",
                                 "predicted_role_frame_confidence": 1.0,
-                                "predicted_role": "POR",
                                 "predicted_role_confidence": 1.0,
                                 "display_role_slot": "POR",
-                                "expected_role_slot": "POR",
                                 "assignment_method": "manual_special_goalkeeper",
                                 "stable_role_assignment_method": "manual_special_goalkeeper",
                                 "role_stabilized": True,
@@ -529,6 +632,11 @@ class OnlineSpecialSeedRoleAssigner:
         role_result = self.role_session.predict_frame(observations_df, expected_roles_by_team=self.expected_roles_by_team, include_all_targets=True)
         frame_predictions_df = role_result.get("frame_predictions_df", pd.DataFrame())
         player_predictions_df = role_result.get("player_predictions_df", pd.DataFrame())
+        role_attack_direction_by_team = role_result.get("attack_direction_by_team") or {}
+        self.attack_direction_by_team = {
+            str(team_id): int(direction)
+            for team_id, direction in role_attack_direction_by_team.items()
+        }
         if frame_predictions_df.empty or player_predictions_df.empty:
             self._annotate_special_goalkeepers(tracks_frame, frame_id)
             return {"frame_predictions": 0, "player_predictions": 0, "roles_applied": False}
@@ -608,9 +716,7 @@ class OnlineSpecialSeedRoleAssigner:
                     "first_frame_id": int(state.get("start_frame", 0)),
                     "last_frame_id": int(state.get("end_frame", 0)),
                     "frames_seen": int(state.get("observations", 0)),
-                    "predicted_role": state.get("display_role_slot"),
                     "display_role_slot": state.get("display_role_slot"),
-                    "expected_role_slot": state.get("expected_role_slot"),
                     "segment_majority_role": state.get("majority_role"),
                     "segment_recent_majority_role": state.get("recent_majority_role"),
                     "segment_majority_expected_role_slot": state.get("majority_expected_role_slot"),

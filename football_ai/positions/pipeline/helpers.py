@@ -38,7 +38,15 @@ def first_existing_track_payload(tracks_frame, track_id):
     return None, None, None
 
 
-def segment_anchor_for_slot(layout_by_team, team_id, slot_name):
+def orient_normalized_point(x_value, y_value, attack_direction):
+    x_value = float(x_value)
+    y_value = float(y_value)
+    if int(attack_direction) >= 0:
+        return x_value, y_value
+    return 1.0 - x_value, 1.0 - y_value
+
+
+def segment_anchor_for_slot(layout_by_team, team_id, slot_name, attack_direction=+1):
     coords = layout_by_team.get(str(team_id), {}).get(normalize_slot_token(slot_name))
     if not isinstance(coords, dict):
         return None
@@ -46,7 +54,7 @@ def segment_anchor_for_slot(layout_by_team, team_id, slot_name):
     y_value = pd.to_numeric(coords.get("y"), errors="coerce")
     if pd.isna(x_value) or pd.isna(y_value):
         return None
-    return float(x_value) / 100.0, float(y_value) / 100.0
+    return orient_normalized_point(float(x_value) / 100.0, float(y_value) / 100.0, attack_direction)
 
 
 def solve_assignment(cost_matrix, linear_sum_assignment_fn):

@@ -122,18 +122,18 @@ tracking:
           DC: "Benzema"
           DFC_DER: "Alaba"
           DFC_IZQ: "Militao"
-          ED: "Valverde"
-          EI: "Vini"
+          ED: "Rodrygo"
+          EI: "Vinicius"
           LD: "Carvajal"
           LI: "Mendy"
           MC: "Casemiro"
-          MD: "Modric"
-          MI: "Kross"
+          MD: "Valverde"
+          MI: "Bellingham"
           POR: "Courtois"
         team_color: "#ffffff"
         team_name: "Real Madrid"
-        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
-        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
+        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "EI", "DC", "ED"]
+        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "EI", "DC", "ED"]
       - formation: "4-3-3"
         pitch_layout:
           DC: {x: 50, y: 14}
@@ -148,22 +148,22 @@ tracking:
           MI: {x: 28, y: 48}
           POR: {x: 50, y: 90}
         players_by_slot:
-          DC: "Mane"
-          DFC_DER: "Konate"
-          DFC_IZQ: "Virgil"
-          ED: "Salah"
-          EI: "Luis Diaz"
-          LD: "Arnold"
-          LI: "Robertson"
-          MC: "Fabinho"
-          MD: "Henderson"
-          MI: "Thiago"
-          POR: "Victor Valdes"
-        team_color: "#FF0000"
-        team_name: "Liverpool"
-        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
-        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "DC", "ED", "EI"]
-    video_source: "video_prueba_medio"
+          DC: "Villa"
+          EI: "Neymar"
+          DFC_DER: "Pique"
+          DFC_IZQ: "Puyol"
+          ED: "Messi"
+          MI: "Pedri"
+          LD: "Alves"
+          LI: "Cancelo"
+          MD: "Iniesta"
+          MC: "Busquets"
+          POR: "Valdes"
+        team_color: "#A5FF6E"
+        team_name: "Wolfsburgo"
+        tracking_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "EI", "DC", "ED"]
+        ui_slots: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MI", "MD", "EI", "DC", "ED"]
+    video_source: "video_prueba"
   print_runtime_devices: true
 
 projector:
@@ -271,10 +271,10 @@ commentary:
   llm_model: "gemma4-q4ks-text"
   llm_base_url: null
   llm_temperature: 0.7
-  tts_backend: "xtts"
+  tts_backend: "elevenlabs"
   speaker_wavs: []
   female_speaker_wavs: []
-  alternate_voices: false
+  alternate_voices: true
   max_workers: 2
   drop_policy: "latest"
   max_queue_size: 8
@@ -320,10 +320,16 @@ positions:
   special_seed_canonical_ids: [1, 2]
   special_seed_defender_roles: ["LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT"]
   expected_roles_by_team:
-    Real Madrid: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
-    Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "DFC_CENT", "MC", "MI", "MD", "DC", "DC"]
+    Real Madrid: ["POR", "DFC_IZQ", "DFC_CENT", "DFC_DER", "LI", "LD", "MC", "MI", "MD", "DC", "DC"]
+    Wolfsburgo: ["POR", "LD", "LI", "DFC_DER", "DFC_IZQ", "MC", "MC", "MI", "MD", "DC", "DC"]
   role_swap_min_recent_samples: 8
   role_swap_position_jump_m: 14.0
+  segment_temporal_continuity_enabled: true
+  segment_temporal_same_line_penalty: 0.35
+  segment_temporal_cross_line_penalty: 1.25
+  segment_temporal_same_base_penalty: 0.15
+  segment_duplicate_lateral_tiebreak_enabled: true
+  segment_duplicate_lateral_tiebreak_delta: 0.06
 
 # Configuracion de equipos
 teams:
