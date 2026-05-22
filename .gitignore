@@ -65,6 +65,16 @@ tmp_downloads/
 # Generated outputs
 output/**
 !output/.gitkeep
+!output/detect/
+!output/detect/best/
+!output/detect/best/20260516_172142/
+!output/detect/best/20260516_172142/detections.mp4
+
+!output/homography/
+!output/homography/best/
+!output/homography/best/20260516_180637/
+!output/homography/best/20260516_180637/homography_short.mp4
+
 runs/
 pruebaTracker
 
