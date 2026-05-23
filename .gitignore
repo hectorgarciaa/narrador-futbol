@@ -75,6 +75,9 @@ output/**
 !output/homography/best/20260516_180637/
 !output/homography/best/20260516_180637/homography_short.mp4
 
+!output/tracking/
+!output/tracking/tracking.mp4
+
 runs/
 pruebaTracker
 
