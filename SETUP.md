@@ -1,140 +1,134 @@
-# 🚀 Guía de Inicio Rápido (Quick Start)
+# SETUP
 
-Sigue estos pasos para poner en marcha el proyecto desde cero.
+Guia corta para dejar el proyecto listo y ejecutar el tracking principal.
 
-## 1. Configuración del Entorno Python
-Se recomienda usar Python 3.10+.
+## 1. Python
 
-```powershell
-# Crear entorno virtual
+La version objetivo del repo es `Python 3.13.7`.
+
+Compruebalo con:
+
+```bash
+python --version
+```
+
+## 2. Entorno virtual
+
+```bash
 python -m venv .venv
-
-# Activar entorno (Windows)
-.\.venv\Scripts\activate
-
-# Instalar dependencias
-pip install -r requirements.txt
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-## 2. Configuración de Variables de Entorno
-Copia el archivo de ejemplo solo si vas a descargar datasets desde Roboflow, usar ElevenLabs o apuntar a un `llama.cpp` remoto ya levantado.
+En Windows:
 
 ```powershell
-cp .env.example .env
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
-Notas:
-- `ROBOFLOW_*` solo hace falta para `scripts/data/download_datasets.py`.
-- `ELEVENLABS_*` solo hace falta para TTS con ElevenLabs.
-- `LLAMA_CPP_BASE_URL` es opcional y sirve si quieres reutilizar un `llama.cpp` remoto/supervisado sin crear `external/llama.cpp/config.yaml`.
 
-## 3. Preparación de la Estructura y Assets
-Ejecuta el script de validación y deja presentes los assets que usa el runtime real.
+## 3. Configuracion minima
 
-```powershell
-# Validar estructura de carpetas
+Revisa `config.yaml` y confirma al menos estas rutas:
+- `paths.models.modelo_base`
+- `paths.data.video_prueba`
+- `paths.data.video_prueba_medio`
+
+El tracking principal necesita un peso YOLO valido en la ruta configurada por `paths.models.modelo_base`.
+
+## 4. Verificacion
+
+Puedes lanzar:
+
+```bash
 python verify_setup.py
+```
 
-# Descargar modelos YOLO base de referencia (opcionales para fallback/pruebas)
+Ese script revisa dependencias, configuracion y assets del runtime por defecto, incluyendo `PathCRF`, `llama.cpp` y credenciales de `ElevenLabs` cuando la configuracion actual los exige. Si no lo quieres usar, al menos comprueba manualmente que existe:
+
+```text
+config.yaml
+models/finetuning/yolov11m/weights/best.pt
+data/partidoPrueba/partido_medio.mp4
+external/pathcrf/saved/120/model/state_dict_best_acc.pt
+external/llama.cpp/config.yaml
+```
+
+## 5. Ejecucion rapida
+
+Desde la raiz del repo:
+
+```bash
+python scripts/track.py video_prueba_medio
+```
+
+Con el `config.yaml` actual, ese comando espera:
+- `actions.enabled: true` -> `external/pathcrf` listo;
+- `commentary.enabled: true` -> `external/llama.cpp/config.yaml` o un `LLAMA_CPP_BASE_URL` remoto;
+- si el backend TTS es `elevenlabs`, credenciales validas en `.env` o en el entorno.
+
+Tambien puedes probar:
+
+```bash
+python scripts/detect.py video_prueba_medio modelo_base
+python scripts/homography.py video_prueba_medio modelo_base
+python interfaz/app.py
+```
+
+## 6. Assets opcionales
+
+### Modelos base YOLO
+
+```bash
 python scripts/data/download_models.py
 ```
 
-Nota:
-- `paths.models.modelo_base` apunta por defecto a `models/finetuning/yolov11m/weights/best.pt`.
-- Ese checkpoint pesa ~39 MB y se puede versionar en GitHub sin Git LFS.
-- El `.gitignore` ya permite trackear exactamente ese fichero si queréis dejarlo como artefacto oficial del runtime.
-- `download_models.py` no deja listo por sí solo el runtime por defecto.
-- Si no vais a versionar ese checkpoint, hay que copiarlo manualmente o sobrescribir `paths.models.modelo_base` antes de arrancar el tracking.
+### Datasets de deteccion
 
-Con eso ya puedes arrancar el tracking base con:
+Solo hace falta si vas a entrenar o repetir fine-tuning.
 
-```powershell
-python scripts/track.py
-```
-
-## 3.1 Assets de runtime
-
-### PathCRF (`external/pathcrf`)
-
-Con la configuración actual es obligatorio, porque `tracking.actions.enabled: true` y el pipeline espera ese checkout para la detección de acciones.
-
-Hoy no basta con mover un `.pt` a `models/`: el runtime también necesita el código del repo externo y `saved/<trial>/args.json`. Por eso, ahora mismo lo correcto es mantener `PathCRF` como repo clonado en `external/pathcrf`.
-
-Ejemplo:
-
-```powershell
-git clone <ruta-o-fork-de-pathcrf> external/pathcrf
-```
-
-Después comprueba que exista el trial configurado en `config.yaml`, por ejemplo:
-
-```text
-external/pathcrf/saved/120/model/state_dict_best_acc.pt
-```
-
-### `llama.cpp` local (`external/llama.cpp/config.yaml`)
-
-Con la configuración actual es obligatorio salvo que sobrescribas `tracking.commentary.llm_base_url` o arranques la interfaz con otro backend explícito.
-
-Ejemplo mínimo:
-
-```powershell
-mkdir -p external/llama.cpp
-@"
-server:
-  executable: C:/ruta/a/llama-server.exe
-  host: 127.0.0.1
-  port: 8081
-model:
-  path: C:/ruta/al/modelo.gguf
-"@ | Set-Content external/llama.cpp/config.yaml
-```
-
-Luego ajusta en ese YAML:
-- `server.executable`: ruta al binario `llama-server`
-- `model.path`: ruta al GGUF que quieras servir
-
-Si no quieres usar `external/llama.cpp`, puedes:
-- usar `--commentary-backend ollama`, o
-- exportar `LLAMA_CPP_BASE_URL=http://host:puerto`
-
-### Assets que no conviene versionar en git normal
-
-- `models/pnlcalib/SV_kp` y `models/pnlcalib/SV_lines`: los descarga el runtime automáticamente
-- `external/pnlcalib`: el runtime lo clona automáticamente
-- `models/gguf/**/*.gguf`: demasiado pesados para GitHub normal
-- `external/pathcrf` completo: mejor mantenerlo como repo externo con su trial/checkpoint
-
-## 4. Descarga de Datasets (Opcional - Para entrenamiento)
-Si necesitas re-entrenar los modelos de detección, el proyecto usa el dataset de DFL Bundesliga en Roboflow por defecto:
-
-```powershell
+```bash
 python scripts/data/download_datasets.py
 ```
 
-**Dataset sintético (SoccerSynth/SpiideoSynLoc)** (altamente recomendado para pre-entrenamiento):
-Al requerir aceptación de licencia, la descarga se hace manualmente:
-1. Crea una cuenta en [research.spiideo.com](https://research.spiideo.com/).
-2. Ve a la página del dataset *Spiideo SoccerNet SynLoc*.
-3. Descarga `annotations.zip` y los zips de **FullHD Images** (`train.zip`, `val.zip`, `test.zip`).
-4. Descomprímelos todos dentro de la nueva carpeta: `data/detection/SoccerSynth/SpiideoSynLoc`.
+### PathCRF y comentarios
 
-## 5. Ejecución del Pipeline de Tracking (Inferencia)
-Para procesar un vídeo de prueba, realizar el tracking y generar el output anotado:
+Con la configuracion actual del repo, si ejecutas `scripts/track.py` tal cual, si son necesarias:
+- `external/pathcrf` para acciones;
+- `external/llama.cpp/config.yaml` o `LLAMA_CPP_BASE_URL` para comentarios.
 
-```powershell
-python scripts/track.py
+Clonado recomendado:
+
+```bash
+git clone https://github.com/hyunsungkim-ds/pathcrf.git external/pathcrf
+git clone https://github.com/ggml-org/llama.cpp.git external/llama.cpp
 ```
-*Los resultados se guardarán en `output/pruebaTracker/`:*
-- `video_anotado.mp4`: Vídeo con boxes e IDs.
-- `tracks.json`: Datos de los tracks para análisis posterior.
 
-## 6. Visualización de Resultados
-Abre el notebook de comparación para analizar las métricas de los tracks generados:
-1. Abre VS Code.
-2. Navega a `experiments/visualization/track_evolution.ipynb`.
-3. Selecciona el kernel `.venv`.
-4. Ejecuta las celdas.
+Despues, para `PathCRF`, comprueba que existe al menos:
 
-## 7. Comandos Útiles
-- **Limpiar proyecto**: `python clean_project.py` (borra archivos temporales y logs).
-- **Verificar estado**: `python verify_setup.py` (comprueba si falta algún asset crítico).
+```text
+external/pathcrf/saved/120/args.json
+external/pathcrf/saved/120/model/state_dict_best_acc.pt
+```
+
+Y para `llama.cpp`, prepara `external/llama.cpp/config.yaml` apuntando al binario `llama-server` y a tu modelo GGUF.
+
+Si solo quieres tracking visual basico, desactiva `actions.enabled` y `commentary.enabled` en `config.yaml`. Tambien puedes lanzar `--no-commentary`, pero eso no desactiva `actions`.
+
+## 7. Variables de entorno
+
+`.env` es opcional, pero se vuelve necesario en estos casos:
+- `ROBOFLOW_*`: descarga de datasets;
+- `ELEVENLABS_*`: audio con ElevenLabs;
+- `LLAMA_CPP_BASE_URL`: si reutilizas un `llama.cpp` remoto en vez del config local.
+
+## 8. Limpieza
+
+Para borrar caches, logs y artefactos regenerables:
+
+```bash
+python clean_project.py --help
+```

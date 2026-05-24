@@ -22,3 +22,4 @@ Modulo para deteccion de acciones a partir del tracking ya generado.
 
 Este modulo se usa desde `scripts/actions/run_pathcrf.py` o desde el pipeline rolling del proyecto.
 
+Si `actions.enabled=true` en `config.yaml`, el runtime espera un checkout de PathCRF en `external/pathcrf`, con el trial y checkpoint configurados en `actions.trial` y `actions.model_file`.

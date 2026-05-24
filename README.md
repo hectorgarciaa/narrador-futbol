@@ -36,6 +36,13 @@ python -m pip install -r requirements.txt
 python verify_setup.py
 ```
 
+`verify_setup.py` comprueba tambien el runtime por defecto definido en `config.yaml`, incluyendo:
+- modelo YOLO principal;
+- video de prueba;
+- `external/pathcrf` y su checkpoint si `actions.enabled: true`;
+- `external/llama.cpp/config.yaml` o un endpoint remoto si `commentary.enabled: true`;
+- credenciales de `ElevenLabs` si el TTS configurado las necesita.
+
 ## Ejecucion rapida
 
 Desde la raiz del proyecto:
@@ -43,6 +50,11 @@ Desde la raiz del proyecto:
 ```bash
 python scripts/track.py video_prueba_medio
 ```
+
+Importante:
+- con la configuracion actual del repo, ese comando usa tambien acciones (`PathCRF`) y comentarios;
+- por tanto, para la ejecucion por defecto deben existir `external/pathcrf` y `external/llama.cpp`, o bien un backend remoto para comentarios;
+- si quieres una ejecucion mas simple, desactiva `actions.enabled` y `commentary.enabled` en `config.yaml`, o al menos lanza `--no-commentary` para evitar la fase de comentarios.
 
 Ese comando ejecuta el pipeline principal de tracking y genera:
 - `output/tracks_json/tracker/<video>_tracks.json`
@@ -65,6 +77,46 @@ La configuracion vive en `config.yaml`. Ahi se definen:
 - opciones de visualizacion y salidas.
 
 Si trabajas en un entorno sin interfaz grafica, usa `visualization.show_output: false`.
+
+## Variables de entorno
+
+`.env` no es obligatorio para todo el proyecto.
+
+Solo hace falta si vas a usar alguna de estas opciones:
+- descarga de datasets desde Roboflow;
+- TTS con `ElevenLabs`;
+- backend remoto de `llama.cpp` mediante `LLAMA_CPP_BASE_URL`.
+
+Si usas `llama.cpp` local con `external/llama.cpp/config.yaml`, no necesitas `LLAMA_CPP_BASE_URL`.
+
+## Repos externos
+
+Con el `config.yaml` actual, si vas a ejecutar `python scripts/track.py video_prueba_medio` tal cual, necesitas estos repos externos:
+
+### PathCRF
+
+```bash
+git clone https://github.com/hyunsungkim-ds/pathcrf.git external/pathcrf
+```
+
+Despues confirma que existe el trial configurado:
+
+```text
+external/pathcrf/saved/120/args.json
+external/pathcrf/saved/120/model/state_dict_best_acc.pt
+```
+
+### llama.cpp
+
+```bash
+git clone https://github.com/ggml-org/llama.cpp.git external/llama.cpp
+```
+
+Luego necesitas un `external/llama.cpp/config.yaml` valido y un modelo GGUF accesible. En este repo, el chequeo por defecto espera ese config local salvo que uses:
+- `commentary.llm_base_url` en `config.yaml`, o
+- `LLAMA_CPP_BASE_URL` en el entorno.
+
+Si no quieres depender de estos repos externos, desactiva `actions.enabled` y `commentary.enabled` en `config.yaml`.
 
 ## Modulos principales
 
