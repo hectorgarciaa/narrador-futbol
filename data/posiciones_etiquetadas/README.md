@@ -1,10 +1,12 @@
 # data/posiciones_etiquetadas
 
-Dataset etiquetado para roles posicionales.
+Dataset etiquetado de roles posicionales.
 
-Estructura:
-- `labels/`: plantillas JSON de etiquetado manual por vídeo.
-- `common/`: dataset acumulado (`base_table.csv`, samples derivados, métricas y metadata).
-- `<match_id>_<timestamp>/`: export de una ejecución concreta del workflow.
+## Estructura
 
-Estos artefactos se generan localmente y están ignorados en git.
+- `labels/`: plantillas y etiquetas manuales por video.
+- `common/`: dataset consolidado compartido.
+- subcarpetas por ejecucion: exportes intermedios del workflow.
+
+Este directorio se genera localmente y alimenta el entrenamiento de `football_ai.positions`.
+

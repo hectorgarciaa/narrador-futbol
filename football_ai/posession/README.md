@@ -1,12 +1,16 @@
 # posession
 
-Fase desacoplada de posesión.
+Fase de estimacion heuristica de posesion.
 
-- Entrada: packet `CANONICALTRACK`.
-- Salida: packet `POSESSION` con:
-  - `clean`: copia de `CANONICALTRACK.clean` + `possession` + `tracks_frame` enriquecido con señales de posesión.
-  - `trace`: copia de `CANONICALTRACK.trace` + bloque `possession`.
+## Que hace
 
-API pública:
+- consume `tracks_frame` del tracking canonico;
+- decide que equipo y jugador tienen la posesion;
+- enriquece los tracks con metadatos de posesion;
+- publica un packet reutilizable por roles y comentarios.
 
-- `PosessionPhase(config_mapping).process_packet(canonical_packet)`
+## Archivos clave
+
+- `estimator.py`: heuristica principal.
+- `phase.py`: integracion como fase del pipeline.
+

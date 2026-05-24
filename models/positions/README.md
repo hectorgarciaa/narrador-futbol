@@ -1,5 +1,9 @@
 # models/positions
 
-Modelos entrenados para tareas posicionales.
+Checkpoint y runs del modulo de roles posicionales.
 
-- `set_transformer/`: checkpoints del clasificador de roles basado en Set Transformer.
+## Contenido
+
+- `set_transformer/`: runs historicos de entrenamiento.
+- `20260427_002133/`: modelo operativo versionado en el repo.
+

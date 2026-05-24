@@ -1,24 +1,12 @@
-# Modelo posicional 20260427_002133
+# models/positions/20260427_002133
 
-Checkpoint operativo del Set Transformer de roles futbolísticos.
+Modelo posicional operativo versionado en el repositorio.
 
-Contenido:
+## Contenido
 
-- `best_model.pt`: checkpoint cargado por el pipeline principal.
-- `best_hyperparameters.json`: hiperparámetros seleccionados.
-- `dataset_summary.json`: resumen del dataset usado.
-- `grid_definition.json`: definición del barrido.
-- `grid_search_summary.csv` y `grid_search_summary.json`: métricas agregadas de la optimización.
+- `best_model.pt`: checkpoint usado por el pipeline.
+- `best_hyperparameters.json`: configuracion ganadora.
+- `dataset_summary.json`: resumen del dataset de entrenamiento.
+- `grid_definition.json`: espacio de busqueda.
+- `grid_search_summary.*`: resultados agregados del barrido.
 
-No se incluyen las carpetas `runs/` de cada entrenamiento para evitar duplicar artefactos pesados.
-
-Este modelo fusiona carrileros con laterales antes del entrenamiento:
-
-- `CI -> LI`
-- `CD -> LD`
-
-La taxonomía final es:
-
-```text
-LI, DFC_IZQ, DFC_CENT, DFC_DER, LD, MC, MI, MD, EI, ED, DC
-```

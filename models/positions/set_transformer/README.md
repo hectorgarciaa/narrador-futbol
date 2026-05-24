@@ -1,11 +1,10 @@
 # models/positions/set_transformer
 
-Runs del clasificador de roles por Set Transformer.
+Runs de entrenamiento del clasificador de roles basado en Set Transformer.
 
-Cada carpeta de timestamp contiene:
-- `set_transformer_checkpoint.pt`
-- `metrics.json`
-- `training_history.csv`
-- `split.json`
+Cada carpeta de timestamp suele guardar:
+- checkpoint del modelo;
+- metricas;
+- historial de entrenamiento;
+- informacion del split.
 
-Solo se conserva el último run local salvo que se necesite comparar experimentos.
