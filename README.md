@@ -28,12 +28,19 @@ Las partes de acciones, LLM y TTS existen en el repo, pero todavia no forman un 
 
 ## Instalacion
 
+Orden recomendado para arrancar el proyecto por primera vez:
+
+1. instalar dependencias Python;
+2. clonar los repos externos necesarios;
+3. revisar `config.yaml`;
+4. ejecutar `verify_setup.py`;
+5. lanzar el pipeline.
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python verify_setup.py
 ```
 
 `verify_setup.py` comprueba tambien el runtime por defecto definido en `config.yaml`, incluyendo:
@@ -91,7 +98,7 @@ Si usas `llama.cpp` local con el bloque `llama_cpp` dentro de `config.yaml`, no 
 
 ## Repos externos
 
-Con el `config.yaml` actual, si vas a ejecutar `python scripts/track.py video_prueba_medio` tal cual, necesitas estos repos externos:
+Con el `config.yaml` actual, antes de ejecutar `python scripts/track.py video_prueba_medio` necesitas clonar estos repos externos:
 
 ### PathCRF
 
@@ -115,6 +122,21 @@ git clone https://github.com/ggml-org/llama.cpp.git external/llama.cpp
 Luego necesitas configurar el bloque `llama_cpp` dentro de `config.yaml` y tener un modelo GGUF accesible. En este repo, el chequeo por defecto espera esa configuracion local salvo que uses:
 - `commentary.llm_base_url` en `config.yaml`, o
 - `LLAMA_CPP_BASE_URL` en el entorno.
+
+## Verificacion
+
+Cuando ya tengas dependencias y repos externos:
+
+```bash
+python verify_setup.py
+```
+
+`verify_setup.py` comprueba tambien el runtime por defecto definido en `config.yaml`, incluyendo:
+- modelo YOLO principal;
+- video de prueba;
+- `external/pathcrf` y su checkpoint si `actions.enabled: true`;
+- el bloque `llama_cpp` en `config.yaml` o un endpoint remoto si `commentary.enabled: true`;
+- credenciales de `ElevenLabs` si el TTS configurado las necesita.
 
 Si no quieres depender de estos repos externos, desactiva `actions.enabled` y `commentary.enabled` en `config.yaml`.
 
