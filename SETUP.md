@@ -54,7 +54,7 @@ config.yaml
 models/finetuning/yolov11m/weights/best.pt
 data/partidoPrueba/partido_medio.mp4
 external/pathcrf/saved/120/model/state_dict_best_acc.pt
-external/llama.cpp/config.yaml
+config.yaml
 ```
 
 ## 5. Ejecucion rapida
@@ -67,7 +67,7 @@ python scripts/track.py video_prueba_medio
 
 Con el `config.yaml` actual, ese comando espera:
 - `actions.enabled: true` -> `external/pathcrf` listo;
-- `commentary.enabled: true` -> `external/llama.cpp/config.yaml` o un `LLAMA_CPP_BASE_URL` remoto;
+- `commentary.enabled: true` -> bloque `llama_cpp` en `config.yaml` o un `LLAMA_CPP_BASE_URL` remoto;
 - si el backend TTS es `elevenlabs`, credenciales validas en `.env` o en el entorno.
 
 Tambien puedes probar:
@@ -98,7 +98,7 @@ python scripts/data/download_datasets.py
 
 Con la configuracion actual del repo, si ejecutas `scripts/track.py` tal cual, si son necesarias:
 - `external/pathcrf` para acciones;
-- `external/llama.cpp/config.yaml` o `LLAMA_CPP_BASE_URL` para comentarios.
+- `external/llama.cpp` y el bloque `llama_cpp` en `config.yaml`, o `LLAMA_CPP_BASE_URL` para comentarios.
 
 Clonado recomendado:
 
@@ -114,7 +114,7 @@ external/pathcrf/saved/120/args.json
 external/pathcrf/saved/120/model/state_dict_best_acc.pt
 ```
 
-Y para `llama.cpp`, prepara `external/llama.cpp/config.yaml` apuntando al binario `llama-server` y a tu modelo GGUF.
+Y para `llama.cpp`, prepara el bloque `llama_cpp` en `config.yaml` apuntando al binario `llama-server` y a tu modelo GGUF.
 
 Si solo quieres tracking visual basico, desactiva `actions.enabled` y `commentary.enabled` en `config.yaml`. Tambien puedes lanzar `--no-commentary`, pero eso no desactiva `actions`.
 

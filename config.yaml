@@ -264,6 +264,22 @@ actions:
     deduplicate_events: true
     hysteresis_margin: 0.10
 
+llama_cpp:
+  runtime:
+    enabled: true
+  server:
+    executable: "external/llama.cpp/build/bin/llama-server"
+    host: "127.0.0.1"
+    port: 8001
+    alias: "gemma4-q4ks-text"
+    ctx_size: 512
+    n_gpu_layers: 999
+    reasoning: "off"
+    no_warmup: true
+    extra_args: []
+  model:
+    path: "models/gguf/unsloth-gemma-4-E2B-it-GGUF/gemma-4-E2B-it-Q4_K_S.gguf"
+
 commentary:
   enabled: true
   generate_text: true

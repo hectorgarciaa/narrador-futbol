@@ -5,24 +5,9 @@ import time
 from pathlib import Path
 from urllib import error, request
 
-from football_ai.core import get_logger
+from football_ai.core import get_config, get_logger
 
 logger = get_logger(__name__)
-
-LLAMA_CPP_CONFIG_PATH = Path(__file__).resolve().parents[2] / "external" / "llama.cpp" / "config.yaml"
-
-
-def _read_llama_config():
-    import yaml
-
-    resolved = Path(LLAMA_CPP_CONFIG_PATH).expanduser().resolve()
-    if not resolved.exists():
-        return None
-    with open(resolved, "r", encoding="utf-8") as f:
-        payload = yaml.safe_load(f) or {}
-    if not isinstance(payload, dict):
-        return None
-    return payload, resolved.parent
 
 
 def _resolve_relative(base_dir, value):
@@ -48,18 +33,19 @@ def _check_server_ready(base_url, timeout_s=60.0, poll_s=1.0):
 
 
 def ensure_llama_server_running() -> str | None:
-    cfg = _read_llama_config()
-    if cfg is None:
-        logger.warning("llama.cpp config no encontrado en %s", LLAMA_CPP_CONFIG_PATH)
+    config = get_config()
+    payload = dict(config.get("llama_cpp", default={}) or {})
+    if not payload:
+        logger.warning("Bloque `llama_cpp` no encontrado en config.yaml")
         return None
-
-    payload, config_dir = cfg
+    config_dir = config.project_root
+    config_path = config.project_root / "config.yaml"
     server_cfg = dict(payload.get("server") or {})
     model_cfg = dict(payload.get("model") or {})
     runtime_cfg = dict(payload.get("runtime") or {})
 
     if not bool(runtime_cfg.get("enabled", True)):
-        logger.info("llama.cpp runtime desactivado en config")
+        logger.info("llama.cpp runtime desactivado en config: %s", config_path)
         return None
 
     executable = _resolve_relative(config_dir, server_cfg.get("executable") or "./llama-server")
@@ -72,7 +58,7 @@ def ensure_llama_server_running() -> str | None:
     n_gpu_layers = int(server_cfg.get("n_gpu_layers", 999))
 
     if _check_server_ready(base_url, timeout_s=2.0, poll_s=0.5):
-        logger.info("llama-server ya corriendo en %s", base_url)
+        logger.info("llama-server ya corriendo en %s (config: %s)", base_url, config_path)
         return base_url
 
     if executable is None or not Path(executable).exists():
@@ -102,7 +88,7 @@ def ensure_llama_server_running() -> str | None:
     for arg in extra_args:
         cmd.append(str(arg))
 
-    logger.info("Arrancando llama-server: %s", " ".join(cmd))
+    logger.info("Arrancando llama-server con config %s: %s", config_path, " ".join(cmd))
     try:
         subprocess.Popen(
             cmd,

@@ -27,7 +27,6 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -73,7 +72,7 @@ COMMENTARY_CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 DEFAULT_COMMENTARY_HOST = "127.0.0.1"
 DEFAULT_COMMENTARY_PORT = 8788
 OLLAMA_SERVE_LOG_PATH = COMMENTARY_CACHE_ROOT / "ollama_serve.log"
-LLAMA_CPP_CONFIG_PATH = PROJECT_ROOT / "external" / "llama.cpp" / "config.yaml"
+LLAMA_CPP_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 LLAMA_CPP_SERVER_LOG_PATH = COMMENTARY_CACHE_ROOT / "llama_cpp_server.log"
 OLLAMA_STARTUP_TIMEOUT_SECONDS = 90.0
 OLLAMA_STARTUP_POLL_SECONDS = 0.5
@@ -175,17 +174,25 @@ def load_llama_cpp_launch_config(config_path=None):
     if not resolved_config_path.exists():
         return None
 
-    with open(resolved_config_path, "r", encoding="utf-8") as f:
-        payload = yaml.safe_load(f) or {}
-    if not isinstance(payload, dict):
-        raise ValueError(
-            f"El config de llama.cpp debe ser un objeto YAML: {resolved_config_path}"
-        )
+    default_config_path = (PROJECT_ROOT / "config.yaml").resolve()
+    if resolved_config_path == default_config_path:
+        project_config = get_config(str(resolved_config_path))
+        payload = dict(project_config.get("llama_cpp", default={}) or {})
+        if not payload:
+            return None
+        config_dir = project_config.project_root
+    else:
+        with open(resolved_config_path, "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f) or {}
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"El config de llama.cpp debe ser un objeto YAML: {resolved_config_path}"
+            )
+        config_dir = resolved_config_path.parent
 
     runtime_cfg = dict(payload.get("runtime") or {})
     server_cfg = dict(payload.get("server") or {})
     model_cfg = dict(payload.get("model") or {})
-    config_dir = resolved_config_path.parent
 
     executable_path = _resolve_optional_local_path(
         config_dir,
@@ -1354,7 +1361,7 @@ def parse_args():
         default="auto",
         help=(
             "Backend LLM para el servidor de comentarios. "
-            "`auto` usa `llama.cpp` si existe `external/llama.cpp/config.yaml`; "
+            "`auto` usa `llama.cpp` si existe la seccion `llama_cpp` en `config.yaml`; "
             "si no, cae a `ollama`."
         ),
     )
@@ -1477,7 +1484,7 @@ def parse_args():
     parser.add_argument(
         "--llama-cpp-config",
         default=str(LLAMA_CPP_CONFIG_PATH),
-        help="Ruta al config YAML usado para lanzar `llama-server`.",
+        help="Ruta al YAML de configuracion. Por defecto usa `config.yaml`.",
     )
     return parser.parse_args()
 

@@ -23,6 +23,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
 from urllib import error, request
+from football_ai.core import get_config
 
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -115,19 +116,6 @@ def _resolve_optional_local_path(base_dir: Path, value: Any) -> Path | None:
     else:
         path = path.resolve()
     return path
-
-
-def _read_llama_cpp_config() -> Tuple[Dict[str, Any], Path, Path] | None:
-    import yaml
-
-    config_path = (PROJECT_ROOT / "external" / "llama.cpp" / "config.yaml").resolve()
-    if not config_path.exists():
-        return None
-    with config_path.open("r", encoding="utf-8") as f:
-        payload = yaml.safe_load(f) or {}
-    if not isinstance(payload, dict):
-        raise ValueError(f"Config invalido de llama.cpp: {config_path}")
-    return payload, config_path.parent, config_path
 
 
 def _check_http_health(base_url: str, timeout_s: float = 2.0) -> bool:
@@ -258,6 +246,7 @@ def check_config_files() -> bool:
         print_success(".env")
     else:
         print_warning(".env no existe. Es opcional salvo para algunos backends externos.")
+
     return all_ok
 
 
@@ -373,15 +362,16 @@ def _check_llama_cpp(commentary_conf: Mapping[str, Any]) -> bool:
             )
         return True
 
-    cfg = _read_llama_cpp_config()
-    if cfg is None:
+    config = get_config()
+    payload = dict(config.get("llama_cpp", default={}) or {})
+    if not payload:
         print_error(
-            "Comentario habilitado pero falta `external/llama.cpp/config.yaml` "
+            "Comentario habilitado pero falta el bloque `llama_cpp` en `config.yaml` "
             "y tampoco hay `commentary.llm_base_url` ni `LLAMA_CPP_BASE_URL`."
         )
         return False
-
-    payload, config_dir, config_path = cfg
+    config_dir = config.project_root
+    config_path = config.project_root / "config.yaml"
     runtime_cfg = dict(payload.get("runtime") or {})
     server_cfg = dict(payload.get("server") or {})
     model_cfg = dict(payload.get("model") or {})

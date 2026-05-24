@@ -24,4 +24,4 @@ En este repo la parte de comentarios existe y se puede probar, pero todavia no r
 
 Con la configuracion por defecto, el backend LLM se resuelve asi:
 - primero intenta `commentary.llm_base_url` o `LLAMA_CPP_BASE_URL`;
-- si no existen, usa `external/llama.cpp/config.yaml`.
+- si no existen, usa el bloque `llama_cpp` de `config.yaml`.
